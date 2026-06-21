@@ -90,15 +90,15 @@ async function getWatchedUnion(viewers: FamilyMember[], kind: LibraryKind): Prom
   return watchedUnion;
 }
 
-async function getContinueWatchingItems(viewers: FamilyMember[], kind: LibraryKind): Promise<ContinueWatchingItem[]> {
+async function getContinueWatchingItems(viewers: FamilyMember[]): Promise<ContinueWatchingItem[]> {
   const startedAt = Date.now();
   const candidateGroups = await Promise.all(
     viewers.map(async (viewer) => {
-      const items =
-        kind === 'show'
-          ? await jellyfin.listShowContinueWatching(viewer.jellyfinUserId)
-          : await jellyfin.listContinueWatching(viewer.jellyfinUserId, kind);
-      return items.map(
+      const [movieItems, showItems] = await Promise.all([
+        jellyfin.listContinueWatching(viewer.jellyfinUserId, 'movie'),
+        jellyfin.listShowContinueWatching(viewer.jellyfinUserId),
+      ]);
+      return [...movieItems, ...showItems].map(
         (item): ContinueWatchingCandidate => ({
           ...item,
           sourceViewerId: viewer.id,
@@ -111,7 +111,7 @@ async function getContinueWatchingItems(viewers: FamilyMember[], kind: LibraryKi
 
   if (jellyfinDebugEnabled) {
     console.log(
-      `[app] getContinueWatchingItems done kind=${kind} viewers=${viewers.map((viewer) => viewer.id).join(',')} result=${merged.length} (${Date.now() - startedAt}ms)`,
+      `[app] getContinueWatchingItems done viewers=${viewers.map((viewer) => viewer.id).join(',')} result=${merged.length} (${Date.now() - startedAt}ms)`,
     );
   }
 
@@ -257,9 +257,8 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
 
 app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, res) => {
   try {
-    const kind = req.query.kind === 'show' ? 'show' : 'movie';
     const viewers = activeViewersForSession(req);
-    const items = await getContinueWatchingItems(viewers, kind);
+    const items = await getContinueWatchingItems(viewers);
     res.json({ items });
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Continue watching lookup failed' });

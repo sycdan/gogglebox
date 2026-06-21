@@ -157,15 +157,19 @@ export function App() {
     setLibrary(libraryResponse.items);
 
     if (activeSession.activeViewerIds.length > 0) {
-      const [continueResponse, recommendationsResponse] = await Promise.all([
-        apiRequest<{ items: ContinueWatchingItem[] }>(`/api/continue-watching?${params.toString()}`),
-        apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`),
-      ]);
-      setContinueWatching(continueResponse.items);
+      const recommendationsResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`);
       setRecommendations(recommendationsResponse.items);
     } else {
-      setContinueWatching([]);
       setRecommendations([]);
+    }
+  }
+
+  async function loadContinueWatching(activeSession: SessionResponse) {
+    if (activeSession.activeViewerIds.length > 0) {
+      const continueResponse = await apiRequest<{ items: ContinueWatchingItem[] }>('/api/continue-watching');
+      setContinueWatching(continueResponse.items);
+    } else {
+      setContinueWatching([]);
     }
   }
 
@@ -199,6 +203,21 @@ export function App() {
       }
     })();
   }, [session, kind, genre, kidsOnly]);
+
+  useEffect(() => {
+    if (!session?.authenticated) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        await loadContinueWatching(session);
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'Could not load continue watching');
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.authenticated, session?.activeViewerIds.join(',')]);
 
   useEffect(() => {
     if (!session || session.authenticated || !session.portalAutoLoginEnabled || busy) {
@@ -297,7 +316,10 @@ export function App() {
     await apiRequest(`/api/items/${itemId}/watched`, { method: 'POST' });
     if (session) {
       await loadSession();
-      await loadLibraryAndRecommendations(session, kind, genre, kidsOnly);
+      await Promise.all([
+        loadLibraryAndRecommendations(session, kind, genre, kidsOnly),
+        loadContinueWatching(session),
+      ]);
     }
   }
 
@@ -588,28 +610,6 @@ export function App() {
         </div>
       </div>
 
-      <div className="toolbar panel">
-        <div className="toggle-row">
-          <button className={kind === 'movie' ? 'selected' : ''} onClick={() => setKind('movie')} type="button">Movies</button>
-          <button className={kind === 'show' ? 'selected' : ''} onClick={() => setKind('show')} type="button">Shows</button>
-        </div>
-        <label>
-          <span>Genre</span>
-          <select value={genre} onChange={(event) => setGenre(event.target.value)}>
-            <option value="">All genres</option>
-            {availableGenres.map((itemGenre) => (
-              <option key={itemGenre} value={itemGenre}>{itemGenre}</option>
-            ))}
-          </select>
-        </label>
-        <label className="checkbox-row">
-          <input checked={kidsOnly} onChange={(event) => setKidsOnly(event.target.checked)} type="checkbox" />
-          <span>Kids only</span>
-        </label>
-      </div>
-
-      {error ? <div className="panel error">{error}</div> : null}
-
       <section className="panel section-block">
         <div className="row spread">
           <div>
@@ -654,6 +654,28 @@ export function App() {
           ))}
         </div>
       </section>
+
+      <div className="toolbar panel">
+        <div className="toggle-row">
+          <button className={kind === 'movie' ? 'selected' : ''} onClick={() => setKind('movie')} type="button">Movies</button>
+          <button className={kind === 'show' ? 'selected' : ''} onClick={() => setKind('show')} type="button">Shows</button>
+        </div>
+        <label>
+          <span>Genre</span>
+          <select value={genre} onChange={(event) => setGenre(event.target.value)}>
+            <option value="">All genres</option>
+            {availableGenres.map((itemGenre) => (
+              <option key={itemGenre} value={itemGenre}>{itemGenre}</option>
+            ))}
+          </select>
+        </label>
+        <label className="checkbox-row">
+          <input checked={kidsOnly} onChange={(event) => setKidsOnly(event.target.checked)} type="checkbox" />
+          <span>Kids only</span>
+        </label>
+      </div>
+
+      {error ? <div className="panel error">{error}</div> : null}
 
       <section className="panel section-block">
         <div className="row spread">
@@ -797,7 +819,7 @@ export function App() {
               }}
               src={`/api/items/${playingItem.id}/stream`}
             />
-            <p className="muted">Playback auto-marks watched at {Math.round(session.watchedThreshold * 100)}%.</p>
+            <p className="muted">Playback auto-marks watched at {Math.round(session.watchedThreshold * 100)}%. Press <i>f</i> to toggle fullscreen.</p>
           </div>
         </div>
       ) : null}
