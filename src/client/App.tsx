@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 type LibraryKind = 'movie' | 'show';
 
@@ -110,7 +110,7 @@ function ViewerAvatar({ viewer }: { viewer: Viewer }) {
 export function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [selectedViewerIds, setSelectedViewerIds] = useState<string[]>([]);
-  const [kind, setKind] = useState<LibraryKind>('movie');
+  const [kind, setKind] = useState<LibraryKind>('show');
   const [genre, setGenre] = useState('');
   const [kidsOnly, setKidsOnly] = useState(false);
   const [library, setLibrary] = useState<LibraryItem[]>([]);
@@ -127,6 +127,8 @@ export function App() {
   const [autoMarked, setAutoMarked] = useState(false);
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const playerModalRef = useRef<HTMLDivElement | null>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
   async function loadSession() {
     const nextSession = await apiRequest<SessionResponse>('/api/session');
@@ -356,6 +358,136 @@ export function App() {
       await markWatched(playingItem.id);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Could not mark item watched');
+    }
+  }
+
+  useEffect(() => {
+    if (!playingItem) {
+      return;
+    }
+
+    // Remember what had focus so we can restore it when the modal closes.
+    previouslyFocusedRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+    // Move focus onto the modal container so the close button / Esc are
+    // reachable. Hotkeys no longer depend on this focus — they're handled by a
+    // document-level listener below — but we still focus so keyboard users land
+    // inside the dialog rather than on the Play button that opened it.
+    const frame = requestAnimationFrame(() => {
+      playerModalRef.current?.focus();
+    });
+
+    // Lock background scroll while the modal is open. This kills the page
+    // scroll that the very first Space press would otherwise cause (before
+    // focus settles), independent of keydown timing.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    // Document-level keydown handler: active only while the modal is open.
+    // Living on `document` (not the dialog container) means hotkeys fire no
+    // matter what is focused and no matter which element is fullscreened —
+    // including when the <video> itself is fullscreened. We call
+    // preventDefault() on every key we handle so the native <video> control
+    // (which also reacts to Space/arrows when focused) doesn't double-fire.
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      const video = videoRef.current;
+
+      if (event.key === 'Escape') {
+        // When the video is fullscreen the browser eats the first Esc to exit
+        // fullscreen; a second Esc reaches here and closes the modal.
+        if (document.fullscreenElement) {
+          return;
+        }
+        event.preventDefault();
+        setPlayingItem(null);
+        return;
+      }
+
+      if (!video) {
+        return;
+      }
+
+      switch (event.key) {
+        case ' ':
+        case 'k':
+          event.preventDefault();
+          if (video.paused) {
+            void video.play();
+          } else {
+            video.pause();
+          }
+          break;
+        case 'ArrowLeft':
+          event.preventDefault();
+          video.currentTime = Math.max(0, video.currentTime - 5);
+          break;
+        case 'ArrowRight':
+          event.preventDefault();
+          video.currentTime = Math.min(video.duration || video.currentTime + 5, video.currentTime + 5);
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          video.volume = Math.min(1, video.volume + 0.1);
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          video.volume = Math.max(0, video.volume - 0.1);
+          break;
+        case 'm':
+        case 'M':
+          event.preventDefault();
+          video.muted = !video.muted;
+          break;
+        case 'f':
+        case 'F':
+          event.preventDefault();
+          if (document.fullscreenElement) {
+            void document.exitFullscreen();
+          } else {
+            // Fullscreen the <video> itself so the user sees only the native
+            // player chrome — no modal header/footer/border.
+            void video.requestFullscreen?.();
+          }
+          break;
+        default:
+          break;
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocusedRef.current?.focus();
+    };
+  }, [playingItem]);
+
+  // Trap focus within the modal: cycle Tab between the focusable elements.
+  // This stays on the container (not document) because it operates on the
+  // dialog's focusable set; the playback hotkeys are handled document-level.
+  function handlePlayerTabTrap(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'Tab') {
+      return;
+    }
+    const focusable = playerModalRef.current?.querySelectorAll<HTMLElement>(
+      'button, [href], video, input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable || focusable.length === 0) {
+      event.preventDefault();
+      playerModalRef.current?.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === playerModalRef.current)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
     }
   }
 
@@ -624,7 +756,16 @@ export function App() {
 
       {playingItem ? (
         <div className="modal-backdrop" onClick={() => setPlayingItem(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="modal"
+            ref={playerModalRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Now playing ${playingItem.title}`}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={handlePlayerTabTrap}
+          >
             <div className="row spread">
               <div>
                 <p className="eyebrow">Now playing</p>

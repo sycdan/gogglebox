@@ -16,6 +16,12 @@ export default defineConfig({
       // falls back to localhost for plain host `npm run dev`.
       '/api': process.env.VITE_API_PROXY ?? 'http://localhost:3000',
     },
+    watch: {
+      // Windows host -> Linux container bind mount drops inotify events, so the
+      // file watcher never sees edits and HMR never fires. Poll instead.
+      usePolling: true,
+      interval: 100,
+    },
   },
   build: {
     outDir: 'dist/client',
