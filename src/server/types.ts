@@ -27,6 +27,9 @@ export interface AppConfig {
   jellyfinUrl: string;
   jellyfinApiKey: string;
   household: HouseholdSettings;
+  recommendations: {
+    count: number;
+  };
   viewers: FamilyMember[];
   groups: GroupPreset[];
 }

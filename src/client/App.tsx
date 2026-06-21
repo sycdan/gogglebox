@@ -116,6 +116,9 @@ export function App() {
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [recommendations, setRecommendations] = useState<LibraryItem[]>([]);
+  const [noMorePicks, setNoMorePicks] = useState(false);
+  const [picksLoading, setPicksLoading] = useState(false);
+  const shownRecommendationIdsRef = useRef<Set<string>>(new Set());
   const [selectedSeries, setSelectedSeries] = useState<LibraryItem | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(false);
@@ -156,11 +159,47 @@ export function App() {
     const libraryResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/library?${params.toString()}`);
     setLibrary(libraryResponse.items);
 
+    setNoMorePicks(false);
     if (activeSession.activeViewerIds.length > 0) {
       const recommendationsResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`);
       setRecommendations(recommendationsResponse.items);
+      recommendationsResponse.items.forEach((item) => shownRecommendationIdsRef.current.add(item.id));
     } else {
       setRecommendations([]);
+    }
+  }
+
+  async function showOtherPicks() {
+    if (!session || session.activeViewerIds.length === 0) {
+      return;
+    }
+
+    const params = new URLSearchParams({ kind });
+    if (genre) {
+      params.set('genre', genre);
+    }
+    if (kidsOnly) {
+      params.set('kidsOnly', 'true');
+    }
+    const shownIds = [...shownRecommendationIdsRef.current];
+    if (shownIds.length > 0) {
+      params.set('exclude', shownIds.join(','));
+    }
+
+    try {
+      setPicksLoading(true);
+      setError(null);
+      const recommendationsResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`);
+      if (recommendationsResponse.items.length === 0) {
+        setNoMorePicks(true);
+        return;
+      }
+      setRecommendations(recommendationsResponse.items);
+      recommendationsResponse.items.forEach((item) => shownRecommendationIdsRef.current.add(item.id));
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not load more picks');
+    } finally {
+      setPicksLoading(false);
     }
   }
 
@@ -185,6 +224,12 @@ export function App() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    shownRecommendationIdsRef.current = new Set();
+    setNoMorePicks(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.activeViewerIds.join(',')]);
 
   useEffect(() => {
     if (!session?.authenticated) {
@@ -683,7 +728,23 @@ export function App() {
             <p className="eyebrow">Group picks</p>
             <h2>Because none of you have seen this</h2>
           </div>
-          {libraryLoading ? <span className="muted">Refreshing…</span> : null}
+          <div className="row">
+            {libraryLoading ? <span className="muted">Refreshing…</span> : null}
+            {noMorePicks ? <span className="muted">No more picks</span> : null}
+            <button
+              onClick={() => void showOtherPicks()}
+              type="button"
+              disabled={
+                libraryLoading ||
+                picksLoading ||
+                noMorePicks ||
+                !session ||
+                session.activeViewerIds.length === 0
+              }
+            >
+              {picksLoading ? 'Finding…' : 'Show me other picks'}
+            </button>
+          </div>
         </div>
         {libraryLoading ? <p className="muted">Loading recommendations…</p> : null}
         {!libraryLoading && recommendations.length === 0 ? (

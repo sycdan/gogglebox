@@ -236,6 +236,10 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     const kind = req.query.kind === 'show' ? 'show' : 'movie';
     const genre = typeof req.query.genre === 'string' && req.query.genre ? req.query.genre : undefined;
     const kidsOnly = req.query.kidsOnly === 'true';
+    const excludeParam = typeof req.query.exclude === 'string' ? req.query.exclude : '';
+    const excludeIds = new Set(
+      excludeParam.split(',').map((id) => id.trim()).filter(Boolean),
+    );
     const viewers = activeViewersForSession(req);
     const watchedUnion = await getWatchedUnion(viewers, kind);
     let candidates = await jellyfin.listItems(kind, genre);
@@ -245,9 +249,9 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     }
 
     const items = candidates
-      .filter((item) => !watchedUnion.has(item.id))
+      .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id))
       .sort((left, right) => (right.rating ?? 0) - (left.rating ?? 0))
-      .slice(0, 24);
+      .slice(0, config.recommendations.count);
 
     res.json({ items });
   } catch (error) {

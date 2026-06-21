@@ -2,6 +2,9 @@
 	"playback": {
 		"watchedThreshold": 0.9
 	},
+	"recommendations": {
+		"count": 8
+	},
 	"groups": [
 		{
 			"id": "household",

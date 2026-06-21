@@ -14,6 +14,9 @@ interface ConfigFile {
   playback?: {
     watchedThreshold?: number;
   };
+  recommendations?: {
+    count?: number;
+  };
   groups?: GroupPreset[];
 }
 
@@ -40,6 +43,14 @@ function clampThreshold(value: number): number {
   }
 
   return Math.min(0.99, Math.max(0.5, value));
+}
+
+function clampRecommendationCount(value: number): number {
+  if (Number.isNaN(value)) {
+    return 8;
+  }
+
+  return Math.min(24, Math.max(1, Math.trunc(value)));
 }
 
 function parseBooleanEnv(value: string | undefined, fallback = false): boolean {
@@ -104,6 +115,9 @@ export function loadConfig(): AppConfig {
     household: {
       username: readHouseholdCredential(process.env.PORTAL_USERNAME, fileSettings.household?.username, 'PORTAL_USERNAME'),
       password: readHouseholdCredential(process.env.PORTAL_PASSWORD, fileSettings.household?.password, 'PORTAL_PASSWORD'),
+    },
+    recommendations: {
+      count: clampRecommendationCount(Number(fileSettings.recommendations?.count ?? 8)),
     },
     viewers: [],
     groups: fileSettings.groups ?? [],
