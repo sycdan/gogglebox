@@ -47,6 +47,8 @@ interface PlaybackItem {
   title: string;
   subtitle?: string;
   startPositionSeconds?: number;
+  seriesId?: string | null;
+  seriesName?: string | null;
 }
 
 interface ContinueWatchingItem extends LibraryItem {
@@ -135,6 +137,15 @@ export function App() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const playerModalRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  // Cache of episode lists keyed by seriesId so repeated S-skips within the same
+  // series don't refetch the ordered episode list each time.
+  const seriesEpisodesCacheRef = useRef<Map<string, EpisodeItem[]>>(new Map());
+  // Guards against double-trigger / races while a skip is resolving in flight.
+  const skipInFlightRef = useRef(false);
+  // Latest playingItem, readable from the document-level keydown handler without
+  // re-binding the listener on every change.
+  const playingItemRef = useRef<PlaybackItem | null>(null);
+  playingItemRef.current = playingItem;
 
   async function loadSession() {
     const nextSession = await apiRequest<SessionResponse>('/api/session');
@@ -453,17 +464,70 @@ export function App() {
       setError(nextError instanceof Error ? nextError.message : 'Could not sync continue watching progress');
     }
 
+    const isShow = item.type === 'show';
     startPlayback({
       id: item.id,
       title: item.name,
-      subtitle:
-        item.type === 'show'
-          ? `${item.seriesName ?? item.name}${item.seasonNumber && item.episodeNumber
-            ? ` • S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}`
-            : ''}`
-          : undefined,
+      subtitle: isShow
+        ? `${item.seriesName ?? item.name}${item.seasonNumber && item.episodeNumber
+          ? ` • S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}`
+          : ''}`
+        : undefined,
       startPositionSeconds: item.playbackPositionTicks / 10_000_000,
+      seriesId: isShow ? item.seriesId : undefined,
+      seriesName: isShow ? item.seriesName : undefined,
     });
+  }
+
+  async function resolveSeriesEpisodes(seriesId: string): Promise<EpisodeItem[]> {
+    const cached = seriesEpisodesCacheRef.current.get(seriesId);
+    if (cached) {
+      return cached;
+    }
+    const response = await apiRequest<{ items: EpisodeItem[] }>(`/api/shows/${seriesId}/episodes`);
+    seriesEpisodesCacheRef.current.set(seriesId, response.items);
+    return response.items;
+  }
+
+  // Skip to the next episode of the current show (S hotkey). Marks the current
+  // episode watched in every case; swaps to the next episode when one exists,
+  // otherwise stays put on the last episode. No-op for movies (no seriesId).
+  async function skipToNextEpisode() {
+    const current = playingItemRef.current;
+    if (!current || !current.seriesId || skipInFlightRef.current) {
+      return;
+    }
+    skipInFlightRef.current = true;
+    try {
+      const list = await resolveSeriesEpisodes(current.seriesId);
+      const index = list.findIndex((episode) => episode.id === current.id);
+      const next = index >= 0 ? list[index + 1] : undefined;
+
+      if (next) {
+        const label = [
+          next.seasonNumber ? `S${String(next.seasonNumber).padStart(2, '0')}` : null,
+          next.episodeNumber ? `E${String(next.episodeNumber).padStart(2, '0')}` : null,
+        ].filter(Boolean).join(' ');
+        const seriesName = next.seriesName ?? current.seriesName ?? next.name;
+        // Swap first so the player lands on the new episode before the heavy
+        // mark-watched refresh runs; the refresh leaves playingItem untouched.
+        startPlayback({
+          id: next.id,
+          title: next.name,
+          subtitle: `${seriesName}${label ? ` • ${label}` : ''}`,
+          seriesId: next.seriesId,
+          seriesName: next.seriesName,
+          startPositionSeconds: 0,
+        });
+      }
+
+      // Always mark the current episode watched (both has-next and last cases).
+      await markWatched(current.id);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not skip to the next episode');
+    } finally {
+      skipInFlightRef.current = false;
+    }
   }
 
   async function handleAutoTrack() {
@@ -556,6 +620,11 @@ export function App() {
         case 'M':
           event.preventDefault();
           video.muted = !video.muted;
+          break;
+        case 's':
+        case 'S':
+          event.preventDefault();
+          void skipToNextEpisode();
           break;
         case 'f':
         case 'F':
@@ -885,6 +954,8 @@ export function App() {
                             id: episode.id,
                             title: episode.name,
                             subtitle: `${selectedSeries.name}${label ? ` • ${label}` : ''}`,
+                            seriesId: episode.seriesId,
+                            seriesName: episode.seriesName,
                           });
                           setSelectedSeries(null);
                         }}
@@ -946,6 +1017,7 @@ export function App() {
               src={`/api/items/${playingItem.id}/stream`}
             />
             <p className="muted">Playback auto-marks watched at {Math.round(session.watchedThreshold * 100)}%. Press <i>f</i> to toggle fullscreen.</p>
+            {playingItem.seriesId ? <p className="muted">Press <i>S</i> for next episode.</p> : null}
           </div>
         </div>
       ) : null}
