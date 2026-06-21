@@ -1,0 +1,94 @@
+# Development stack. All app execution (server, client, tests, proof) runs in
+# containers so the host only needs Docker. Source is bind-mounted; node_modules
+# lives in a named volume to keep the host clean and avoid host/Linux binary
+# mismatch.
+#
+#   docker compose -f docker-compose.dev.yml up -d server client   # run stack
+#   docker compose -f docker-compose.dev.yml run --rm check        # typecheck
+#   docker compose -f docker-compose.dev.yml run --rm test         # unit tests
+#   docker compose -f docker-compose.dev.yml --profile proof run --rm proof
+#   docker compose -f docker-compose.dev.yml --profile proof run --rm -e PROOF_FLOW=my-feature proof
+#
+# server/proof need a real Jellyfin reachable via the values in .env.
+
+x-node: &node
+  image: node:22-alpine
+  working_dir: /app
+  volumes:
+    - .:/app
+    - node_modules:/app/node_modules
+
+services:
+  # One-shot: populate the node_modules volume. Other services wait on this.
+  deps:
+    <<: *node
+    command: npm ci
+
+  server:
+    <<: *node
+    command: npm run dev:server
+    env_file: .env
+    environment:
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  client:
+    <<: *node
+    command: npm run dev:client
+    environment:
+      # vite proxies /api to the server service (see vite.config.ts)
+      - VITE_API_PROXY=http://server:3000
+    ports:
+      - "5173:5173"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # Typecheck — no Jellyfin needed. `run --rm check`
+  check:
+    <<: *node
+    command: npm run check
+    profiles: ["ci"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # Unit tests — no Jellyfin needed. `run --rm test`
+  test:
+    <<: *node
+    command: npm test
+    profiles: ["ci"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # Visual proof: Playwright drives the running client and writes screenshots to
+  # ./artifacts. Pass a flow name via PROOF_FLOW (an extra `run` arg would
+  # override the service command, so use the env var):
+  #   --profile proof run --rm -e PROOF_FLOW=my-feature proof
+  proof:
+    image: mcr.microsoft.com/playwright:v1.49.0-jammy
+    working_dir: /app
+    command: node scripts/proof/screenshot.mjs
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - ./artifacts:/app/artifacts
+    environment:
+      - PROOF_URL=http://client:5173
+      - PROOF_FLOW=${PROOF_FLOW:-app}
+      # household login used by the proof script
+      - PORTAL_USERNAME=${PORTAL_USERNAME:?set PORTAL_USERNAME in .env}
+      - PORTAL_PASSWORD=${PORTAL_PASSWORD:?set PORTAL_PASSWORD in .env}
+      - PORTAL_AUTO_LOGIN=${PORTAL_AUTO_LOGIN:-false}
+    profiles: ["proof"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+volumes:
+  node_modules:

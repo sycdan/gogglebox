@@ -1,0 +1,42 @@
+{
+  "name": "gogglebox",
+  "version": "1.0.0",
+  "description": "LAN-first family media portal for Jellyfin households.",
+  "main": "dist/server/server.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch src/server/server.ts",
+    "dev:client": "vite",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "tsx --test src/server/*.test.ts",
+    "test:e2e:real": "tsx --test src/server/*.real.e2e.test.ts",
+    "test:all": "npm run test && npm run test:e2e:real",
+    "start": "node dist/server/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "playwright": "1.49.0",
+    "@types/express": "^5.0.6",
+    "@types/express-session": "^1.19.0",
+    "@types/node": "^26.0.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.7.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vite": "^5.4.19"
+  }
+}

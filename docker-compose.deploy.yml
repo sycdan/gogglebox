@@ -1,0 +1,21 @@
+services:
+  gogglebox:
+    image: ${REGISTRY_HOST:?your docker registry host:port}/gogglebox:${GOGGLEBOX_VERSION:-latest}
+    pull_policy: always
+    container_name: gogglebox
+    restart: unless-stopped
+    environment:
+      # required
+      - JELLYFIN_URL=${JELLYFIN_URL:?required}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:?required}
+      - SESSION_SECRET=${SESSION_SECRET:?use a strong secret for production}
+      # optional pass-through (only set if present in the env file / shell)
+      - WATCHED_THRESHOLD
+      - PORTAL_USERNAME
+      - PORTAL_PASSWORD
+      - PORTAL_AUTO_LOGIN
+    volumes:
+      # required: household config (groups + playback)
+      - ./config.json:/app/config.json:ro
+    ports:
+      - "${GOGGLEBOX_PORT:?host port to expose}:3000"

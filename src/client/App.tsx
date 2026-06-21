@@ -1,0 +1,706 @@
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+
+type LibraryKind = 'movie' | 'show';
+
+interface Viewer {
+  id: string;
+  jellyfinUserId: string;
+  name: string;
+  avatarUrl?: string | null;
+}
+
+interface GroupPreset {
+  id: string;
+  name: string;
+  memberIds: string[];
+}
+
+interface LibraryItem {
+  id: string;
+  name: string;
+  type: LibraryKind;
+  overview: string;
+  year: number | null;
+  runtimeMinutes: number | null;
+  rating: number | null;
+  genres: string[];
+  officialRating: string | null;
+  imageUrl: string | null;
+  backdropUrl: string | null;
+  playable: boolean;
+}
+
+interface EpisodeItem {
+  id: string;
+  name: string;
+  seriesId: string;
+  seriesName: string;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  runtimeMinutes: number | null;
+  overview: string;
+  imageUrl: string | null;
+}
+
+interface PlaybackItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  startPositionSeconds?: number;
+}
+
+interface ContinueWatchingItem extends LibraryItem {
+  sourceViewerId: string;
+  sourceViewerName: string;
+  playbackPositionTicks: number;
+  progressPercent: number;
+  seriesId: string | null;
+  seriesName: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+}
+
+interface SessionResponse {
+  authenticated: boolean;
+  portalAutoLoginEnabled: boolean;
+  appName: string;
+  watchedThreshold: number;
+  viewers: Viewer[];
+  groups: GroupPreset[];
+  activeViewerIds: string[];
+}
+
+async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, {
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+    ...init,
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(async () => ({ error: await response.text() }));
+    throw new Error(body.error ?? 'Request failed');
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return (await response.json()) as T;
+}
+
+function ViewerAvatar({ viewer }: { viewer: Viewer }) {
+  const [imgFailed, setImgFailed] = useState(false);
+  if (viewer.avatarUrl && !imgFailed) {
+    return (
+      <img
+        className="viewer-avatar"
+        src={viewer.avatarUrl}
+        alt={viewer.name}
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+  return <span className="viewer-avatar">{viewer.name.slice(0, 1)}</span>;
+}
+
+export function App() {
+  const [session, setSession] = useState<SessionResponse | null>(null);
+  const [selectedViewerIds, setSelectedViewerIds] = useState<string[]>([]);
+  const [kind, setKind] = useState<LibraryKind>('movie');
+  const [genre, setGenre] = useState('');
+  const [kidsOnly, setKidsOnly] = useState(false);
+  const [library, setLibrary] = useState<LibraryItem[]>([]);
+  const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
+  const [recommendations, setRecommendations] = useState<LibraryItem[]>([]);
+  const [selectedSeries, setSelectedSeries] = useState<LibraryItem | null>(null);
+  const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
+  const [episodesLoading, setEpisodesLoading] = useState(false);
+  const [playingItem, setPlayingItem] = useState<PlaybackItem | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [autoMarked, setAutoMarked] = useState(false);
+  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  async function loadSession() {
+    const nextSession = await apiRequest<SessionResponse>('/api/session');
+    setSession(nextSession);
+    setSelectedViewerIds(nextSession.activeViewerIds);
+  }
+
+  async function attemptAutoLogin() {
+    await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    await loadSession();
+  }
+
+  async function loadLibraryAndRecommendations(activeSession: SessionResponse, nextKind: LibraryKind, nextGenre: string, nextKidsOnly: boolean) {
+    const params = new URLSearchParams({ kind: nextKind });
+    if (nextGenre) {
+      params.set('genre', nextGenre);
+    }
+    if (nextKidsOnly) {
+      params.set('kidsOnly', 'true');
+    }
+
+    const libraryResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/library?${params.toString()}`);
+    setLibrary(libraryResponse.items);
+
+    if (activeSession.activeViewerIds.length > 0) {
+      const [continueResponse, recommendationsResponse] = await Promise.all([
+        apiRequest<{ items: ContinueWatchingItem[] }>(`/api/continue-watching?${params.toString()}`),
+        apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`),
+      ]);
+      setContinueWatching(continueResponse.items);
+      setRecommendations(recommendationsResponse.items);
+    } else {
+      setContinueWatching([]);
+      setRecommendations([]);
+    }
+  }
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setLoading(true);
+        await loadSession();
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'Could not load session');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!session?.authenticated) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        setLibraryLoading(true);
+        setError(null);
+        await loadLibraryAndRecommendations(session, kind, genre, kidsOnly);
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'Could not load library');
+      } finally {
+        setLibraryLoading(false);
+      }
+    })();
+  }, [session, kind, genre, kidsOnly]);
+
+  useEffect(() => {
+    if (!session || session.authenticated || !session.portalAutoLoginEnabled || busy) {
+      return;
+    }
+
+    void (async () => {
+      try {
+        setBusy(true);
+        setError(null);
+        await attemptAutoLogin();
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'Auto login failed');
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [session, busy]);
+
+  const availableGenres = useMemo(() => {
+    const uniqueGenres = new Set<string>();
+    library.forEach((item) => item.genres.forEach((itemGenre) => uniqueGenres.add(itemGenre)));
+    return [...uniqueGenres].sort((left, right) => left.localeCompare(right));
+  }, [library]);
+
+  function toggleViewer(viewerId: string) {
+    setSelectedViewerIds((current) =>
+      current.includes(viewerId) ? current.filter((id) => id !== viewerId) : [...current, viewerId],
+    );
+  }
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    try {
+      setBusy(true);
+      setError(null);
+      await apiRequest('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(credentials),
+      });
+      await loadSession();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Login failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveGroup(memberIds: string[]) {
+    try {
+      setBusy(true);
+      setError(null);
+      await apiRequest('/api/group', {
+        method: 'POST',
+        body: JSON.stringify({ memberIds }),
+      });
+      await loadSession();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not save viewer group');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clearGroup() {
+    try {
+      setBusy(true);
+      setError(null);
+      await apiRequest('/api/group/clear', {
+        method: 'POST',
+      });
+      await loadSession();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not clear viewer group');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logout() {
+    try {
+      setBusy(true);
+      await apiRequest('/api/auth/logout', { method: 'POST' });
+      setSession(null);
+      setSelectedViewerIds([]);
+      await loadSession();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not sign out');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markWatched(itemId: string) {
+    await apiRequest(`/api/items/${itemId}/watched`, { method: 'POST' });
+    if (session) {
+      await loadSession();
+      await loadLibraryAndRecommendations(session, kind, genre, kidsOnly);
+    }
+  }
+
+  async function openEpisodes(series: LibraryItem) {
+    try {
+      setEpisodesLoading(true);
+      setError(null);
+      setSelectedSeries(series);
+      const response = await apiRequest<{ items: EpisodeItem[] }>(`/api/shows/${series.id}/episodes`);
+      setEpisodes(response.items);
+    } catch (nextError) {
+      setSelectedSeries(null);
+      setEpisodes([]);
+      setError(nextError instanceof Error ? nextError.message : 'Could not load episodes');
+    } finally {
+      setEpisodesLoading(false);
+    }
+  }
+
+  function startPlayback(item: PlaybackItem) {
+    setAutoMarked(false);
+    setPlayingItem(item);
+  }
+
+  async function startContinuePlayback(item: ContinueWatchingItem) {
+    try {
+      await apiRequest(`/api/items/${item.id}/progress/sync`, {
+        method: 'POST',
+        body: JSON.stringify({
+          sourceViewerId: item.sourceViewerId,
+          playbackPositionTicks: item.playbackPositionTicks,
+        }),
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not sync continue watching progress');
+    }
+
+    startPlayback({
+      id: item.id,
+      title: item.name,
+      subtitle:
+        item.type === 'show'
+          ? `${item.seriesName ?? item.name}${item.seasonNumber && item.episodeNumber
+            ? ` • S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}`
+            : ''}`
+          : undefined,
+      startPositionSeconds: item.playbackPositionTicks / 10_000_000,
+    });
+  }
+
+  async function handleAutoTrack() {
+    if (!playingItem || autoMarked) {
+      return;
+    }
+
+    setAutoMarked(true);
+    try {
+      await markWatched(playingItem.id);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not mark item watched');
+    }
+  }
+
+  if (loading || !session) {
+    return <div className="shell"><div className="panel">Loading Gogglebox…</div></div>;
+  }
+
+  if (!session.authenticated) {
+    return (
+      <div className="shell">
+        <div className="panel auth-panel">
+          <p className="eyebrow">LAN household portal</p>
+          <h1>{session.appName}</h1>
+          <p className="lead">One login for the house, then choose who is watching together.</p>
+          <form className="stack" onSubmit={handleLogin}>
+            <label>
+              <span>Household username</span>
+              <input
+                value={credentials.username}
+                onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))}
+              />
+            </label>
+            <label>
+              <span>Password</span>
+              <input
+                type="password"
+                value={credentials.password}
+                onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))}
+              />
+            </label>
+            <button disabled={busy} type="submit">Enter gogglebox</button>
+          </form>
+          {error ? <p className="error">{error}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  if (session.activeViewerIds.length === 0) {
+    return (
+      <div className="shell">
+        <div className="panel">
+          <div className="row spread">
+            <div>
+              <p className="eyebrow">Who is watching?</p>
+              <h1>Pick the group</h1>
+            </div>
+            <button className="ghost" onClick={() => void logout()}>Log out</button>
+          </div>
+          <div className="viewer-grid">
+            {session.viewers.map((viewer) => {
+              const selected = selectedViewerIds.includes(viewer.id);
+              return (
+                <button
+                  key={viewer.id}
+                  className={`viewer-card${selected ? ' selected' : ''}`}
+                  onClick={() => toggleViewer(viewer.id)}
+                  type="button"
+                >
+                  <ViewerAvatar viewer={viewer} />
+                  <strong>{viewer.name}</strong>
+                </button>
+              );
+            })}
+          </div>
+          {session.groups.length > 0 ? (
+            <div className="preset-row">
+              {session.groups.map((preset) => (
+                <button key={preset.id} className="chip" onClick={() => setSelectedViewerIds(preset.memberIds)} type="button">
+                  {preset.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <div className="row spread">
+            <p className="muted">Multi-select is stored for this session only.</p>
+            <button disabled={busy || selectedViewerIds.length === 0} onClick={() => void saveGroup(selectedViewerIds)} type="button">
+              Continue
+            </button>
+          </div>
+          {error ? <p className="error">{error}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="shell">
+      <div className="hero">
+        <div>
+          <p className="eyebrow">Now watching</p>
+          <h1>{session.activeViewerIds.map((viewerId) => session.viewers.find((viewer) => viewer.id === viewerId)?.name).filter(Boolean).join(' + ')}</h1>
+          <p className="lead">Recommendations exclude anything already seen by anyone in this group.</p>
+        </div>
+        <div className="hero-actions">
+          <button className="ghost" onClick={() => void clearGroup()} type="button">Change viewers</button>
+          <button className="ghost" onClick={() => void logout()} type="button">Log out</button>
+        </div>
+      </div>
+
+      <div className="toolbar panel">
+        <div className="toggle-row">
+          <button className={kind === 'movie' ? 'selected' : ''} onClick={() => setKind('movie')} type="button">Movies</button>
+          <button className={kind === 'show' ? 'selected' : ''} onClick={() => setKind('show')} type="button">Shows</button>
+        </div>
+        <label>
+          <span>Genre</span>
+          <select value={genre} onChange={(event) => setGenre(event.target.value)}>
+            <option value="">All genres</option>
+            {availableGenres.map((itemGenre) => (
+              <option key={itemGenre} value={itemGenre}>{itemGenre}</option>
+            ))}
+          </select>
+        </label>
+        <label className="checkbox-row">
+          <input checked={kidsOnly} onChange={(event) => setKidsOnly(event.target.checked)} type="checkbox" />
+          <span>Kids only</span>
+        </label>
+      </div>
+
+      {error ? <div className="panel error">{error}</div> : null}
+
+      <section className="panel section-block">
+        <div className="row spread">
+          <div>
+            <p className="eyebrow">Resume together</p>
+            <h2>Continue watching</h2>
+          </div>
+        </div>
+        {!libraryLoading && continueWatching.length === 0 ? (
+          <p className="muted">Nothing in progress for this group yet.</p>
+        ) : null}
+        <div className="media-grid compact">
+          {continueWatching.map((item) => (
+            <article className="media-card" key={`continue-${item.id}-${item.sourceViewerId}`}>
+              <div className="poster" style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : undefined}>
+                {!item.imageUrl ? <span>No artwork</span> : null}
+              </div>
+              <div className="media-copy">
+                <div className="row spread top-align">
+                  <h3>{item.name}</h3>
+                  <span className="badge">{Math.round(item.progressPercent * 100)}%</span>
+                </div>
+                <p className="meta">
+                  {item.type === 'show'
+                    ? [
+                      item.seriesName,
+                      item.seasonNumber && item.episodeNumber
+                        ? `S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}`
+                        : null,
+                    ].filter(Boolean).join(' • ')
+                    : [item.year, item.runtimeMinutes ? `${item.runtimeMinutes} min` : null].filter(Boolean).join(' • ')}
+                </p>
+                <p className="overview">{item.overview || 'No synopsis available.'}</p>
+                <p className="muted">Resume from {item.sourceViewerName}'s progress.</p>
+                <div className="progress-track" aria-hidden="true">
+                  <span className="progress-fill" style={{ width: `${Math.max(2, Math.round(item.progressPercent * 100))}%` }} />
+                </div>
+              </div>
+              <div className="row spread">
+                <button onClick={() => void startContinuePlayback(item)} type="button">Continue</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel section-block">
+        <div className="row spread">
+          <div>
+            <p className="eyebrow">Group picks</p>
+            <h2>Because none of you have seen this</h2>
+          </div>
+          {libraryLoading ? <span className="muted">Refreshing…</span> : null}
+        </div>
+        {libraryLoading ? <p className="muted">Loading recommendations…</p> : null}
+        {!libraryLoading && recommendations.length === 0 ? (
+          <p className="muted">No fresh recommendations match this filter yet. Try another genre or turn off kids-only.</p>
+        ) : null}
+        <div className="media-grid compact">
+          {recommendations.map((item) => (
+            <MediaCard
+              key={`rec-${item.id}`}
+              item={item}
+              onMarkWatched={markWatched}
+              onPlay={startPlayback}
+              onOpenEpisodes={openEpisodes}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="panel section-block">
+        <div className="row spread">
+          <div>
+            <p className="eyebrow">Library</p>
+            <h2>Browse {kind === 'movie' ? 'movies' : 'shows'}</h2>
+          </div>
+        </div>
+        <div className="media-grid">
+          {library.map((item) => (
+            <MediaCard
+              key={item.id}
+              item={item}
+              onMarkWatched={markWatched}
+              onPlay={startPlayback}
+              onOpenEpisodes={openEpisodes}
+            />
+          ))}
+        </div>
+        {!libraryLoading && library.length === 0 ? (
+          <p className="muted">No titles found for this filter.</p>
+        ) : null}
+      </section>
+
+      {selectedSeries ? (
+        <div className="modal-backdrop" onClick={() => setSelectedSeries(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="row spread">
+              <div>
+                <p className="eyebrow">Episodes</p>
+                <h2>{selectedSeries.name}</h2>
+              </div>
+              <button className="ghost" onClick={() => setSelectedSeries(null)} type="button">Close</button>
+            </div>
+            {episodesLoading ? <p className="muted">Loading episodes…</p> : null}
+            {!episodesLoading && episodes.length === 0 ? <p className="muted">No episodes were found for this series.</p> : null}
+            <div className="episode-list">
+              {episodes.map((episode) => {
+                const label = [
+                  episode.seasonNumber ? `S${String(episode.seasonNumber).padStart(2, '0')}` : null,
+                  episode.episodeNumber ? `E${String(episode.episodeNumber).padStart(2, '0')}` : null,
+                ].filter(Boolean).join(' ');
+
+                return (
+                  <article className="episode-card" key={episode.id}>
+                    <div>
+                      <p className="eyebrow">{label || 'Episode'}</p>
+                      <h3>{episode.name}</h3>
+                      <p className="meta">{episode.runtimeMinutes ? `${episode.runtimeMinutes} min` : 'Runtime unavailable'}</p>
+                      <p className="overview">{episode.overview || 'No synopsis available.'}</p>
+                    </div>
+                    <div className="row">
+                      <button
+                        onClick={() => {
+                          startPlayback({
+                            id: episode.id,
+                            title: episode.name,
+                            subtitle: `${selectedSeries.name}${label ? ` • ${label}` : ''}`,
+                          });
+                          setSelectedSeries(null);
+                        }}
+                        type="button"
+                      >
+                        Play episode
+                      </button>
+                      <button className="ghost" onClick={() => void markWatched(episode.id)} type="button">Mark watched</button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {playingItem ? (
+        <div className="modal-backdrop" onClick={() => setPlayingItem(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="row spread">
+              <div>
+                <p className="eyebrow">Now playing</p>
+                <h2>{playingItem.title}</h2>
+                {playingItem.subtitle ? <p className="meta">{playingItem.subtitle}</p> : null}
+              </div>
+              <button className="ghost" onClick={() => setPlayingItem(null)} type="button">Close</button>
+            </div>
+            <video
+              ref={videoRef}
+              controls
+              autoPlay
+              onLoadedMetadata={() => {
+                const video = videoRef.current;
+                if (video && playingItem.startPositionSeconds && playingItem.startPositionSeconds > 0) {
+                  video.currentTime = Math.min(playingItem.startPositionSeconds, Math.max(0, video.duration - 1));
+                }
+                setAutoMarked(false);
+              }}
+              onTimeUpdate={() => {
+                const video = videoRef.current;
+                if (!video || !video.duration || autoMarked) {
+                  return;
+                }
+
+                if (video.currentTime / video.duration >= session.watchedThreshold) {
+                  void handleAutoTrack();
+                }
+              }}
+              src={`/api/items/${playingItem.id}/stream`}
+            />
+            <p className="muted">Playback auto-marks watched at {Math.round(session.watchedThreshold * 100)}%.</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MediaCard({
+  item,
+  onMarkWatched,
+  onPlay,
+  onOpenEpisodes,
+}: {
+  item: LibraryItem;
+  onMarkWatched: (itemId: string) => Promise<void>;
+  onPlay: (item: PlaybackItem) => void;
+  onOpenEpisodes: (series: LibraryItem) => Promise<void>;
+}) {
+  return (
+    <article className="media-card">
+      <div className="poster" style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : undefined}>
+        {!item.imageUrl ? <span>No artwork</span> : null}
+      </div>
+      <div className="media-copy">
+        <div className="row spread top-align">
+          <h3>{item.name}</h3>
+          {item.rating ? <span className="badge">{item.rating.toFixed(1)}</span> : null}
+        </div>
+        <p className="meta">{[item.year, item.runtimeMinutes ? `${item.runtimeMinutes} min` : null, item.officialRating].filter(Boolean).join(' • ') || 'No metadata yet'}</p>
+        <p className="overview">{item.overview || 'No synopsis available.'}</p>
+        <div className="tag-row">
+          {item.genres.slice(0, 3).map((genre) => (
+            <span key={genre} className="tag">{genre}</span>
+          ))}
+        </div>
+      </div>
+      <div className="row spread">
+        {item.playable ? (
+          <button onClick={() => onPlay({ id: item.id, title: item.name })} type="button">Play</button>
+        ) : (
+          <button onClick={() => void onOpenEpisodes(item)} type="button">Episodes</button>
+        )}
+        <button className="ghost" onClick={() => void onMarkWatched(item.id)} type="button">Mark watched</button>
+      </div>
+    </article>
+  );
+}

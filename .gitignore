@@ -1,0 +1,15 @@
+node_modules
+dist
+.vite
+artifacts
+.env
+!.env.example
+config.json
+!config.example.json
+!package-lock.json
+
+# Global gitignore ignores .claude/; re-include only the shared project subagents
+# (local .claude settings stay ignored).
+!.claude/
+.claude/*
+!.claude/agents/

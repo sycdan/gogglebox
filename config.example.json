@@ -1,0 +1,24 @@
+{
+	"playback": {
+		"watchedThreshold": 0.9
+	},
+	"groups": [
+		{
+			"id": "household",
+			"name": "Everyone",
+			"memberIds": [
+				"jellyfinUserId1",
+				"jellyfinUserId2",
+				"jellyfinUserId3"
+			]
+		},
+		{
+			"id": "parents",
+			"name": "Parents",
+			"memberIds": [
+				"jellyfinUserId1",
+				"jellyfinUserId2"
+			]
+		}
+	]
+}
