@@ -782,7 +782,8 @@ export function App() {
 
       {error ? <div className="panel error">{error}</div> : null}
 
-      <section className="panel section-block">
+      {searchQuery.trim() ? null : (
+        <section className="panel section-block">
         <div className="row spread">
           <div>
             <p className="eyebrow">Group picks</p>
@@ -821,7 +822,8 @@ export function App() {
             />
           ))}
         </div>
-      </section>
+        </section>
+      )}
 
       {searchQuery.trim() ? (
         <section className="panel section-block">
