@@ -219,7 +219,14 @@ app.get('/api/library', requireAuth, async (req, res) => {
     const kind = req.query.kind === 'show' ? 'show' : 'movie';
     const genre = typeof req.query.genre === 'string' && req.query.genre ? req.query.genre : undefined;
     const kidsOnly = req.query.kidsOnly === 'true';
-    let items = await jellyfin.listItems(kind, genre);
+    const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+
+    if (!query) {
+      res.json({ items: [] });
+      return;
+    }
+
+    let items = await jellyfin.listItems(kind, genre, query);
 
     if (kidsOnly) {
       items = items.filter(isKidsContent);

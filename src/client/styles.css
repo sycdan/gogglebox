@@ -170,6 +170,14 @@ h3 {
   margin-bottom: 1.25rem;
 }
 
+.search-field {
+  grid-column: 1 / -1;
+}
+
+.search-field input {
+  width: 100%;
+}
+
 .toggle-row button,
 .chip {
   background: rgba(255, 255, 255, 0.08);

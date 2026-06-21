@@ -236,7 +236,7 @@ export class JellyfinClient {
     };
   }
 
-  async listItems(kind: LibraryKind, genre?: string): Promise<LibraryItem[]> {
+  async listItems(kind: LibraryKind, genre?: string, searchTerm?: string): Promise<LibraryItem[]> {
     const query = new URLSearchParams({
       Recursive: 'true',
       SortBy: 'SortName',
@@ -247,6 +247,10 @@ export class JellyfinClient {
 
     if (genre) {
       query.set('Genres', genre);
+    }
+
+    if (searchTerm) {
+      query.set('SearchTerm', searchTerm);
     }
 
     const data = await this.request<JellyfinListResponse<JellyfinItem>>('/Items', query);

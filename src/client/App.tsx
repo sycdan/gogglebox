@@ -113,7 +113,10 @@ export function App() {
   const [kind, setKind] = useState<LibraryKind>('show');
   const [genre, setGenre] = useState('');
   const [kidsOnly, setKidsOnly] = useState(false);
-  const [library, setLibrary] = useState<LibraryItem[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<LibraryItem[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchRequestIdRef = useRef(0);
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const [recommendations, setRecommendations] = useState<LibraryItem[]>([]);
   const [noMorePicks, setNoMorePicks] = useState(false);
@@ -155,9 +158,6 @@ export function App() {
     if (nextKidsOnly) {
       params.set('kidsOnly', 'true');
     }
-
-    const libraryResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/library?${params.toString()}`);
-    setLibrary(libraryResponse.items);
 
     setNoMorePicks(false);
     if (activeSession.activeViewerIds.length > 0) {
@@ -265,6 +265,55 @@ export function App() {
   }, [session?.authenticated, session?.activeViewerIds.join(',')]);
 
   useEffect(() => {
+    if (!session?.authenticated) {
+      return;
+    }
+
+    const trimmedQuery = searchQuery.trim();
+    if (!trimmedQuery) {
+      // Cancel any in-flight search and clear results.
+      searchRequestIdRef.current += 1;
+      setSearchLoading(false);
+      setSearchResults([]);
+      return;
+    }
+
+    setSearchLoading(true);
+    const requestId = ++searchRequestIdRef.current;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        const params = new URLSearchParams({ kind, q: trimmedQuery });
+        if (genre) {
+          params.set('genre', genre);
+        }
+        if (kidsOnly) {
+          params.set('kidsOnly', 'true');
+        }
+        try {
+          const response = await apiRequest<{ items: LibraryItem[] }>(`/api/library?${params.toString()}`);
+          // Ignore stale responses — only the latest request wins.
+          if (requestId !== searchRequestIdRef.current) {
+            return;
+          }
+          setSearchResults(response.items);
+        } catch (nextError) {
+          if (requestId !== searchRequestIdRef.current) {
+            return;
+          }
+          setError(nextError instanceof Error ? nextError.message : 'Search failed');
+          setSearchResults([]);
+        } finally {
+          if (requestId === searchRequestIdRef.current) {
+            setSearchLoading(false);
+          }
+        }
+      })();
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [session?.authenticated, searchQuery, kind, genre, kidsOnly]);
+
+  useEffect(() => {
     if (!session || session.authenticated || !session.portalAutoLoginEnabled || busy) {
       return;
     }
@@ -284,9 +333,11 @@ export function App() {
 
   const availableGenres = useMemo(() => {
     const uniqueGenres = new Set<string>();
-    library.forEach((item) => item.genres.forEach((itemGenre) => uniqueGenres.add(itemGenre)));
+    [...recommendations, ...searchResults].forEach((item) =>
+      item.genres.forEach((itemGenre) => uniqueGenres.add(itemGenre)),
+    );
     return [...uniqueGenres].sort((left, right) => left.localeCompare(right));
-  }, [library]);
+  }, [recommendations, searchResults]);
 
   function toggleViewer(viewerId: string) {
     setSelectedViewerIds((current) =>
@@ -718,6 +769,15 @@ export function App() {
           <input checked={kidsOnly} onChange={(event) => setKidsOnly(event.target.checked)} type="checkbox" />
           <span>Kids only</span>
         </label>
+        <label className="search-field">
+          <span>Search</span>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={`Search ${kind === 'movie' ? 'movies' : 'shows'}…`}
+          />
+        </label>
       </div>
 
       {error ? <div className="panel error">{error}</div> : null}
@@ -763,28 +823,31 @@ export function App() {
         </div>
       </section>
 
-      <section className="panel section-block">
-        <div className="row spread">
-          <div>
-            <p className="eyebrow">Library</p>
-            <h2>Browse {kind === 'movie' ? 'movies' : 'shows'}</h2>
+      {searchQuery.trim() ? (
+        <section className="panel section-block">
+          <div className="row spread">
+            <div>
+              <p className="eyebrow">Library</p>
+              <h2>Search results</h2>
+            </div>
+            {searchLoading ? <span className="muted">Searching…</span> : null}
           </div>
-        </div>
-        <div className="media-grid">
-          {library.map((item) => (
-            <MediaCard
-              key={item.id}
-              item={item}
-              onMarkWatched={markWatched}
-              onPlay={startPlayback}
-              onOpenEpisodes={openEpisodes}
-            />
-          ))}
-        </div>
-        {!libraryLoading && library.length === 0 ? (
-          <p className="muted">No titles found for this filter.</p>
-        ) : null}
-      </section>
+          <div className="media-grid">
+            {searchResults.map((item) => (
+              <MediaCard
+                key={item.id}
+                item={item}
+                onMarkWatched={markWatched}
+                onPlay={startPlayback}
+                onOpenEpisodes={openEpisodes}
+              />
+            ))}
+          </div>
+          {!searchLoading && searchResults.length === 0 ? (
+            <p className="muted">No titles match “{searchQuery.trim()}”.</p>
+          ) : null}
+        </section>
+      ) : null}
 
       {selectedSeries ? (
         <div className="modal-backdrop" onClick={() => setSelectedSeries(null)}>
