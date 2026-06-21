@@ -3,9 +3,6 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  // Serve project-root assets/ at / in dev and copy into dist/client on build
-  // (favicons live here).
-  publicDir: 'assets',
   server: {
     // host: true binds 0.0.0.0 so the dev-compose proof container can reach it
     host: true,
