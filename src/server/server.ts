@@ -4,13 +4,16 @@ import { Readable } from 'node:stream';
 import express from 'express';
 import session from 'express-session';
 
+import { AppState } from './appState';
 import { loadConfig } from './config';
 import { ContinueWatchingCandidate, getProgressPropagationTargets, mergeContinueWatching } from './continueWatching';
+import { deriveGroupKey } from './groupKey';
 import { JellyfinClient } from './jellyfin';
 import { ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind } from './types';
 
 const config = loadConfig();
 const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
+const appState = new AppState();
 const app = express();
 const clientDist = path.resolve(process.cwd(), 'dist/client');
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
@@ -58,6 +61,22 @@ function requireViewerGroup(
 
 function activeViewersForSession(req: express.Request): FamilyMember[] {
   return config.viewers.filter((viewer) => req.session.activeViewerIds?.includes(viewer.id));
+}
+
+// Deterministic, order-independent key for the active viewer group, derived from
+// the selected Jellyfin user ids. Same set of people -> same key.
+function activeGroupKey(req: express.Request): string {
+  const jellyfinUserIds = activeViewersForSession(req).map((viewer) => viewer.jellyfinUserId);
+  return deriveGroupKey(jellyfinUserIds);
+}
+
+function ignoredShowsForSession(req: express.Request): Set<string> {
+  return new Set(appState.getIgnoredShows(activeGroupKey(req)));
+}
+
+// The id used to ignore an item: the series id for shows, the item id for movies.
+function ignorableId(item: { type: LibraryKind; id: string; seriesId?: string | null }): string {
+  return item.type === 'show' && item.seriesId ? item.seriesId : item.id;
 }
 
 function getItemId(req: express.Request): string {
@@ -232,6 +251,11 @@ app.get('/api/library', requireAuth, async (req, res) => {
       items = items.filter(isKidsContent);
     }
 
+    if (req.session.activeViewerIds?.length) {
+      const ignoredShows = ignoredShowsForSession(req);
+      items = items.filter((item) => !ignoredShows.has(ignorableId(item)));
+    }
+
     res.json({ items });
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Library lookup failed' });
@@ -249,6 +273,7 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     );
     const viewers = activeViewersForSession(req);
     const watchedUnion = await getWatchedUnion(viewers, kind);
+    const ignoredShows = ignoredShowsForSession(req);
     let candidates = await jellyfin.listItems(kind, genre);
 
     if (kidsOnly) {
@@ -256,7 +281,7 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     }
 
     const items = candidates
-      .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id))
+      .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id) && !ignoredShows.has(ignorableId(item)))
       .sort((left, right) => (right.rating ?? 0) - (left.rating ?? 0))
       .slice(0, config.recommendations.count);
 
@@ -269,11 +294,50 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
 app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, res) => {
   try {
     const viewers = activeViewersForSession(req);
-    const items = await getContinueWatchingItems(viewers);
+    const ignoredShows = ignoredShowsForSession(req);
+    const items = (await getContinueWatchingItems(viewers)).filter(
+      (item) => !ignoredShows.has(ignorableId(item)),
+    );
     res.json({ items });
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Continue watching lookup failed' });
   }
+});
+
+app.get('/api/ignored-shows', requireAuth, requireViewerGroup, async (req, res) => {
+  const showIds = appState.getIgnoredShows(activeGroupKey(req));
+
+  // Resolve human-readable titles so the client doesn't render raw ids. An id
+  // that no longer resolves (deleted item) or a lookup failure falls back to
+  // showing the id.
+  let names = new Map<string, string>();
+  try {
+    names = await jellyfin.fetchItemNames(showIds);
+  } catch (error) {
+    if (jellyfinDebugEnabled) {
+      console.log(`[ignored-shows] title lookup failed: ${error instanceof Error ? error.message : error}`);
+    }
+  }
+
+  const shows = showIds.map((id) => ({ id, title: names.get(id) ?? id }));
+  res.json({ shows });
+});
+
+app.post('/api/ignored-shows', requireAuth, requireViewerGroup, (req, res) => {
+  const showId = typeof req.body?.showId === 'string' ? req.body.showId.trim() : '';
+  if (!showId) {
+    res.status(400).json({ error: 'showId is required' });
+    return;
+  }
+
+  const showIds = appState.ignoreShow(activeGroupKey(req), showId);
+  res.json({ showIds });
+});
+
+app.delete('/api/ignored-shows/:showId', requireAuth, requireViewerGroup, (req, res) => {
+  const showId = Array.isArray(req.params.showId) ? req.params.showId[0] : req.params.showId;
+  const showIds = appState.unignoreShow(activeGroupKey(req), showId);
+  res.json({ showIds });
 });
 
 app.get('/api/shows/:seriesId/episodes', requireAuth, requireViewerGroup, async (req, res) => {

@@ -1,6 +1,25 @@
 # Gogglebox
 
-Gogglebox is a shared-household Jellyfin frontend that helps people browse the library together, pick something to watch, and keep session state in sync between the server and client.
+Gogglebox is a LAN-first Jellyfin frontend for a household that watches together.
+One shared login, then pick **who's watching** (one or more people); everything
+after that is scoped to that group.
+
+## What it does
+
+- **Watch as a group, not a profile.** Select multiple viewers at once. Marking
+  something watched applies to all of them, and watch state is read back from
+  Jellyfin — the portal stores no media data of its own.
+- **Continue watching first.** The home screen leads with in-progress titles —
+  movies and shows together — so the group resumes without first choosing a
+  library.
+- **Recommendations none of you have seen.** Picks are the library minus the
+  union of everything anyone in the selected group has already watched.
+- **Find, don't browse.** Rather than rendering the whole library, the selector
+  drives a small set of recommendations plus a search box.
+
+Viewers and groups map to Jellyfin user ids in `config.json`. Jellyfin remains
+the source of truth for library, metadata, and watch history; Gogglebox is a thin
+group-aware layer on top.
 
 See [BACKLOG.md](BACKLOG.md) for the roadmap.
 

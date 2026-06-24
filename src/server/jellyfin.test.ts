@@ -199,6 +199,77 @@ test('listEpisodes requests episode metadata and maps season info', async () => 
   }
 });
 
+test('fetchItemNames requests ids in one call and maps id to name', async () => {
+  const originalFetch = globalThis.fetch;
+  let callCount = 0;
+
+  globalThis.fetch = (async (input: URL | string) => {
+    callCount += 1;
+    const url = new URL(String(input));
+    assert.match(url.pathname, /\/Items$/);
+    assert.equal(url.searchParams.get('Ids'), 'show-a,show-b');
+
+    return new Response(
+      JSON.stringify({
+        Items: [
+          { Id: 'show-a', Name: 'Show A', Type: 'Series' },
+          { Id: 'show-b', Name: 'Show B', Type: 'Series' },
+        ],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+    // Duplicate id should be de-duped into a single request param.
+    const names = await client.fetchItemNames(['show-a', 'show-b', 'show-a']);
+
+    assert.equal(callCount, 1);
+    assert.equal(names.get('show-a'), 'Show A');
+    assert.equal(names.get('show-b'), 'Show B');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchItemNames skips the request and returns empty for no ids', async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = (async () => {
+    called = true;
+    return new Response('{}', { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+    const names = await client.fetchItemNames([]);
+    assert.equal(called, false);
+    assert.equal(names.size, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchItemNames omits unresolved ids so callers can fall back', async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({ Items: [{ Id: 'show-a', Name: 'Show A', Type: 'Series' }] }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+    const names = await client.fetchItemNames(['show-a', 'deleted-id']);
+    assert.equal(names.get('show-a'), 'Show A');
+    assert.equal(names.has('deleted-id'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('listContinueWatching requests resume endpoint and maps user progress', async () => {
   const originalFetch = globalThis.fetch;
 

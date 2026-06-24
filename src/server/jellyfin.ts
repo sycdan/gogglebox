@@ -257,6 +257,31 @@ export class JellyfinClient {
     return data.Items.map((item) => this.toLibraryItem(item, kind));
   }
 
+  // Resolve a set of item ids to their display names in a single request.
+  // Ids that no longer resolve (e.g. deleted items) are simply omitted from the
+  // returned map so callers can fall back to the raw id.
+  async fetchItemNames(ids: string[]): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    const uniqueIds = [...new Set(ids.filter((id) => id))];
+    if (uniqueIds.length === 0) {
+      return names;
+    }
+
+    const query = new URLSearchParams({
+      Recursive: 'true',
+      Ids: uniqueIds.join(','),
+      Fields: '',
+    });
+    query.delete('Fields');
+
+    const data = await this.request<JellyfinListResponse<JellyfinItem>>('/Items', query);
+    for (const item of data.Items) {
+      names.set(item.Id, item.Name);
+    }
+
+    return names;
+  }
+
   async listEpisodes(seriesId: string): Promise<EpisodeItem[]> {
     const query = new URLSearchParams({
       Recursive: 'true',

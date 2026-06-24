@@ -15,7 +15,8 @@ services:
       - PORTAL_PASSWORD
       - PORTAL_AUTO_LOGIN
     volumes:
-      # required: household config (groups + playback)
       - ./config.json:/app/config.json:ro
+      # writable app state; host-mounted so it survives redeploys
+      - ${GOGGLEBOX_STATE_DIR:-./data}:/data
     ports:
       - "${GOGGLEBOX_PORT:?host port to expose}:3000"
