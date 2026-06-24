@@ -105,4 +105,20 @@ Required vars (compose fails fast if unset): `REGISTRY_HOST` (registry host
 for the image), `GOGGLEBOX_PORT` (host port), `JELLYFIN_URL`,
 `JELLYFIN_API_KEY`, `SESSION_SECRET`.
 
+### Writable state directory
+
+The portal writes runtime state (e.g. the per-group list of ignored shows) to
+`/data/state.json` inside the container. That path is bind-mounted from the host
+via `GOGGLEBOX_STATE_DIR` (defaults to `./data`) so it survives redeploys.
+
+The container runs as the non-root `node` user (**uid 1000**, fixed by the
+official `node` base image), so the host state directory must be writable by uid
+1000 — otherwise writes fail with `EACCES` and actions like ignoring a show
+return an error. A freshly created host dir is usually owned by root, so chown it
+once after first deploy:
+
+```bash
+sudo chown -R 1000:1000 "$GOGGLEBOX_STATE_DIR"   # e.g. /var/lib/gogglebox
+```
+
 The container listens on port `3000` internally and serves both API routes and the built client from `dist/client`.
