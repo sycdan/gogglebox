@@ -2,7 +2,23 @@
 
 ## Backlog
 
-_Empty._ Add real, needs-driven items here.
+### Ignore shows per viewer group
+
+Let a viewer group hide a show from all results (continue-watching,
+recommendations, and search). Ignoring just suppresses the show everywhere; an
+unignore action in the UI brings it back.
+
+- **Group key:** derive a deterministic id from the set of selected user ids,
+  order-independent (sort ids, then namespaced UUIDv5, dashes stripped). Same
+  group of people always maps to the same key.
+- **Storage:** persist a `groupKey → [showId]` map (or its inverse) in a
+  writable **app state file**, not `config.json`. App must write to it at
+  runtime. Mount the state path from the host via docker-compose deploy so it
+  survives redeploys. Config stays read-only.
+- **Filtering:** subtract a group's ignored show ids from continue-watching,
+  recommendations, and search results for that group.
+- **UI:** action to ignore a show, and a way to view/unignore the group's
+  ignored shows.
 
 ## Recently shipped
 
@@ -23,4 +39,3 @@ Continue-watching-first home (all phases verified + visually proven):
 - Config loader: [src/server/config.ts](src/server/config.ts)
 - Client app: [src/client/App.tsx](src/client/App.tsx)
 - Continue-watching merge: [src/server/continueWatching.ts](src/server/continueWatching.ts)
-</content>
