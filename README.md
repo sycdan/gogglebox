@@ -64,10 +64,11 @@ Publish the image to the registry (builds, tags, and pushes in one step):
 REGISTRY_HOST=registry.example.com:5000 ./scripts/docker-publish.sh
 ```
 
-Override the image name and tag too:
+Each run pushes both `latest` and a timestamped `yyyy.m.d.<minute-of-day>` version
+tag from the same build. Override the image name too:
 
 ```bash
-REGISTRY_HOST=registry.example.com:5000 IMAGE_NAME=gogglebox IMAGE_TAG=v1.0.0 ./scripts/docker-publish.sh
+REGISTRY_HOST=registry.example.com:5000 IMAGE_NAME=gogglebox ./scripts/docker-publish.sh
 ```
 
 Optional platform override (passed through to build):
