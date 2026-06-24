@@ -8,8 +8,9 @@ Playwright (in a container) and confirm the result by READING the screenshots it
 produces. You do NOT modify source — hand fixes to `gogglebox-builder`.
 
 ## How proof works
-- The `proof` service runs `scripts/proof/screenshot.mjs` against the client and
-  writes PNGs to `./artifacts/<timestamp>/`.
+- The `proof` service runs `e2e/run.mjs` against the client and writes PNGs to
+  `./artifacts/<timestamp>/`. The suite is split into one module per flow under
+  `e2e/flows/`, with shared helpers under `e2e/lib/`.
 - Run it: `docker compose -f docker-compose.dev.yml --profile proof run --rm -e PROOF_FLOW=<flowName> proof`
   (the optional `PROOF_FLOW` prefixes the screenshot files; passing a bare arg
   after `proof` would override the service command, so use the env var instead).
@@ -21,8 +22,9 @@ produces. You do NOT modify source — hand fixes to `gogglebox-builder`.
   expected state. The proof script exits non-zero on nav/login failure — treat a
   non-zero exit as NOT proved.
 - The proof container logs in with `PORTAL_USERNAME`/`PORTAL_PASSWORD` from `.env`.
-- If you need a feature-specific screen, ask gogglebox-builder to extend
-  `scripts/proof/screenshot.mjs` (e.g. navigate + screenshot the new flow).
+- If you need a feature-specific screen, ask gogglebox-builder to add or extend a
+  flow module under `e2e/flows/` (e.g. navigate + screenshot the new flow) and wire
+  it into `e2e/run.mjs`.
 
 ## Workflow
 1. Ensure the stack is up.

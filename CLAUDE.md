@@ -47,8 +47,10 @@ The server exits at startup if Jellyfin is unreachable. `check` and `test` need
 no Jellyfin.
 
 ### Visual proof
-`scripts/proof/screenshot.mjs` (Playwright) logs in and writes PNGs to
-`./artifacts/<timestamp>/`. The prover Reads those PNGs to confirm the UI.
+The Playwright suite entry is `e2e/run.mjs`. It logs in, then runs one module per
+flow under `e2e/flows/`, with shared harness/session/viewer helpers under
+`e2e/lib/`. It writes PNGs to `./artifacts/<timestamp>/`. The prover Reads those
+PNGs to confirm the UI.
 
 ## Conventions
 - Never run `npm`/`node`/`tsc` on the host — use the compose services above.

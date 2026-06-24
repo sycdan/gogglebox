@@ -73,7 +73,7 @@ services:
   proof:
     image: mcr.microsoft.com/playwright:v1.49.0-jammy
     working_dir: /app
-    command: node scripts/proof/screenshot.mjs
+    command: node e2e/run.mjs
     volumes:
       - .:/app
       - node_modules:/app/node_modules
