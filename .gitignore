@@ -9,6 +9,10 @@ config.json
 !config.example.json
 !package-lock.json
 
+# Stray file created when a command redirects to `nul` (Windows null-device
+# name) inside the POSIX Bash tool, where it's a literal file not /dev/null.
+nul
+
 # Global gitignore ignores .claude/; re-include only the shared project subagents
 # (local .claude settings stay ignored).
 !.claude/
