@@ -33,7 +33,7 @@ interface JellyfinItem {
   UserData?: {
     PlaybackPositionTicks?: number;
     PlayedPercentage?: number;
-    IsPlayed?: boolean;
+    Played?: boolean;
   };
 }
 
@@ -175,7 +175,7 @@ export class JellyfinClient {
 
   private toContinueWatchingItem(item: JellyfinItem): JellyfinContinueWatchingItem | null {
     const playbackPositionTicks = item.UserData?.PlaybackPositionTicks ?? 0;
-    if (playbackPositionTicks <= 0 || item.UserData?.IsPlayed) {
+    if (playbackPositionTicks <= 0 || item.UserData?.Played) {
       return null;
     }
 
@@ -370,6 +370,15 @@ export class JellyfinClient {
     }
 
     return watchedIds;
+  }
+
+  // Per-user played state of a single item, read from its UserData when fetched
+  // as that user. Used to show which viewers have already watched the current
+  // continue-watching episode. A missing/unresolvable item reads as not played.
+  async getItemPlayedState(userId: string, itemId: string): Promise<boolean> {
+    const query = new URLSearchParams({ Ids: itemId, Fields: 'UserData' });
+    const data = await this.request<JellyfinListResponse<JellyfinItem>>(`/Users/${userId}/Items`, query);
+    return Boolean(data.Items[0]?.UserData?.Played);
   }
 
   async markPlayed(userId: string, itemId: string): Promise<void> {

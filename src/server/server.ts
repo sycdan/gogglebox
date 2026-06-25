@@ -9,7 +9,7 @@ import { loadConfig } from './config';
 import { ContinueWatchingCandidate, getProgressPropagationTargets, mergeContinueWatching } from './continueWatching';
 import { deriveGroupKey } from './groupKey';
 import { JellyfinClient } from './jellyfin';
-import { ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind } from './types';
+import { ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind, ViewerWatchedState } from './types';
 
 const config = loadConfig();
 const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
@@ -135,6 +135,28 @@ async function getContinueWatchingItems(viewers: FamilyMember[]): Promise<Contin
   }
 
   return merged;
+}
+
+// Attach, per continue-watching card, each active viewer's played state for that
+// card's current episode/movie item. State is read live from Jellyfin (per-user
+// UserData.Played), so no local persistence is needed.
+async function withViewerWatchedState(
+  items: ContinueWatchingItem[],
+  viewers: FamilyMember[],
+): Promise<ContinueWatchingItem[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      const viewerWatched: ViewerWatchedState[] = await Promise.all(
+        viewers.map(async (viewer) => ({
+          viewerId: viewer.id,
+          viewerName: viewer.name,
+          avatarUrl: viewer.avatarUrl ?? null,
+          watched: await jellyfin.getItemPlayedState(viewer.jellyfinUserId, item.id),
+        })),
+      );
+      return { ...item, viewerWatched };
+    }),
+  );
 }
 
 app.disable('x-powered-by');
@@ -295,9 +317,10 @@ app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, r
   try {
     const viewers = activeViewersForSession(req);
     const ignoredShows = ignoredShowsForSession(req);
-    const items = (await getContinueWatchingItems(viewers)).filter(
+    const visible = (await getContinueWatchingItems(viewers)).filter(
       (item) => !ignoredShows.has(ignorableId(item)),
     );
+    const items = await withViewerWatchedState(visible, viewers);
     res.json({ items });
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Continue watching lookup failed' });
@@ -358,6 +381,33 @@ app.post('/api/items/:itemId/watched', requireAuth, requireViewerGroup, async (r
     res.json({ ok: true });
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Could not mark item watched' });
+  }
+});
+
+// Toggle a single viewer's played state for one item (the card's current
+// episode/movie). The viewer must be in the active group. State lives in
+// Jellyfin; we return the new value so the client can reconcile.
+app.post('/api/items/:itemId/viewer-watched', requireAuth, requireViewerGroup, async (req, res) => {
+  try {
+    const viewerId = typeof req.body?.viewerId === 'string' ? req.body.viewerId : '';
+    const watched = Boolean(req.body?.watched);
+    const viewer = activeViewersForSession(req).find((candidate) => candidate.id === viewerId);
+
+    if (!viewer) {
+      res.status(400).json({ error: 'Viewer must be in the active group' });
+      return;
+    }
+
+    const itemId = getItemId(req);
+    if (watched) {
+      await jellyfin.markPlayed(viewer.jellyfinUserId, itemId);
+    } else {
+      await jellyfin.markUnplayed(viewer.jellyfinUserId, itemId);
+    }
+
+    res.json({ viewerId, watched });
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Could not update viewer watch state' });
   }
 });
 

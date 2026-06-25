@@ -49,6 +49,13 @@ export interface LibraryItem {
   playable: boolean;
 }
 
+export interface ViewerWatchedState {
+  viewerId: string;
+  viewerName: string;
+  avatarUrl?: string | null;
+  watched: boolean;
+}
+
 export interface ContinueWatchingItem extends LibraryItem {
   sourceViewerId: string;
   sourceViewerName: string;
@@ -58,4 +65,5 @@ export interface ContinueWatchingItem extends LibraryItem {
   seriesName: string | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
+  viewerWatched?: ViewerWatchedState[];
 }

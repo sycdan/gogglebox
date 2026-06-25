@@ -56,6 +56,13 @@ interface IgnoredShow {
   title: string;
 }
 
+interface ViewerWatchedState {
+  viewerId: string;
+  viewerName: string;
+  avatarUrl?: string | null;
+  watched: boolean;
+}
+
 interface ContinueWatchingItem extends LibraryItem {
   sourceViewerId: string;
   sourceViewerName: string;
@@ -65,6 +72,7 @@ interface ContinueWatchingItem extends LibraryItem {
   seriesName: string | null;
   seasonNumber: number | null;
   episodeNumber: number | null;
+  viewerWatched?: ViewerWatchedState[];
 }
 
 interface SessionResponse {
@@ -487,6 +495,36 @@ export function App() {
     }
   }
 
+  // Toggle one viewer's watched state for a continue-watching card's current
+  // item. Optimistically flips the pill, then reconciles on failure.
+  async function toggleViewerWatched(item: ContinueWatchingItem, viewer: ViewerWatchedState) {
+    const nextWatched = !viewer.watched;
+    const applyWatched = (value: boolean) =>
+      setContinueWatching((current) =>
+        current.map((card) =>
+          card.id === item.id && card.sourceViewerId === item.sourceViewerId
+            ? {
+              ...card,
+              viewerWatched: card.viewerWatched?.map((entry) =>
+                entry.viewerId === viewer.viewerId ? { ...entry, watched: value } : entry,
+              ),
+            }
+            : card,
+        ),
+      );
+
+    applyWatched(nextWatched);
+    try {
+      await apiRequest(`/api/items/${item.id}/viewer-watched`, {
+        method: 'POST',
+        body: JSON.stringify({ viewerId: viewer.viewerId, watched: nextWatched }),
+      });
+    } catch (nextError) {
+      applyWatched(viewer.watched);
+      setError(nextError instanceof Error ? nextError.message : 'Could not update watch state');
+    }
+  }
+
   async function openEpisodes(series: LibraryItem) {
     try {
       setEpisodesLoading(true);
@@ -867,13 +905,33 @@ export function App() {
                     : [item.year, item.runtimeMinutes ? `${item.runtimeMinutes} min` : null].filter(Boolean).join(' • ')}
                 </p>
                 <p className="overview">{item.overview || 'No synopsis available.'}</p>
-                <p className="muted">Resume from {item.sourceViewerName}'s progress.</p>
                 <div className="progress-track" aria-hidden="true">
                   <span className="progress-fill" style={{ width: `${Math.max(2, Math.round(item.progressPercent * 100))}%` }} />
                 </div>
               </div>
               <div className="row spread">
-                <button onClick={() => void startContinuePlayback(item)} type="button">Continue</button>
+                <div className="play-row">
+                  <button onClick={() => void startContinuePlayback(item)} type="button">{item.progressPercent > 0 ? 'Resume' : 'Play'}</button>
+                  <div className="viewer-pills">
+                    {item.viewerWatched?.map((viewer) => (
+                      <button
+                        key={viewer.viewerId}
+                        type="button"
+                        className={`viewer-pill${viewer.watched ? ' watched' : ''}`}
+                        onClick={() => void toggleViewerWatched(item, viewer)}
+                        aria-pressed={viewer.watched}
+                        title={`${viewer.viewerName} — ${viewer.watched ? 'watched' : 'not watched'} (click to toggle)`}
+                      >
+                        {viewer.avatarUrl ? (
+                          <img className="viewer-pill-avatar" src={viewer.avatarUrl} alt={viewer.viewerName} />
+                        ) : (
+                          <span className="viewer-pill-avatar">{viewer.viewerName.slice(0, 1)}</span>
+                        )}
+                        {viewer.watched ? <span className="viewer-pill-check" aria-hidden="true">✓</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <button className="ghost" onClick={() => void ignoreShow(item)} type="button">Ignore</button>
               </div>
             </article>

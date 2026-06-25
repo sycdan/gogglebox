@@ -2,19 +2,36 @@
 
 ## Backlog
 
-### Per-viewer watched-state pills in continue-watching
+### Movies resume least-watched first
 
-Each continue-watching card shows who in the group has seen the current episode,
-and lets you toggle it.
+When several viewers in a group have the same movie in progress at different
+points, the continue-watching card currently resumes from the **most**-watched
+viewer's position (rank = highest `progressPercent`, see
+[src/server/continueWatching.ts](src/server/continueWatching.ts) `rankCandidate`).
+That spoils the least-watched viewer. Flip it so a movie's card resumes from the
+**least**-watched viewer's position instead.
 
-- **Play button:** rename the card's "Continue" button to "Play".
-- **Viewer pills:** next to Play, render a small icon per viewer in the active
-  group. Overlay a marker on a viewer's icon when that person has watched the
-  episode.
-- **Toggle:** clicking a viewer's icon toggles that episode's watched state for
-  that person in Jellyfin (mark played / unplayed for that user id).
+- Only movies (`type === 'movie'`) change; shows still rank by season/episode
+  then progress as today.
+- Pick the in-progress candidate with the **lowest** `progressPercent` for that
+  movie; that viewer becomes the card's `sourceViewer` / resume point.
+- Keep deduping movies by `movie:{id}`; the per-viewer pills already show
+  everyone's individual watched state, so the card still reflects the group.
+- Update `continueWatching.test.ts` to assert the least-progressed viewer wins
+  for movies.
 
 ## Recently shipped
+
+Per-viewer watched-state pills in continue-watching (built + visually proven):
+
+- "Continue" button renamed to "Play" (and "Resume" when the file has partial
+  progress).
+- A viewer pill per active-group member next to the button, with a check badge
+  overlaid when that viewer has the card's current item marked played in
+  Jellyfin. Avatars clip to equal circles (`object-fit: cover`).
+- Clicking a pill toggles that viewer's played/unplayed state in Jellyfin.
+- Fixed a Jellyfin field-name bug (`UserData.Played`, not `IsPlayed`) so the
+  watched badge reads correctly on initial load, not just after a toggle.
 
 Ignore shows per viewer group (backend + UI in code):
 

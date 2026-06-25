@@ -293,7 +293,7 @@ test('listContinueWatching requests resume endpoint and maps user progress', asy
             UserData: {
               PlaybackPositionTicks: 300_000_000,
               PlayedPercentage: 25,
-              IsPlayed: false,
+              Played: false,
             },
           },
         ],
@@ -335,6 +335,38 @@ test('setPlaybackPosition posts user-data payload without marking played', async
   try {
     const client = new JellyfinClient('https://example.com', 'abc123');
     await client.setPlaybackPosition('user2', 'ep42', 555000000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getItemPlayedState reads the Played field from UserData', async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async (input: URL | string) => {
+    assert.match(String(input), /\/Users\/user2\/Items\?/);
+    return new Response(
+      JSON.stringify({
+        Items: [
+          {
+            Id: 'ep42',
+            UserData: {
+              Played: true,
+            },
+          },
+        ],
+      }),
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
+  }) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+    const watched = await client.getItemPlayedState('user2', 'ep42');
+    assert.equal(watched, true);
   } finally {
     globalThis.fetch = originalFetch;
   }
