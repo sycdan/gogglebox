@@ -2,25 +2,34 @@
 
 ## Backlog
 
-### Ignore shows per viewer group
+### Per-viewer watched-state pills in continue-watching
 
-Let a viewer group hide a show from all results (continue-watching,
-recommendations, and search). Ignoring just suppresses the show everywhere; an
-unignore action in the UI brings it back.
+Each continue-watching card shows who in the group has seen the current episode,
+and lets you toggle it.
 
-- **Group key:** derive a deterministic id from the set of selected user ids,
-  order-independent (sort ids, then namespaced UUIDv5, dashes stripped). Same
-  group of people always maps to the same key.
-- **Storage:** persist a `groupKey → [showId]` map (or its inverse) in a
-  writable **app state file**, not `config.json`. App must write to it at
-  runtime. Mount the state path from the host via docker-compose deploy so it
-  survives redeploys. Config stays read-only.
-- **Filtering:** subtract a group's ignored show ids from continue-watching,
-  recommendations, and search results for that group.
-- **UI:** action to ignore a show, and a way to view/unignore the group's
-  ignored shows.
+- **Play button:** rename the card's "Continue" button to "Play".
+- **Viewer pills:** next to Play, render a small icon per viewer in the active
+  group. Overlay a marker on a viewer's icon when that person has watched the
+  episode.
+- **Toggle:** clicking a viewer's icon toggles that episode's watched state for
+  that person in Jellyfin (mark played / unplayed for that user id).
 
 ## Recently shipped
+
+Ignore shows per viewer group (backend + UI in code):
+
+- A viewer group can hide a show from all results (continue-watching,
+  recommendations, search). Ignoring suppresses it everywhere; an unignore
+  action brings it back.
+- **Group key:** deterministic, order-independent id from the set of selected
+  user ids (sort ids, namespaced UUIDv5, dashes stripped) — same people always
+  map to the same key. See [src/server/groupKey.ts](src/server/groupKey.ts).
+- **Storage:** `groupKey → [showId]` persisted in a writable app state file
+  (not `config.json`), mounted from the host so it survives redeploys. See
+  [src/server/appState.ts](src/server/appState.ts).
+- **Filtering + endpoints:** ignored ids subtracted from all three surfaces;
+  `GET/POST/DELETE /api/ignored-shows`. UI has an ignore action and an
+  ignored-shows panel to unignore.
 
 Continue-watching-first home (all phases verified + visually proven):
 
