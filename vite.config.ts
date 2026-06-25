@@ -3,6 +3,13 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
+  // Dep-optimizer cache off the shared node_modules volume. Default is
+  // node_modules/.vite, but that volume is persistent: a SIGKILL mid-optimize
+  // (e.g. `compose down`) leaves a corrupt cache the next `up` inherits (504
+  // Outdated Optimize Dep -> blank SPA). In dev compose this maps to a tmpfs so
+  // the cache is ephemeral and fresh per container start. Does not affect the
+  // production build (outDir stays dist/client).
+  cacheDir: '/tmp/vite',
   server: {
     // host: true binds 0.0.0.0 so the dev-compose proof container can reach it
     host: true,

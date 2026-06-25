@@ -46,6 +46,14 @@ URLs: client `http://localhost:5173`, API `http://localhost:3000`.
 The server exits at startup if Jellyfin is unreachable. `check` and `test` need
 no Jellyfin.
 
+### Vite cache / blank-SPA recovery
+The client's Vite dep-optimizer cache (`cacheDir`) is on an ephemeral tmpfs
+(`/tmp/vite`), not the persistent `node_modules` volume, so a stale/half-written
+`.vite` can't survive a kill and wedge the next boot with 504s. If the client
+ever serves a blank SPA, recover with
+`docker compose -f docker-compose.dev.yml up -d --force-recreate client` (NOT
+`restart`, which races the optimizer).
+
 ### Visual proof
 The Playwright suite entry is `e2e/run.mjs`. It logs in, then runs one module per
 flow under `e2e/flows/`, with shared harness/session/viewer helpers under

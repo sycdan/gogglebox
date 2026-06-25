@@ -44,6 +44,21 @@ services:
       - VITE_API_PROXY=http://server:3000
     ports:
       - "5173:5173"
+    # Vite's dep-optimizer cache (cacheDir=/tmp/vite) lives on an ephemeral
+    # tmpfs, not the persistent node_modules volume. A half-written cache from a
+    # SIGKILL cannot survive a container kill and wedge the next boot.
+    tmpfs:
+      - /tmp/vite
+    # Only healthy once Vite actually serves the app shell. A wedged client
+    # (504 Outdated Optimize Dep / blank SPA) keeps returning non-200 and goes
+    # unhealthy, which gates the proof service below. start_period covers a cold
+    # optimize.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5173/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
       deps:
         condition: service_completed_successfully
@@ -89,6 +104,10 @@ services:
     depends_on:
       deps:
         condition: service_completed_successfully
+      # Don't screenshot a blank/unmounted client: wait for the client to serve
+      # the app shell before the proof runs.
+      client:
+        condition: service_healthy
 
 volumes:
   node_modules:
