@@ -62,69 +62,118 @@ code directly:
 
 See [CLAUDE.md](CLAUDE.md) for the full protocol.
 
-## Docker
+## Deployment
 
-Publish the image to the registry (builds, tags, and pushes in one step):
+Production runs a **single container** built from the root [Dockerfile](Dockerfile):
+a multi-stage build that compiles the client + server, then ships a slim
+`node:22-alpine` runtime. The container listens on port `3000` internally,
+serving both the API and the built client from `dist/client`, and runs as the
+non-root `node` user (**uid 1000**, fixed by the base image). Deploy with
+[deploy/docker-compose.yml](deploy/docker-compose.yml).
+
+### 1. Build and publish the image
+
+[scripts/docker-publish.sh](scripts/docker-publish.sh) builds, tags, and pushes
+in one step. It reads `.env` for defaults, then pushes both `latest` and a
+timestamped `yyyy.m.d.<minute-of-day>` version tag from the same build:
 
 ```bash
 REGISTRY_HOST=registry.example.com:5000 ./scripts/docker-publish.sh
 ```
 
-Each run pushes both `latest` and a timestamped `yyyy.m.d.<minute-of-day>` version
-tag from the same build. Override the image name too:
+Overrides (env vars or `.env` entries):
 
 ```bash
+# Override the image name (default: gogglebox)
 REGISTRY_HOST=registry.example.com:5000 IMAGE_NAME=gogglebox ./scripts/docker-publish.sh
-```
 
-Optional platform override (passed through to build):
-
-```bash
+# Force a build platform (e.g. when building on arm64 for an amd64 host)
 REGISTRY_HOST=registry.example.com:5000 PLATFORM=linux/amd64 ./scripts/docker-publish.sh
 ```
 
-Deploy also requires a `config.json` next to the compose file. It holds the
-household groups (and playback settings) and is bind-mounted read-only into the
-container (`./config.json:/app/config.json:ro`) rather than baked into the image.
-Copy `config.example.json` to `config.json` and fill in real Jellyfin user ids
-(the server fails fast at startup if it is missing, empty, or invalid JSON):
+### 2. Configure the household (`deploy/config.json`)
+
+The compose file bind-mounts `./config.json` (relative to `deploy/`) into the
+container read-only at `/app/config.json` — groups are **configured, not baked**
+into the image. It holds the household groups (Jellyfin user ids) plus playback
+and recommendation settings. The server fails fast at startup if it is missing,
+empty, or invalid JSON.
 
 ```bash
-cp config.example.json config.json
+cp deploy/config.example.json deploy/config.json
+# then edit deploy/config.json: replace jellyfinUserId* with real Jellyfin user ids
 ```
 
-Deploy with Docker Compose. Container vars are interpolated from the env file
-passed via `--env-file` (auto-loads `.env` if the flag is omitted). Copy
-`.env.example` and fill it in:
+### 3. Configure the environment (`.env`)
+
+Container vars are interpolated from the env file passed via `--env-file`. Copy
+the deploy template (`deploy/.env.example`, deploy vars only — the root
+`.env.example` also carries dev-only vars) and fill it in:
 
 ```bash
-docker compose -f docker-compose.deploy.yml --env-file .env up -d
+cp deploy/.env.example deploy/.env
 ```
 
-Deploy with a specific env file:
+**Required** — compose refuses to start if any is unset:
+
+| Var | Purpose |
+| --- | --- |
+| `REGISTRY_HOST` | Registry host the image is pulled from |
+| `GOGGLEBOX_PORT` | Host port to expose (maps to container `3000`) |
+| `JELLYFIN_URL` | Base URL of the Jellyfin server |
+| `JELLYFIN_API_KEY` | Jellyfin API key |
+| `SESSION_SECRET` | Long random string for session cookies |
+
+**Optional**:
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `GOGGLEBOX_VERSION` | `latest` | Image tag to pull — pin to a version tag for reproducible deploys |
+| `GOGGLEBOX_STATE_DIR` | `./data` (under `deploy/`) | Host dir for writable state — see below |
+| `WATCHED_THRESHOLD` | `0.9` | Fraction watched before an item counts as watched |
+| `PORTAL_USERNAME` / `PORTAL_PASSWORD` | — | Shared household login credentials |
+| `PORTAL_AUTO_LOGIN` | `false` | Skip the login screen on a trusted LAN |
+| `JELLYFIN_DEBUG` | `false` | Log outbound Jellyfin requests with timing |
+
+### 4. Deploy
 
 ```bash
-docker compose -f docker-compose.deploy.yml --env-file .env.production up -d
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
 ```
 
-Required vars (compose fails fast if unset): `REGISTRY_HOST` (registry host
-for the image), `GOGGLEBOX_PORT` (host port), `JELLYFIN_URL`,
-`JELLYFIN_API_KEY`, `SESSION_SECRET`.
+`--env-file` is resolved relative to your **current directory**, so the path
+above assumes you run from the repo root; point it at any file you like:
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env.production up -d
+```
+
+The service sets `pull_policy: always` and `restart: unless-stopped`, so each
+`up -d` pulls the current `GOGGLEBOX_VERSION` and the container survives reboots.
+
+**Update**: publish a new image, then re-run the `up -d` command (pin
+`GOGGLEBOX_VERSION` to roll forward/back deterministically).
+**Verify**: `docker compose -f deploy/docker-compose.yml ps` and
+`... logs -f gogglebox`; the app is reachable at `http://<host>:$GOGGLEBOX_PORT`.
+**Stop**: `docker compose -f deploy/docker-compose.yml down`.
 
 ### Writable state directory
 
 The portal writes runtime state (e.g. the per-group list of ignored shows) to
 `/data/state.json` inside the container. That path is bind-mounted from the host
-via `GOGGLEBOX_STATE_DIR` (defaults to `./data`) so it survives redeploys.
-
-The container runs as the non-root `node` user (**uid 1000**, fixed by the
-official `node` base image), so the host state directory must be writable by uid
-1000 — otherwise writes fail with `EACCES` and actions like ignoring a show
-return an error. A freshly created host dir is usually owned by root, so chown it
-once after first deploy:
+via `GOGGLEBOX_STATE_DIR` (default `./data`, relative to `deploy/`) so it
+survives redeploys. Set it to an absolute path for a real deployment:
 
 ```bash
-sudo chown -R 1000:1000 "$GOGGLEBOX_STATE_DIR"   # e.g. /var/lib/gogglebox
+GOGGLEBOX_STATE_DIR=/var/lib/gogglebox
 ```
 
-The container listens on port `3000` internally and serves both API routes and the built client from `dist/client`.
+Because the container runs as uid **1000**, the host state dir must be writable
+by uid 1000 — otherwise writes fail with `EACCES` and actions like ignoring a
+show return an error. A freshly created host dir is usually owned by root, so
+chown it once after first deploy:
+
+```bash
+sudo mkdir -p /var/lib/gogglebox
+sudo chown -R 1000:1000 /var/lib/gogglebox
+```

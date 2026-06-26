@@ -7,12 +7,13 @@
 	},
 	"groups": [
 		{
-			"id": "household",
+			"id": "everyone",
 			"name": "Everyone",
 			"memberIds": [
 				"jellyfinUserId1",
 				"jellyfinUserId2",
-				"jellyfinUserId3"
+				"jellyfinUserId3",
+				"jellyfinUserId4"
 			]
 		},
 		{
@@ -21,6 +22,14 @@
 			"memberIds": [
 				"jellyfinUserId1",
 				"jellyfinUserId2"
+			]
+		},
+		{
+			"id": "kids",
+			"name": "Kids",
+			"memberIds": [
+				"jellyfinUserId3",
+				"jellyfinUserId4"
 			]
 		}
 	]
