@@ -345,3 +345,178 @@ export async function seedRemovableMovie({ url, apiKey }, { excludeMovieIds = []
 
   return { name: movie.name, id: movie.id, userCount: users.length };
 }
+
+// Seed a MULTI-VIEWER, STAGGERED-POSITION movie: the same movie left in-progress
+// for >=3 household viewers at CLEARLY different positions (e.g. ~10% / ~45% /
+// ~80%), NONE watched. This exercises the "movies resume least-watched first"
+// rule (src/server/continueWatching.ts mergeContinueWatching -> preferLeastAdvanced):
+// the single group movie card must resume from the LEAST-advanced viewer (lowest
+// progressPercent), so the card's badge/progress bar reflects the LOWEST %, and
+// sourceViewer is that least-watched viewer — NOT the most-watched.
+//
+//   - Pick a movie (distinct from excludeMovieIds) with a real runtime.
+//   - Reset that movie's played-state for ALL users (idempotent re-runs).
+//   - Assign each household viewer a distinct fraction across a low..high spread
+//     and setPlaybackPosition accordingly. All stay unwatched so the card stays.
+// Returns the per-viewer fractions + the expected (lowest) resume fraction.
+export async function seedMultiViewerMovie({ url, apiKey }, { excludeMovieIds = [] } = {}, log = console.log) {
+  const jf = makeJellyfin(url, apiKey);
+
+  const users = await householdUsers(jf, {}, log);
+  if (users.length < 2) {
+    log(`[proof][seed] multi-viewer-movie: need >=2 household viewers; have ${users.length}. Skipping.`);
+    return null;
+  }
+
+  const exclude = new Set(excludeMovieIds);
+  const movies = await jf.listMovies(40);
+  const movie = movies.find((m) => m.runtimeTicks > 0 && !exclude.has(m.id));
+  if (!movie) {
+    log('[proof][seed] multi-viewer-movie: DATA GAP - no spare movie with runtime to seed.');
+    return null;
+  }
+
+  // Distinct fractions across a clear low..high spread: 10% .. 80% evenly split
+  // over however many viewers we have, so positions are unambiguous on screen.
+  const LOW = 0.1;
+  const HIGH = 0.8;
+  const n = users.length;
+  const fractions = users.map((_, i) => (n === 1 ? LOW : LOW + (HIGH - LOW) * (i / (n - 1))));
+
+  // Reset everyone first so re-runs start clean (no lingering played/position).
+  for (const user of users) {
+    await jf.markUnplayed(user.id, movie.id);
+  }
+
+  const perViewer = [];
+  for (let i = 0; i < users.length; i += 1) {
+    const user = users[i];
+    const frac = fractions[i];
+    const ticks = Math.floor(movie.runtimeTicks * frac);
+    await jf.setPlaybackPosition(user.id, movie.id, ticks);
+    perViewer.push({ userId: user.id, userName: user.name, fraction: frac, percent: Math.round(frac * 100), ticks });
+  }
+
+  // The least-advanced (lowest fraction) viewer = the expected resume point.
+  const least = perViewer.reduce((lo, p) => (p.fraction < lo.fraction ? p : lo), perViewer[0]);
+  const most = perViewer.reduce((hi, p) => (p.fraction > hi.fraction ? p : hi), perViewer[0]);
+
+  log(
+    `[proof][seed] multi-viewer-movie: "${movie.name}" in-progress for ${users.length} viewer(s) at ` +
+    perViewer.map((p) => `${p.userName}:${p.percent}%`).join(', ') +
+    ` -> EXPECT card resumes from LEAST-watched ${least.userName} (${least.percent}%), NOT most-watched ${most.userName} (${most.percent}%).`,
+  );
+
+  return {
+    name: movie.name,
+    id: movie.id,
+    userCount: users.length,
+    perViewer,
+    leastWatched: { userName: least.userName, percent: least.percent, fraction: least.fraction },
+    mostWatched: { userName: most.userName, percent: most.percent, fraction: most.fraction },
+  };
+}
+
+// Seed the CROSS-EPISODE + PARTIAL-PROGRESS show case: one series, the active
+// group's viewers on DIFFERENT episodes each with mid-episode partial progress.
+// This proves SHOWS differ from movies: the group SHOW card anchors on EPISODE
+// ORDER FIRST (the earliest not-all-watched episode), then resumes from the
+// least-advanced viewer AT that anchor — i.e. "don't spoil the furthest-behind".
+//
+// Layout (needs >=3 regular-season episodes + >=3 household viewers):
+//   viewer[0] (e.g. Alice): finished E2, ~10% into E3  -> candidate E3 @10%
+//   viewer[1] (e.g. Bob):   ~20% into E2 (E1 finished) -> candidate E2 @20%
+//   viewer[2] (e.g. Carol): ~2% into E1 (unfinished)   -> candidate E1 @2%
+// Expected: anchor = E1 (Carol hasn't finished it), resume ~2% (Carol), NOT E3.
+//
+// Each viewer: reset whole series, specials played, mark earlier regular eps
+// played up to their episode, set their episode in-progress at the given fraction.
+export async function seedCrossEpisodeShow({ url, apiKey }, { excludeSeriesIds = [] } = {}, log = console.log) {
+  const jf = makeJellyfin(url, apiKey);
+
+  const users = await householdUsers(jf, {}, log);
+  if (users.length < 3) {
+    log(`[proof][seed] cross-episode-show: need >=3 household viewers; have ${users.length}. Skipping.`);
+    return null;
+  }
+
+  const exclude = new Set(excludeSeriesIds);
+  const series = await jf.listSeries(40);
+  let chosen = null;
+  for (const s of series) {
+    if (exclude.has(s.id)) continue;
+    const allEpisodes = await jf.listEpisodes(s.id);
+    const regulars = regularSeasonEpisodes(allEpisodes);
+    if (regulars.length >= 3 && regulars.slice(0, 3).every((e) => e.runtimeTicks > 0)) {
+      chosen = { series: s, allEpisodes, regulars };
+      break;
+    }
+  }
+  if (!chosen) {
+    log('[proof][seed] cross-episode-show: DATA GAP - no spare series with >=3 regular-season episodes (with runtime).');
+    return null;
+  }
+
+  const { allEpisodes, regulars } = chosen;
+  const e1 = regulars[0];
+  const e2 = regulars[1];
+  const e3 = regulars[2];
+
+  // Per-viewer plan: episode index into `regulars` + the partial fraction.
+  // viewer 0 -> E3 @10%, viewer 1 -> E2 @20%, viewer 2 -> E1 @2%.
+  const plan = [
+    { epIdx: 2, frac: 0.10 },
+    { epIdx: 1, frac: 0.20 },
+    { epIdx: 0, frac: 0.02 },
+  ];
+
+  const perViewer = [];
+  for (let v = 0; v < users.length; v += 1) {
+    const user = users[v];
+    // Viewers beyond the planned 3 just sit fully behind on E1 @2% so they never
+    // pull the anchor earlier than E1 (there is nothing earlier) and never ahead.
+    const p = plan[v] ?? { epIdx: 0, frac: 0.02 };
+    const ep = regulars[p.epIdx];
+
+    // Reset whole series for idempotency.
+    for (const e of allEpisodes) await jf.markUnplayed(user.id, e.id);
+    // Specials played so they don't pollute NextUp/resume order.
+    for (const e of allEpisodes) {
+      if (typeof e.seasonNumber === 'number' && e.seasonNumber === 0) await jf.markPlayed(user.id, e.id);
+    }
+    // Every regular episode BEFORE this viewer's current one = finished.
+    for (let i = 0; i < p.epIdx; i += 1) await jf.markPlayed(user.id, regulars[i].id);
+    // This viewer's current episode = in-progress at the planned fraction.
+    const ticks = Math.max(1, Math.floor(ep.runtimeTicks * p.frac));
+    await jf.setPlaybackPosition(user.id, ep.id, ticks);
+
+    perViewer.push({
+      userId: user.id, userName: user.name,
+      code: sxxexx(ep), epIdx: p.epIdx, percent: Math.round(p.frac * 100), id: ep.id,
+    });
+  }
+
+  // Anchor = the earliest episode any viewer has NOT finished. By construction the
+  // furthest-behind viewer (viewer index 2, or any extra viewers) is in-progress on
+  // E1, so the anchor is E1. The least-advanced viewer AT the anchor is whoever is
+  // in-progress on E1 with the lowest fraction.
+  const anchorEp = e1;
+  const atAnchor = perViewer.filter((p) => p.epIdx === 0);
+  const leastAtAnchor = atAnchor.reduce((lo, p) => (p.percent < lo.percent ? p : lo), atAnchor[0]);
+
+  log(
+    `[proof][seed] cross-episode-show: "${anchorEp.seriesName}" viewers at ` +
+    perViewer.map((p) => `${p.userName}:${p.code}@${p.percent}%`).join(', ') +
+    ` -> EXPECT anchor ${sxxexx(anchorEp)} (earliest not-all-watched), resume ~${leastAtAnchor.percent}% ` +
+    `(least-advanced ${leastAtAnchor.userName} on ${sxxexx(anchorEp)}), NOT the furthest-ahead viewer's episode.`,
+  );
+
+  return {
+    seriesName: anchorEp.seriesName,
+    seriesId: chosen.series.id,
+    anchor: { code: sxxexx(anchorEp), id: anchorEp.id, percent: leastAtAnchor.percent, viewerName: leastAtAnchor.userName },
+    episodes: { e1: sxxexx(e1), e2: sxxexx(e2), e3: sxxexx(e3) },
+    perViewer,
+    userIds: users.map((u) => u.id),
+  };
+}

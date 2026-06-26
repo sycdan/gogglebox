@@ -12,8 +12,14 @@ after that is scoped to that group.
 - **Continue watching first.** The home screen leads with in-progress titles —
   movies and shows together — so the group resumes without first choosing a
   library.
+- **Per-viewer watched pills.** Each continue-watching card shows a pill per
+  group member with a check when they've watched the current item; click to
+  toggle that person's watched state.
 - **Recommendations none of you have seen.** Picks are the library minus the
   union of everything anyone in the selected group has already watched.
+- **Hide shows you're done with.** A group can ignore a show to drop it from
+  continue-watching, recommendations, and search everywhere; unignore brings it
+  back.
 - **Find, don't browse.** Rather than rendering the whole library, the selector
   drives a small set of recommendations plus a search box.
 

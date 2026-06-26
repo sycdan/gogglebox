@@ -21,15 +21,20 @@ function episodeOrder(candidate: ContinueWatchingCandidate): number {
   return season * 1_000_000 + episode;
 }
 
-// Used only for the final rail ordering and movie selection (higher = surfaces
-// first / "more in progress"). NOT used to choose a show's displayed episode.
-function displayRank(candidate: ContinueWatchingCandidate): number {
-  if (candidate.type === 'show') {
-    const hasResumeProgress = candidate.playbackPositionTicks > 0 || candidate.progressPercent > 0 ? 1 : 0;
-    return hasResumeProgress * 10_000_000_000 + episodeOrder(candidate) * 10_000 + Math.round(candidate.progressPercent * 1000);
-  }
-
-  return Math.round(candidate.progressPercent * 1_000_000);
+// "Least-advanced viewer wins" comparator: order by (episodeOrder asc,
+// progressPercent asc). Returns the candidate that is LESS far along, i.e. the
+// resume point the group still has the most left to watch from. For a movie,
+// episodeOrder is constant, so this reduces to the LOWEST progressPercent (the
+// least-watched viewer). A movie is the degenerate one-episode case of a show.
+function preferLeastAdvanced(
+  current: ContinueWatchingCandidate,
+  candidate: ContinueWatchingCandidate,
+): ContinueWatchingCandidate {
+  const a = episodeOrder(candidate);
+  const b = episodeOrder(current);
+  if (a < b) return candidate;
+  if (a > b) return current;
+  return candidate.progressPercent < current.progressPercent ? candidate : current;
 }
 
 // Pick which of two candidates for the SAME series becomes the group's displayed
@@ -56,6 +61,15 @@ function preferEarlierShow(
   return candidate.progressPercent > current.progressPercent ? candidate : current;
 }
 
+// The name a card is sorted/displayed by: a show uses its series name, a movie
+// its own name. Used only for the final, stable rail ordering.
+function railSortName(candidate: ContinueWatchingCandidate): string {
+  if (candidate.type === 'show' && candidate.seriesName) {
+    return candidate.seriesName;
+  }
+  return candidate.name;
+}
+
 export function mergeContinueWatching(candidates: ContinueWatchingCandidate[]): ContinueWatchingItem[] {
   const selected = new Map<string, ContinueWatchingCandidate>();
 
@@ -71,14 +85,23 @@ export function mergeContinueWatching(candidates: ContinueWatchingCandidate[]): 
       // Group SHOW anchor: keep the EARLIEST not-all-watched episode (stable
       // across single-viewer watched toggles).
       selected.set(key, preferEarlierShow(current, candidate));
-    } else if (displayRank(candidate) > displayRank(current)) {
-      // Movies: keep the most in-progress instance.
-      selected.set(key, candidate);
+    } else {
+      // Movies (the degenerate one-episode case): resume from the LEAST-advanced
+      // viewer so the group still has the most movie left to watch.
+      selected.set(key, preferLeastAdvanced(current, candidate));
     }
   }
 
+  // Stable rail order: alphabetical by show/movie name (case-insensitive), with a
+  // stable id tie-break so same-named items keep a fixed relative order. This is
+  // deterministic and independent of progress, so toggling a viewer's watched
+  // state (which refetches the rail) never reshuffles the cards.
   return [...selected.values()]
-    .sort((left, right) => displayRank(right) - displayRank(left))
+    .sort((left, right) => {
+      const byName = railSortName(left).localeCompare(railSortName(right), undefined, { sensitivity: 'base' });
+      if (byName !== 0) return byName;
+      return left.id.localeCompare(right.id);
+    })
     .slice(0, 24)
     .map((candidate) => ({
       ...candidate,

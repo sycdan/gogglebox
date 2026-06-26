@@ -211,6 +211,205 @@ test('mergeContinueWatching show anchor is order-independent (no jump from candi
   assert.equal(reverse[0].id, 'episode-ac-s01e03');
 });
 
+test('mergeContinueWatching orders the rail alphabetically by name with a stable id tie-break, deterministically', () => {
+  // Mixed shows + movies whose progress differs; the rail must order purely by
+  // show/movie name (case-insensitive), tie-breaking on id, so repeated merges of
+  // the same state never reshuffle the cards.
+  const base = {
+    overview: '',
+    year: 2020,
+    runtimeMinutes: 100,
+    rating: null,
+    genres: [],
+    officialRating: null,
+    imageUrl: null,
+    backdropUrl: null,
+    playable: true,
+    seasonNumber: null,
+    episodeNumber: null,
+    sourceViewerName: 'V',
+  };
+  const movieZodiac = {
+    ...base,
+    id: 'movie-zodiac',
+    name: 'Zodiac',
+    type: 'movie' as const,
+    playbackPositionTicks: 900_000_000,
+    progressPercent: 0.9, // most-watched -> would sort first under the old rank sort
+    seriesId: null,
+    seriesName: null,
+    sourceViewerId: 'a',
+  };
+  const movieArrival = {
+    ...base,
+    id: 'movie-arrival',
+    name: 'arrival', // lowercase: must still sort case-insensitively before "Brooklyn"
+    type: 'movie' as const,
+    playbackPositionTicks: 100_000_000,
+    progressPercent: 0.1,
+    seriesId: null,
+    seriesName: null,
+    sourceViewerId: 'b',
+  };
+  // Two distinct shows that share a display name -> id tie-break decides order.
+  const showBrooklynTwo = {
+    ...base,
+    id: 'episode-brooklyn-2',
+    name: 'A Later Episode',
+    type: 'show' as const,
+    playbackPositionTicks: 50_000_000,
+    progressPercent: 0.05,
+    seriesId: 'series-brooklyn-b',
+    seriesName: 'Brooklyn',
+    seasonNumber: 1,
+    episodeNumber: 4,
+    sourceViewerId: 'c',
+  };
+  const showBrooklynOne = {
+    ...base,
+    id: 'episode-brooklyn-1',
+    name: 'An Earlier Episode',
+    type: 'show' as const,
+    playbackPositionTicks: 500_000_000,
+    progressPercent: 0.5,
+    seriesId: 'series-brooklyn-a',
+    seriesName: 'Brooklyn',
+    seasonNumber: 1,
+    episodeNumber: 2,
+    sourceViewerId: 'd',
+  };
+
+  const input = [movieZodiac, showBrooklynTwo, movieArrival, showBrooklynOne];
+  const expectedOrder = [
+    'movie-arrival', // "arrival"
+    'episode-brooklyn-1', // "Brooklyn", id tie-break: ...-1 before ...-2
+    'episode-brooklyn-2', // "Brooklyn"
+    'movie-zodiac', // "Zodiac"
+  ];
+
+  const first = mergeContinueWatching(input).map((item) => item.id);
+  assert.deepEqual(first, expectedOrder);
+
+  // Same input (and a shuffled copy) must always yield the identical order.
+  const repeat = mergeContinueWatching(input).map((item) => item.id);
+  const shuffled = mergeContinueWatching([showBrooklynOne, movieArrival, showBrooklynTwo, movieZodiac]).map(
+    (item) => item.id,
+  );
+  assert.deepEqual(repeat, expectedOrder);
+  assert.deepEqual(shuffled, expectedOrder);
+});
+
+test('mergeContinueWatching resumes a shared movie from the LEAST-watched viewer', () => {
+  // Same movie in progress for three viewers at different points. The card must
+  // resume from the LEAST-advanced viewer (lowest progressPercent), so the group
+  // still has the most movie left to watch, and that viewer becomes the source.
+  const base = {
+    name: 'Heat',
+    type: 'movie' as const,
+    overview: '',
+    year: 1995,
+    runtimeMinutes: 170,
+    rating: 8.3,
+    genres: ['Crime'],
+    officialRating: 'R',
+    imageUrl: null,
+    backdropUrl: null,
+    playable: true,
+    seriesId: null,
+    seriesName: null,
+    seasonNumber: null,
+    episodeNumber: null,
+  };
+  const mostWatched = {
+    ...base,
+    id: 'movie-heat',
+    playbackPositionTicks: 900_000_000,
+    progressPercent: 0.9,
+    sourceViewerId: 'a',
+    sourceViewerName: 'A',
+  };
+  const leastWatched = {
+    ...base,
+    id: 'movie-heat',
+    playbackPositionTicks: 120_000_000,
+    progressPercent: 0.12,
+    sourceViewerId: 'b',
+    sourceViewerName: 'B',
+  };
+  const middle = {
+    ...base,
+    id: 'movie-heat',
+    playbackPositionTicks: 500_000_000,
+    progressPercent: 0.5,
+    sourceViewerId: 'c',
+    sourceViewerName: 'C',
+  };
+
+  for (const order of [
+    [mostWatched, leastWatched, middle],
+    [leastWatched, mostWatched, middle],
+    [middle, mostWatched, leastWatched],
+  ]) {
+    const items = mergeContinueWatching(order);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].sourceViewerId, 'b'); // least-watched viewer wins
+    assert.equal(items[0].progressPercent, 0.12); // resume from the lowest progress
+    assert.equal(items[0].playbackPositionTicks, 120_000_000);
+  }
+});
+
+test('mergeContinueWatching show selection is NOT affected by the least-watched movie rule', () => {
+  // Same series, two viewers. The earlier-episode viewer is the MORE-watched one;
+  // the later-episode viewer is the LESS-watched one. The show must still anchor
+  // to the EARLIEST episode (air order), proving the least-progress movie rule
+  // does not bleed into show ordering.
+  const base = {
+    type: 'show' as const,
+    overview: '',
+    year: 2018,
+    runtimeMinutes: 50,
+    rating: null,
+    genres: ['Drama'],
+    officialRating: null,
+    imageUrl: null,
+    backdropUrl: null,
+    playable: true,
+    seriesId: 'series-the-bear',
+    seriesName: 'The Bear',
+  };
+  const earlierHighProgress = {
+    ...base,
+    id: 'episode-bear-s01e02',
+    name: 'Hands',
+    playbackPositionTicks: 900_000_000,
+    progressPercent: 0.9, // more-watched, but earliest episode
+    seasonNumber: 1,
+    episodeNumber: 2,
+    sourceViewerId: 'a',
+    sourceViewerName: 'A',
+  };
+  const laterLowProgress = {
+    ...base,
+    id: 'episode-bear-s02e01',
+    name: 'Beef',
+    playbackPositionTicks: 100_000_000,
+    progressPercent: 0.05, // least-watched, but later episode
+    seasonNumber: 2,
+    episodeNumber: 1,
+    sourceViewerId: 'b',
+    sourceViewerName: 'B',
+  };
+
+  const forward = mergeContinueWatching([earlierHighProgress, laterLowProgress]);
+  const reverse = mergeContinueWatching([laterLowProgress, earlierHighProgress]);
+
+  for (const items of [forward, reverse]) {
+    assert.equal(items.length, 1);
+    assert.equal(items[0].id, 'episode-bear-s01e02'); // earliest episode, NOT least-progress
+    assert.equal(items[0].sourceViewerId, 'a');
+  }
+});
+
 test('getProgressPropagationTargets updates everyone except the source viewer', () => {
   const activeViewerIds = ['n', 'd', 'j'];
   const targets = getProgressPropagationTargets(activeViewerIds, 'n');
