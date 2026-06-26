@@ -27,15 +27,13 @@ produces. You do NOT modify source — hand fixes to `gogglebox-builder`.
   it into `e2e/run.mjs`.
 
 ## Workflow
-1. **Housekeeping:** prune stale run output so `./artifacts/` doesn't grow
-   unbounded, keeping the newest few for an eyeball diff —
-   `ls -dt artifacts/*/ 2>/dev/null | tail -n +4 | xargs -r rm -rf` (keeps newest
-   3). It's gitignored run output, safe to prune. Your run still gets a fresh
-   `<timestamp>/` dir, so "newest dir" in step 4 stays unambiguous.
-2. Ensure the stack is up.
-3. Run the `proof` service (with a flow name when proving a specific feature).
-4. Find the newest `./artifacts/<timestamp>/` dir and **Read** the PNG(s).
-5. Judge proved / partial / not-proved from what the image actually shows.
+1. Ensure the stack is up.
+2. Run the `proof` service (with a flow name when proving a specific feature).
+3. Find the newest `./artifacts/<timestamp>/` dir and **Read** the PNG(s).
+4. Judge proved / partial / not-proved from what the image actually shows.
+
+`run.mjs` auto-prunes `./artifacts/` to the newest few run dirs on startup, so
+old output is cleaned for you — no manual housekeeping needed.
 
 ## Output Format
 - `status`: pass | partial | fail

@@ -21,7 +21,7 @@
 // order listed in `flows` below). Shared helpers live under lib/, flow bodies
 // under flows/.
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import { createHarness } from './lib/harness.mjs';
@@ -52,8 +52,41 @@ const flowName = (process.env.PROOF_FLOW || process.argv[2] || 'app').replace(
   '-',
 );
 
+// Keep only the newest N run dirs in artifacts/ so stale runs don't pile up.
+// Pruning runs before this run's dir is created, so the current run is safe.
+const ARTIFACT_RUNS_TO_KEEP = 3;
+
+const artifactsRoot = path.resolve('artifacts');
+
+// Prune artifacts/ down to the newest ARTIFACT_RUNS_TO_KEEP run dirs. Dir names
+// are sortable ISO timestamps, so a reverse name sort gives newest-first. Only
+// directories are touched; a missing artifacts dir (first run) is a no-op.
+async function pruneArtifacts() {
+  let entries;
+  try {
+    entries = await readdir(artifactsRoot, { withFileTypes: true });
+  } catch {
+    return; // no artifacts dir yet, or unreadable — nothing to prune.
+  }
+  const runDirs = entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort()
+    .reverse();
+  for (const name of runDirs.slice(ARTIFACT_RUNS_TO_KEEP)) {
+    try {
+      await rm(path.join(artifactsRoot, name), { recursive: true, force: true });
+      console.log(`[proof] pruned old artifact dir: ${name}`);
+    } catch {
+      // ignore — a busy/locked dir shouldn't fail the run.
+    }
+  }
+}
+
+await pruneArtifacts();
+
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const outDir = path.resolve('artifacts', stamp);
+const outDir = path.join(artifactsRoot, stamp);
 
 const ctx = createHarness(outDir);
 ctx.flowName = flowName;
