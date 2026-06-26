@@ -133,6 +133,7 @@ export function App() {
   const [searchLoading, setSearchLoading] = useState(false);
   const searchRequestIdRef = useRef(0);
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
+  const continueRequestIdRef = useRef(0);
   const [recommendations, setRecommendations] = useState<LibraryItem[]>([]);
   const [noMorePicks, setNoMorePicks] = useState(false);
   const [picksLoading, setPicksLoading] = useState(false);
@@ -230,10 +231,15 @@ export function App() {
   }
 
   async function loadContinueWatching(activeSession: SessionResponse) {
+    // Sequence concurrent loads: a later request always wins, so a stale
+    // refetch (e.g. from rapid pill toggles) can never overwrite fresher data.
+    const requestId = (continueRequestIdRef.current += 1);
     if (activeSession.activeViewerIds.length > 0) {
       const continueResponse = await apiRequest<{ items: ContinueWatchingItem[] }>('/api/continue-watching');
+      if (requestId !== continueRequestIdRef.current) return;
       setContinueWatching(continueResponse.items);
     } else {
+      if (requestId !== continueRequestIdRef.current) return;
       setContinueWatching([]);
     }
   }
@@ -519,6 +525,14 @@ export function App() {
         method: 'POST',
         body: JSON.stringify({ viewerId: viewer.viewerId, watched: nextWatched }),
       });
+      // The server re-runs resolveWatchedCards on /api/continue-watching, so a
+      // refetch is what makes the card advance (show -> next episode) or drop
+      // (movie / last episode) live, without a reload. The optimistic flip above
+      // keeps the pill snappy; this refetch is the source of truth. loadContinueWatching
+      // sequences requests so rapid toggles resolve to the latest result.
+      if (session) {
+        await loadContinueWatching(session);
+      }
     } catch (nextError) {
       applyWatched(viewer.watched);
       setError(nextError instanceof Error ? nextError.message : 'Could not update watch state');

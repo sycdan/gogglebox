@@ -468,6 +468,63 @@ test('listShowContinueWatching combines Resume and NextUp and prefers resume for
   }
 });
 
+function episodeListResponse() {
+  return new Response(
+    JSON.stringify({
+      Items: [
+        { Id: 'ep-s1e1', Name: 'Pilot', Type: 'Episode', SeriesId: 'series1', SeriesName: 'Show', ParentIndexNumber: 1, IndexNumber: 1 },
+        { Id: 'ep-s1e2', Name: 'Second', Type: 'Episode', SeriesId: 'series1', SeriesName: 'Show', ParentIndexNumber: 1, IndexNumber: 2 },
+        { Id: 'ep-s2e1', Name: 'Premiere', Type: 'Episode', SeriesId: 'series1', SeriesName: 'Show', ParentIndexNumber: 2, IndexNumber: 1 },
+      ],
+    }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  );
+}
+
+test('getNextEpisode returns the following episode in air order, crossing seasons', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => episodeListResponse()) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+
+    const midSeason = await client.getNextEpisode('series1', 1, 1);
+    assert.equal(midSeason?.id, 'ep-s1e2');
+
+    // End of a season rolls into the next season's premiere.
+    const crossSeason = await client.getNextEpisode('series1', 1, 2);
+    assert.equal(crossSeason?.id, 'ep-s2e1');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getNextEpisode returns null for the last episode of a series', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => episodeListResponse()) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+    const next = await client.getNextEpisode('series1', 2, 1);
+    assert.equal(next, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getNextEpisode returns null when the current episode is not found', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => episodeListResponse()) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+    const next = await client.getNextEpisode('series1', 9, 9);
+    assert.equal(next, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('fetchUsers maps jellyfin users to FamilyMember list and builds avatar URLs', async () => {
   const originalFetch = globalThis.fetch;
 

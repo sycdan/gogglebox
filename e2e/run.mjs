@@ -32,10 +32,11 @@ import * as recommendations from './flows/recommendations.mjs';
 import * as ignoreShows from './flows/ignore-shows.mjs';
 import * as search from './flows/search.mjs';
 import * as viewerWatched from './flows/viewer-watched.mjs';
+import * as markAllWatched from './flows/mark-all-watched.mjs';
 
 // Flow dispatch order — preserved from the original single-file script. Each
 // flow whose `match` matches the flowName runs; multiple may fire for one name.
-const flows = [playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched];
+const flows = [playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched];
 
 const url = process.env.PROOF_URL ?? 'http://client:5173';
 const username = process.env.PORTAL_USERNAME ?? '';

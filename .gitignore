@@ -9,6 +9,13 @@ config.json
 !config.example.json
 !package-lock.json
 
+# Sandbox Jellyfin: generated artifacts stay out of git (regenerate on demand).
+# The generator/provisioner/reset scripts + .nfo templates ARE committed; the
+# media + Jellyfin config live in named volumes, not the tree.
+.env.sandbox
+config.sandbox.json
+tools/sandbox/media/
+
 # Stray file created when a command redirects to `nul` (Windows null-device
 # name) inside the POSIX Bash tool, where it's a literal file not /dev/null.
 nul

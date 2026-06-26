@@ -58,6 +58,10 @@ export interface JellyfinContinueWatchingItem extends Omit<ContinueWatchingItem,
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
 let jellyfinRequestSequence = 0;
 
+function sxxexxOf(season: number | null, episode: number | null): string {
+  return `S${String(season ?? 0).padStart(2, '0')}E${String(episode ?? 0).padStart(2, '0')}`;
+}
+
 function toRuntimeMinutes(runTimeTicks?: number): number | null {
   if (!runTimeTicks) {
     return null;
@@ -294,6 +298,84 @@ export class JellyfinClient {
 
     const data = await this.request<JellyfinListResponse<JellyfinItem>>('/Items', query);
     return data.Items.map((item) => this.toEpisodeItem(item));
+  }
+
+  // The next episode after a given season/episode in a series' airing order, or
+  // null when the given episode is the last one (or can't be located). Reuses
+  // listEpisodes, which is already sorted ascending by air order, so this is a
+  // deterministic "what comes next" lookup independent of any user's played
+  // state. Specials/out-of-band episodes are positioned by that same ordering.
+  async getNextEpisode(
+    seriesId: string,
+    seasonNumber: number | null,
+    episodeNumber: number | null,
+  ): Promise<EpisodeItem | null> {
+    if (!seriesId) {
+      return null;
+    }
+
+    const episodes = await this.listEpisodes(seriesId);
+    const currentIndex = episodes.findIndex(
+      (episode) => episode.seasonNumber === seasonNumber && episode.episodeNumber === episodeNumber,
+    );
+
+    if (currentIndex < 0 || currentIndex + 1 >= episodes.length) {
+      return null;
+    }
+
+    return episodes[currentIndex + 1];
+  }
+
+  // A series' episodes in air order WITH a single user's played state, used to
+  // find that user's "next unwatched episode" (the first air-order episode they
+  // have not played). Fetched as the user (/Users/{id}/Items) so UserData.Played
+  // reflects that viewer. Specials (Season 0) are excluded so the anchor lives in
+  // the regular-season run that the card's SxxExx reflects.
+  async listSeriesEpisodesPlayedState(
+    userId: string,
+    seriesId: string,
+  ): Promise<{ episode: EpisodeItem; played: boolean }[]> {
+    const query = new URLSearchParams({
+      Recursive: 'true',
+      ParentId: seriesId,
+      // Sort by SEASON then EPISODE number (not PremiereDate) so the anchor walk
+      // uses the SAME deterministic order the card's SxxExx reflects. Premiere-
+      // date ordering can diverge from season/episode order (production vs air
+      // order), which would mis-map a viewer's played episodes to the wrong index
+      // and pick the wrong anchor.
+      SortBy: 'ParentIndexNumber,IndexNumber',
+      SortOrder: 'Ascending',
+      IncludeItemTypes: 'Episode',
+      // Cover even very long series in one page so index alignment across viewers
+      // is exact (a truncated list would shift the anchor walk).
+      Limit: '1000',
+      EnableUserData: 'true',
+      Fields: 'Overview,RunTimeTicks,ImageTags,SeriesId,SeriesName,ParentIndexNumber,IndexNumber,UserData',
+    });
+
+    const data = await this.request<JellyfinListResponse<JellyfinItem>>(`/Users/${userId}/Items`, query);
+    const result = data.Items
+      // Exclude Season 0 specials so the anchor stays in the regular-season run
+      // (specials have no SxxExx with S>=1 and would mis-anchor the card).
+      .filter((item) => typeof item.ParentIndexNumber === 'number' && item.ParentIndexNumber >= 1)
+      // Defensive: enforce season/episode order client-side too, so the walk is
+      // air-order even if the server's sort honoured a different field.
+      .sort((a, b) =>
+        ((a.ParentIndexNumber ?? 0) - (b.ParentIndexNumber ?? 0))
+        || ((a.IndexNumber ?? 0) - (b.IndexNumber ?? 0)))
+      .map((item) => ({
+        episode: this.toEpisodeItem(item),
+        played: Boolean(item.UserData?.Played),
+      }));
+
+    if (jellyfinDebugEnabled) {
+      const compact = result
+        .map((r) => `${sxxexxOf(r.episode.seasonNumber, r.episode.episodeNumber)}:${r.played ? 'W' : '.'}`)
+        .join(' ');
+      console.log(`[anchor] playedState user=${userId} series=${seriesId} count=${result.length} [${compact}]`);
+    }
+
+    return result;
   }
 
   async listContinueWatching(userId: string, kind: LibraryKind): Promise<JellyfinContinueWatchingItem[]> {

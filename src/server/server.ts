@@ -6,7 +6,12 @@ import session from 'express-session';
 
 import { AppState } from './appState';
 import { loadConfig } from './config';
-import { ContinueWatchingCandidate, getProgressPropagationTargets, mergeContinueWatching } from './continueWatching';
+import { anchorShowCards } from './anchorShowCards';
+import {
+  ContinueWatchingCandidate,
+  getProgressPropagationTargets,
+  mergeContinueWatching,
+} from './continueWatching';
 import { deriveGroupKey } from './groupKey';
 import { JellyfinClient } from './jellyfin';
 import { ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind, ViewerWatchedState } from './types';
@@ -157,6 +162,87 @@ async function withViewerWatchedState(
       return { ...item, viewerWatched };
     }),
   );
+}
+
+// True only when every active viewer has played the card's current item.
+function allViewersWatched(item: ContinueWatchingItem): boolean {
+  const viewerWatched = item.viewerWatched ?? [];
+  return viewerWatched.length > 0 && viewerWatched.every((viewer) => viewer.watched);
+}
+
+// Read every active viewer's played state for a single item id in one pass.
+async function viewerWatchedFor(itemId: string, viewers: FamilyMember[]): Promise<ViewerWatchedState[]> {
+  return Promise.all(
+    viewers.map(async (viewer) => ({
+      viewerId: viewer.id,
+      viewerName: viewer.name,
+      avatarUrl: viewer.avatarUrl ?? null,
+      watched: await jellyfin.getItemPlayedState(viewer.jellyfinUserId, itemId),
+    })),
+  );
+}
+
+// Resolve a single fully-watched card. Movies (or shows with no next episode)
+// drop out entirely. Shows advance to the next episode; if that episode is also
+// already watched by everyone, keep advancing until we reach one someone still
+// needs to watch (which becomes the new card) or run out of episodes (drop).
+async function advanceWatchedCard(
+  item: ContinueWatchingItem,
+  viewers: FamilyMember[],
+): Promise<ContinueWatchingItem | null> {
+  if (item.type !== 'show' || !item.seriesId) {
+    return null;
+  }
+
+  let seasonNumber = item.seasonNumber;
+  let episodeNumber = item.episodeNumber;
+
+  // Bounded by the episode count of the series (getNextEpisode returns null at
+  // the end), so this loop always terminates.
+  for (;;) {
+    const next = await jellyfin.getNextEpisode(item.seriesId, seasonNumber, episodeNumber);
+    if (!next) {
+      return null;
+    }
+
+    const viewerWatched = await viewerWatchedFor(next.id, viewers);
+    const card: ContinueWatchingItem = {
+      ...item,
+      id: next.id,
+      name: next.name,
+      overview: next.overview,
+      runtimeMinutes: next.runtimeMinutes,
+      imageUrl: next.imageUrl,
+      seriesId: next.seriesId || item.seriesId,
+      seriesName: next.seriesName || item.seriesName,
+      seasonNumber: next.seasonNumber,
+      episodeNumber: next.episodeNumber,
+      playbackPositionTicks: 0,
+      progressPercent: 0,
+      viewerWatched,
+    };
+
+    if (!allViewersWatched(card)) {
+      return card;
+    }
+
+    seasonNumber = next.seasonNumber;
+    episodeNumber = next.episodeNumber;
+  }
+}
+
+// Apply the fully-watched policy to the card list: cards everyone has watched
+// either advance to the next unwatched episode (shows) or disappear (movies and
+// end-of-series shows). Partially-watched cards pass through unchanged.
+async function resolveWatchedCards(
+  items: ContinueWatchingItem[],
+  viewers: FamilyMember[],
+): Promise<ContinueWatchingItem[]> {
+  const resolved = await Promise.all(
+    items.map(async (item) => (allViewersWatched(item) ? advanceWatchedCard(item, viewers) : item)),
+  );
+
+  return resolved.filter((item): item is ContinueWatchingItem => item !== null);
 }
 
 app.disable('x-powered-by');
@@ -320,7 +406,20 @@ app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, r
     const visible = (await getContinueWatchingItems(viewers)).filter(
       (item) => !ignoredShows.has(ignorableId(item)),
     );
-    const items = await withViewerWatchedState(visible, viewers);
+    if (jellyfinDebugEnabled) {
+      for (const item of visible) {
+        console.log(
+          `[anchor] merged card type=${item.type} id=${item.id} name=${JSON.stringify(item.name)} ` +
+          `seriesId=${JSON.stringify(item.seriesId)} season=${item.seasonNumber} episode=${item.episodeNumber} ` +
+          `progress=${item.progressPercent} sourceViewer=${item.sourceViewerName}`,
+        );
+      }
+    }
+    // Re-anchor SHOW cards to the group's stable earliest-not-all-watched episode
+    // BEFORE computing pills, so pills reflect the displayed (anchor) episode.
+    const anchored = await anchorShowCards(jellyfin, visible, viewers);
+    const withWatched = await withViewerWatchedState(anchored, viewers);
+    const items = await resolveWatchedCards(withWatched, viewers);
     res.json({ items });
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Continue watching lookup failed' });

@@ -2,6 +2,22 @@
 
 ## Backlog
 
+### Stabilize continue-watching card order
+
+The SHOW (and overall) card ordering in the continue-watching rail can **vary
+between loads/refetches** — cards visibly reshuffle, which is jarring. Because
+every viewer-watched toggle now refetches the rail
+([src/client/App.tsx](src/client/App.tsx) `loadContinueWatching`), an unstable
+sort makes cards jump position on each interaction, not just on navigation.
+
+- Give the rail a **deterministic, stable sort** so the same state always yields
+  the same order and cards don't move under the user mid-session.
+- Decide the intended ordering key (e.g. most-recently-played first) and make it
+  total/tie-broken (fall back to a stable id) so equal-rank cards keep a fixed
+  relative order across refetches.
+- Verify on the sandbox: refetch the rail repeatedly with unchanged state and
+  assert identical card order.
+
 ### Movies resume least-watched first
 
 When several viewers in a group have the same movie in progress at different

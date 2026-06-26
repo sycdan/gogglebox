@@ -1,7 +1,81 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getProgressPropagationTargets, mergeContinueWatching } from './continueWatching';
+import { getProgressPropagationTargets, mergeContinueWatching, pickGroupAnchorIndex } from './continueWatching';
+
+// Build one viewer's per-episode played state: episodes 0..n-1, played === true
+// for index < watchedThrough (i.e. the viewer has finished that many episodes and
+// is currently on episode `watchedThrough`).
+function viewerPlayedThrough(episodeCount: number, watchedThrough: number) {
+  return Array.from({ length: episodeCount }, (_, index) => ({
+    id: `ep-${index}`,
+    played: index < watchedThrough,
+  }));
+}
+
+test('pickGroupAnchorIndex anchors to earliest episode not all active viewers watched (real staggered case)', () => {
+  // 7-episode series. Three ACTIVE viewers have FINISHED different numbers of
+  // episodes and are now on later ones: Alice finished 1 (on ep1), Bob finished
+  // 3 (on ep3), Carol finished 5 (on ep5). The earliest episode someone still
+  // hasn't watched is ep1 (Alice's) -> anchor index 1, NOT ep3 or ep5.
+  const perViewer = [
+    viewerPlayedThrough(7, 1), // Alice on ep1
+    viewerPlayedThrough(7, 3), // Bob on ep3
+    viewerPlayedThrough(7, 5), // Carol on ep5
+  ];
+  assert.equal(pickGroupAnchorIndex(perViewer), 1);
+});
+
+test('pickGroupAnchorIndex: marking the lagging viewer watched on the anchor keeps it stable until all pass it', () => {
+  // Anchor is ep1 (Alice lagging). Alice watches ep1 -> she is now on ep2. The
+  // anchor must move only to the next earliest-not-all-watched, which is ep2
+  // (still Alice; Bob/Carol already past it). It does NOT jump to ep3/ep5.
+  const after = [
+    viewerPlayedThrough(7, 2), // Alice now finished ep1, on ep2
+    viewerPlayedThrough(7, 3), // Bob on ep3
+    viewerPlayedThrough(7, 5), // Carol on ep5
+  ];
+  assert.equal(pickGroupAnchorIndex(after), 2);
+});
+
+test('pickGroupAnchorIndex is stable when a viewer AHEAD of the anchor toggles', () => {
+  // Anchor is ep1 (Alice). Carol (ahead, on ep5) un-watches ep4 -> his next
+  // unwatched moves to ep4, but the GROUP anchor is still ep1 because Alice still
+  // hasn't watched it. Toggling an ahead viewer must NOT move the displayed
+  // episode.
+  const base = pickGroupAnchorIndex([
+    viewerPlayedThrough(7, 1),
+    viewerPlayedThrough(7, 3),
+    viewerPlayedThrough(7, 5),
+  ]);
+  const carol = viewerPlayedThrough(7, 5);
+  carol[4].played = false; // Carol un-watches ep4 (he is ahead of the ep1 anchor)
+  const afterToggle = pickGroupAnchorIndex([
+    viewerPlayedThrough(7, 1),
+    viewerPlayedThrough(7, 3),
+    carol,
+  ]);
+  assert.equal(base, 1);
+  assert.equal(afterToggle, 1);
+});
+
+test('pickGroupAnchorIndex returns -1 when every active viewer has watched every episode', () => {
+  const perViewer = [
+    viewerPlayedThrough(5, 5),
+    viewerPlayedThrough(5, 5),
+    viewerPlayedThrough(5, 5),
+  ];
+  assert.equal(pickGroupAnchorIndex(perViewer), -1);
+});
+
+test('pickGroupAnchorIndex anchors at index 0 when one viewer has watched nothing', () => {
+  const perViewer = [
+    viewerPlayedThrough(5, 0), // a brand-new viewer
+    viewerPlayedThrough(5, 4),
+    viewerPlayedThrough(5, 5),
+  ];
+  assert.equal(pickGroupAnchorIndex(perViewer), 0);
+});
 
 test('mergeContinueWatching keeps a show resume item when only one viewer has progress', () => {
   const items = mergeContinueWatching([
@@ -34,7 +108,10 @@ test('mergeContinueWatching keeps a show resume item when only one viewer has pr
   assert.equal(items[0].sourceViewerId, 'n');
 });
 
-test('mergeContinueWatching prefers later show progress for the same series', () => {
+test('mergeContinueWatching anchors a show to the EARLIEST not-all-watched episode across viewers', () => {
+  // Two viewers at different points in the same series. The group card must
+  // anchor to the EARLIEST episode (the one someone still needs), NOT the
+  // furthest-along viewer, so the displayed episode is a stable group anchor.
   const items = mergeContinueWatching([
     {
       id: 'episode-schitt-s02e06',
@@ -83,8 +160,55 @@ test('mergeContinueWatching prefers later show progress for the same series', ()
   ]);
 
   assert.equal(items.length, 1);
-  assert.equal(items[0].id, 'episode-schitt-s03e01');
-  assert.equal(items[0].sourceViewerId, 'n');
+  assert.equal(items[0].id, 'episode-schitt-s02e06');
+  assert.equal(items[0].sourceViewerId, 'd');
+  assert.equal(items[0].seasonNumber, 2);
+  assert.equal(items[0].episodeNumber, 6);
+});
+
+test('mergeContinueWatching show anchor is order-independent (no jump from candidate ordering)', () => {
+  const earlier = {
+    id: 'episode-ac-s01e03',
+    name: 'In a Lonely Place',
+    type: 'show' as const,
+    overview: '',
+    year: 2018,
+    runtimeMinutes: 50,
+    rating: null,
+    genres: ['Sci-Fi'],
+    officialRating: null,
+    imageUrl: null,
+    backdropUrl: null,
+    playable: true,
+    playbackPositionTicks: 300_000_000,
+    progressPercent: 0.2,
+    seriesId: 'series-altered-carbon',
+    seriesName: 'Altered Carbon',
+    seasonNumber: 1,
+    episodeNumber: 3,
+    sourceViewerId: 'a',
+    sourceViewerName: 'A',
+  };
+  const later = {
+    ...earlier,
+    id: 'episode-ac-s01e05',
+    name: 'The Wrong Man',
+    playbackPositionTicks: 100_000_000,
+    progressPercent: 0.1,
+    seasonNumber: 1,
+    episodeNumber: 5,
+    sourceViewerId: 'b',
+    sourceViewerName: 'B',
+  };
+
+  const forward = mergeContinueWatching([earlier, later]);
+  const reverse = mergeContinueWatching([later, earlier]);
+
+  assert.equal(forward.length, 1);
+  assert.equal(reverse.length, 1);
+  // The earliest episode wins regardless of input order.
+  assert.equal(forward[0].id, 'episode-ac-s01e03');
+  assert.equal(reverse[0].id, 'episode-ac-s01e03');
 });
 
 test('getProgressPropagationTargets updates everyone except the source viewer', () => {
