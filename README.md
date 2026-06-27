@@ -1,5 +1,7 @@
 # Gogglebox
 
+_Couch-coop streaming._
+
 Gogglebox is a LAN-first Jellyfin frontend for a household that watches together.
 One shared login, then pick **who's watching** (one or more people); everything
 after that is scoped to that group.
@@ -237,3 +239,7 @@ chown it once after first deploy:
 sudo mkdir -p /var/lib/gogglebox
 sudo chown -R 1000:1000 /var/lib/gogglebox
 ```
+
+---
+
+In loving memory of [Oggie](mascot.jpg).
