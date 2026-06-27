@@ -4,9 +4,10 @@ A deterministic, **offline** Jellyfin for testing Gogglebox's continue-watching
 features against a **real** Jellyfin with controlled, repeatable data — ending the
 "unit tests pass but real behavior fails" cycle.
 
-It is **additive and opt-in**: everything lives behind the `sandbox` compose
-profile. Normal flows (`server`, `client`, `check`, `test`, `proof`) are
-unaffected unless you explicitly point them at the sandbox.
+It is **additive and opt-in**: everything lives in the `docker-compose.sbx.yml`
+overlay, driven by `./scripts/sbx.sh` (which layers it on the base file). The base
+stack (`docker compose …` against your `.env`) is unaffected unless you use the
+overlay.
 
 The model: an **immutable** library + users + API key persist in named volumes;
 only the **mutable** per-user played-state is reset between tests.
@@ -17,28 +18,31 @@ only the **mutable** per-user played-state is reset between tests.
 | --- | --- |
 | `fixtures.mjs` — the library/users spec | `tools/sandbox/media/` and the `sandbox_media` volume (tiny .mkv stubs + .nfo) |
 | `generate-fixtures.mjs`, `provision.mjs`, `reset.mjs` | `sandbox_config` / `sandbox_cache` volumes (Jellyfin state) |
-| `Dockerfile` (Node + ffmpeg tooling image) | `.env.sandbox` (minted API key + URL) |
-| this `README.md` | `config.sandbox.json` (groups with the minted user GUIDs) |
+| `Dockerfile` (Node + ffmpeg tooling image) | `.env.sbx` (overrides-only: minted API key + URL + admin creds) |
+| this `README.md` | `config.sbx.json` (groups with the minted user GUIDs) |
 
 ## Bring it up (zero manual steps)
 
 ```bash
 # 1. Boot the sandbox Jellyfin (official image, internal hostname jellyfin-sandbox:8096)
-docker compose -f docker-compose.dev.yml --profile sandbox up -d jellyfin-sandbox
+./scripts/sbx.sh up -d jellyfin-sandbox
 
 # 2. Generate the tiny media library (ffmpeg stubs + .nfo) into the sandbox_media volume
-docker compose -f docker-compose.dev.yml --profile sandbox run --rm sandbox-generate
+./scripts/sbx.sh run --rm sandbox-generate
 
 # 3. Provision: run the first-run wizard, create users, add libraries (online
 #    metadata DISABLED), scan + wait, mint a stable API key, emit env + config
-docker compose -f docker-compose.dev.yml --profile sandbox run --rm sandbox-provision
+./scripts/sbx.sh run --rm sandbox-provision
 ```
 
 After step 3 you have, at the project root:
 
-- `.env.sandbox` — `JELLYFIN_URL=http://jellyfin-sandbox:8096` + the minted
-  `JELLYFIN_API_KEY` + admin portal creds.
-- `config.sandbox.json` — `groups` whose `memberIds` are the **actual GUIDs** of
+- `.env.sbx` — the **overrides-only** env file layered on top of the shared
+  `.env` (later file wins). It carries only the four per-env override keys:
+  `JELLYFIN_URL=http://jellyfin-sandbox:8096`, the minted `JELLYFIN_API_KEY`, and
+  the admin `PORTAL_USERNAME`/`PORTAL_PASSWORD`. Shared keys (e.g.
+  `PORTAL_AUTO_LOGIN`) stay in `.env`.
+- `config.sbx.json` — `groups` whose `memberIds` are the **actual GUIDs** of
   the provisioned users (Alice/Bob/Carol/Dave), so the server's `fetchUsers` /
   `activeViewersForSession` see exactly this "Everyone" group.
 
@@ -48,50 +52,51 @@ API key.
 
 ## Point the server / proof at the sandbox (one command)
 
-Dedicated **`*-sandbox`** services bake in everything that previously had to be
-wired by hand (the `.env.sandbox` overrides, the `config.sandbox.json` mount over
-`/app/config.json`, and the `server`/`client` network aliases). Use them via the
-`sandbox` profile — the real-Jellyfin path (plain `server`/`client`/`proof`,
-`.env` + `config.json`) is untouched.
+The `docker-compose.sbx.yml` overlay **re-points the base `server`/`proof`
+services** at the sandbox, baking in everything that previously had to be wired by
+hand (the `.env.sbx` overrides + the `config.sbx.json` mount over
+`/app/config.json`). Because it overrides the same service names, the client's
+`http://server:3000` proxy and the proof's `http://client:5173` already resolve —
+no network aliases needed. Drive it all with `./scripts/sbx.sh`; the base stack
+(`docker compose …` with `.env` + `config.json`) is untouched.
 
 ```bash
 # 0. (once) sandbox Jellyfin must be up + provisioned (see "Bring it up" above).
 
 # 1. Reset every user to a clean played-state slate.
-docker compose -f docker-compose.dev.yml --profile sandbox run --rm sandbox-reset
+./scripts/sbx.sh run --rm sandbox-reset
 
 # 2. Bring up the sandbox-pointed server + client. (Use up -d, NOT `run`, so the
-#    `server`/`client` network aliases exist for the proxy + proof.)
-docker compose -f docker-compose.dev.yml --profile sandbox up -d server-sandbox client-sandbox
+#    services are reachable by name for the proxy + proof.)
+./scripts/sbx.sh up -d server client
 
 # 3. Run a flow against the sandbox (writes screenshots to ./artifacts):
-PROOF_FLOW=mark-all-watched \
-  docker compose -f docker-compose.dev.yml --profile sandbox run --rm proof-sandbox
+PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
 
 # 4. Tear down when done.
-docker compose -f docker-compose.dev.yml --profile sandbox down
+./scripts/sbx.sh down
 ```
 
-What the `*-sandbox` services bake in (so you never hand-hack again):
+What the overlay bakes into `server`/`proof` (so you never hand-hack again):
 
-- **`server-sandbox`**: `env_file: .env.sandbox` (sandbox `JELLYFIN_URL`/
-  `JELLYFIN_API_KEY` override the live `.env`) **and** a compose-managed mount of
-  `./config.sandbox.json` → `/app/config.json:ro`. The mount target is an
+- **`server`**: `env_file: [.env, .env.sbx]` (the ordered list layers the sandbox
+  `JELLYFIN_URL`/`JELLYFIN_API_KEY` + creds over the shared `.env`; later wins)
+  **and** a compose-managed mount of
+  `./config.sbx.json` → `/app/config.json:ro`. The mount target is an
   absolute **in-container** path, so Git Bash never path-mangles it (a mangled
   target silently leaves the live `config.json` in place → `viewers: []` /
-  "Unknown viewer"). It also gets the **`server`** network alias.
-- **`client-sandbox`**: proxies `/api` to `server-sandbox` and gets the
-  **`client`** alias, so `http://server:3000` / `http://client:5173` resolve with
-  no manual `docker network connect`.
-- **`proof-sandbox`**: `env_file: .env.sandbox` (so seeders get the sandbox
-  Jellyfin creds) and the same `config.sandbox.json` mount, so the flow reads the
+  "Unknown viewer"). It also depends on `jellyfin-sandbox`.
+- **`client`**: unchanged from base — its `http://server:3000` proxy now resolves
+  to the sandbox-pointed `server` because the overlay overrides that same service.
+- **`proof`**: `env_file: [.env, .env.sbx]` (so seeders get the sandbox Jellyfin
+  creds layered over the shared `.env`) and the same `config.sbx.json` mount, so the flow reads the
   **household group** and scopes seeders to Alice/Bob/Carol/Dave only — not the
   `gogglebox-admin` user, whose stray played-state would desync the rail.
 
-> Gotcha: if a `*-sandbox` container ever comes up with **no network** (can happen
-> if a prior start aborted on a port conflict — symptom: server logs
+> Gotcha: if a container ever comes up with **no network** (can happen if a prior
+> start aborted on a port conflict — symptom: server logs
 > `Failed to load viewers from Jellyfin: fetch failed`), recreate it:
-> `docker compose -f docker-compose.dev.yml --profile sandbox up -d --force-recreate server-sandbox`.
+> `./scripts/sbx.sh up -d --force-recreate server`.
 
 ## Deterministic reset (between flows)
 
@@ -100,7 +105,7 @@ clean played-state slate — clears every user's `PlayedItems` and zeroes every
 Movie/Episode `PlaybackPositionTicks` — fast, no rescan:
 
 ```bash
-docker compose -f docker-compose.dev.yml --profile sandbox run --rm sandbox-reset
+./scripts/sbx.sh run --rm sandbox-reset
 ```
 
 In e2e code the same logic is on the shared client
@@ -185,7 +190,7 @@ Then:
 - API key: list `GET /Auth/Keys`; reuse the `GOGGLEBOX_SANDBOX` key if present,
   else `POST /Auth/Keys?app=GOGGLEBOX_SANDBOX` and re-read to capture the token.
   (Jellyfin mints the token server-side, so the **value** can differ across a
-  full volume wipe; it is emitted to `.env.sandbox` for the harness to read. As
+  full volume wipe; it is emitted to `.env.sbx` for the harness to read. As
   long as the `sandbox_config` volume persists, the same key is reused.)
 
 Auth header on write calls is

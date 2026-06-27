@@ -8,10 +8,16 @@ allowed to edit application code. All execution happens in the dev Docker stack 
 never run `npm`/`node`/`tsc` on the host.
 
 ## Dev commands (run via the Bash tool, Git Bash)
-- Typecheck: `docker compose -f docker-compose.dev.yml run --rm check`
-- Unit tests: `docker compose -f docker-compose.dev.yml run --rm test`
-- Stack up (manual look): `docker compose -f docker-compose.dev.yml up -d server client`
-- Logs: `docker compose -f docker-compose.dev.yml logs --tail=50 server`
+- Typecheck: `docker compose run --rm check`
+- Unit tests: `docker compose run --rm test`
+- Stack up (manual look): `./scripts/sbx.sh up -d server client` (seeded sandbox)
+  or `./scripts/uat.sh up -d server client` (real Jellyfin)
+- Logs: `./scripts/sbx.sh logs --tail=50 server`
+
+(`docker-compose.yml` is the compose default — no `-f` needed — but the bare base
+only does check/test; it ships no Jellyfin + no config. Running the app needs a
+run stack: `./scripts/sbx.sh` (seeded) or `./scripts/uat.sh` (real JF), which
+mount their own config over `/app/config.json`.)
 
 ## Constraints
 - Keep changes minimal and match existing code style (see `src/server`, `src/client`).

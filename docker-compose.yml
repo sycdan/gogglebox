@@ -1,0 +1,128 @@
+# Shared base. Carries the service DEFINITIONS (server/client/proof/check/test)
+# and the node_modules volume, runs in containers so the host only needs Docker.
+# Source is bind-mounted; node_modules lives in a named volume to keep the host
+# clean and avoid host/Linux binary mismatch.
+#
+# This file is the compose *default* (no -f needed). The bare base is NOT a way to
+# run the app (it ships no Jellyfin + no config) — it only does check/test:
+#
+#   docker compose run --rm check   # typecheck (no Jellyfin)
+#   docker compose run --rm test    # unit tests (no Jellyfin)
+#   docker compose down             # stop
+#
+# To actually run server/client/proof, use an overlay stack that supplies its own
+# Jellyfin + config (mounted over /app/config.json) — never the bare base:
+#   - docker-compose.sbx.yml  → seeded offline sandbox Jellyfin (./scripts/sbx.sh)
+#   - docker-compose.uat.yml  → the developer's REAL Jellyfin     (./scripts/uat.sh)
+#   e.g.  ./scripts/sbx.sh up -d server client
+#         PROOF_FLOW=my-feature ./scripts/uat.sh run --rm proof
+
+x-node: &node
+  image: node:22-alpine
+  working_dir: /app
+  volumes:
+    - .:/app
+    - node_modules:/app/node_modules
+
+services:
+  # One-shot: populate the node_modules volume. Other services wait on this.
+  deps:
+    <<: *node
+    command: npm ci
+
+  server:
+    <<: *node
+    command: npm run dev:server
+    # Layered env: .env is the shared base; the sbx/uat overlays append
+    # .env.<env> after it (later file wins) for the per-env override keys
+    # (JELLYFIN_URL/API_KEY + portal creds). optional so the bare base parses.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  client:
+    <<: *node
+    command: npm run dev:client
+    environment:
+      # vite proxies /api to the server service (see vite.config.ts)
+      - VITE_API_PROXY=http://server:3000
+    ports:
+      - "5173:5173"
+    # Vite's dep-optimizer cache (cacheDir=/tmp/vite) lives on an ephemeral
+    # tmpfs, not the persistent node_modules volume. A half-written cache from a
+    # SIGKILL cannot survive a container kill and wedge the next boot.
+    tmpfs:
+      - /tmp/vite
+    # Only healthy once Vite actually serves the app shell. A wedged client
+    # (504 Outdated Optimize Dep / blank SPA) keeps returning non-200 and goes
+    # unhealthy, which gates the proof service below. start_period covers a cold
+    # optimize.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5173/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # Typecheck — no Jellyfin needed. `run --rm check`
+  check:
+    <<: *node
+    command: npm run check
+    profiles: ["ci"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # Unit tests — no Jellyfin needed. `run --rm test`
+  test:
+    <<: *node
+    command: npm test
+    profiles: ["ci"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # Visual proof: Playwright drives the running client and writes screenshots to
+  # ./artifacts. Pass a flow name via PROOF_FLOW (an extra `run` arg would
+  # override the service command, so use the env var):
+  #   --profile proof run --rm -e PROOF_FLOW=my-feature proof
+  proof:
+    image: mcr.microsoft.com/playwright:v1.49.0-jammy
+    working_dir: /app
+    command: node e2e/run.mjs
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - ./artifacts:/app/artifacts
+    environment:
+      - PROOF_URL=http://client:5173
+      - PROOF_FLOW=${PROOF_FLOW:-app}
+      # household login used by the proof script
+      - PORTAL_USERNAME=${PORTAL_USERNAME:?set PORTAL_USERNAME in .env}
+      - PORTAL_PASSWORD=${PORTAL_PASSWORD:?set PORTAL_PASSWORD in .env}
+      - PORTAL_AUTO_LOGIN=${PORTAL_AUTO_LOGIN:-false}
+      # Jellyfin admin creds let flows seed their own fixture data (e.g. an
+      # in-progress mid-series episode) so proofs are self-contained.
+      - JELLYFIN_URL=${JELLYFIN_URL}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+    profiles: ["proof"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      # Don't screenshot a blank/unmounted client: wait for the client to serve
+      # the app shell before the proof runs.
+      client:
+        condition: service_healthy
+
+volumes:
+  node_modules:

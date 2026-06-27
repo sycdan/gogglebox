@@ -6,14 +6,19 @@ data
 .env
 !.env.example
 config.json
-!config.example.json
 !package-lock.json
+
+# UAT stack (real Jellyfin): local secrets + household config stay out of git.
+# Copy the templates from .env.example and deploy/config.example.json.
+.env.uat
+config.uat.json
 
 # Sandbox Jellyfin: generated artifacts stay out of git (regenerate on demand).
 # The generator/provisioner/reset scripts + .nfo templates ARE committed; the
-# media + Jellyfin config live in named volumes, not the tree.
-.env.sandbox
-config.sandbox.json
+# media + Jellyfin config live in named volumes, not the tree. .env.sbx is
+# minted secrets (the provisioned API key) — never commit it.
+.env.sbx
+config.sbx.json
 tools/sandbox/media/
 
 # Stray file created when a command redirects to `nul` (Windows null-device

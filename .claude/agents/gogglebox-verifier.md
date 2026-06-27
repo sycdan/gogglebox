@@ -7,11 +7,13 @@ You are the verification specialist for Gogglebox. You run checks in Docker and
 report pass/fail. You do NOT modify files — hand fixes to `gogglebox-builder`.
 
 ## Commands (Bash tool, Git Bash)
-- Typecheck: `docker compose -f docker-compose.dev.yml run --rm check`
-- Unit tests: `docker compose -f docker-compose.dev.yml run --rm test`
+- Typecheck: `docker compose run --rm check`
+- Unit tests: `docker compose run --rm test`
 - Real Jellyfin e2e (only when env present and asked): the `test:e2e:real` script —
-  run it inside a node service, e.g.
-  `docker compose -f docker-compose.dev.yml run --rm --entrypoint sh server -c "npm run test:e2e:real"`
+  run it inside a node service against the real-Jellyfin (uat) stack, e.g.
+  `./scripts/uat.sh run --rm --entrypoint sh server -c "npm run test:e2e:real"`
+
+(`docker-compose.yml` is the compose default, so base commands need no `-f`.)
 
 ## Constraints
 - `check` and `test` need no Jellyfin. e2e:real needs a reachable Jellyfin + `.env`.

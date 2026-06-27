@@ -31,21 +31,65 @@ See [BACKLOG.md](BACKLOG.md) for the roadmap.
 
 ## Development (Docker)
 
-All dev execution runs in containers via [docker-compose.dev.yml](docker-compose.dev.yml),
+All dev execution runs in containers via [docker-compose.yml](docker-compose.yml),
 so the host only needs Docker + git — no Node install, no host `node_modules`
-(deps live in a named volume). Copy `.env.example` to `.env` first; `server` and
-`proof` need a reachable real Jellyfin.
+(deps live in a named volume). `docker-compose.yml` is the compose default (the
+shared base), so no `-f` is needed for the no-config commands:
 
 ```bash
-docker compose -f docker-compose.dev.yml run --rm check        # typecheck (no Jellyfin)
-docker compose -f docker-compose.dev.yml run --rm test         # unit tests (no Jellyfin)
-docker compose -f docker-compose.dev.yml up -d server client   # full stack
-docker compose -f docker-compose.dev.yml --profile proof run --rm proof   # visual proof
-docker compose -f docker-compose.dev.yml down                  # stop
+docker compose run --rm check   # typecheck (no Jellyfin)
+docker compose run --rm test    # unit tests (no Jellyfin)
+docker compose down             # stop
 ```
+
+The bare base is **not** a way to run the app — it carries the shared service
+definitions plus `check`/`test` only. Running the actual app (`server`/`client`/
+`proof`) requires a stack overlay that supplies its own Jellyfin + config: use
+`./scripts/sbx.sh` (seeded offline sandbox) or `./scripts/uat.sh` (your real
+Jellyfin). See the next section.
 
 Client: `http://localhost:5173` · API: `http://localhost:3000`. The `proof`
 service drives the app with Playwright and writes screenshots to `./artifacts/`.
+
+### Two run stacks: sbx and uat
+
+The base only does typecheck/tests. To actually run the app, pick a stack: two
+thin overlays re-point `server`/`proof` (and mount their own config over
+`/app/config.json`) without duplicating services; wrapper scripts save you typing
+`-f -f`:
+
+| Stack | Jellyfin | Command | Env / config |
+| --- | --- | --- | --- |
+| base | — (shared defs + check/test only) | `docker compose …` | `.env` — not a runnable app stack |
+| **sbx** | seeded offline sandbox | `./scripts/sbx.sh …` | `.env` + `.env.sbx`, `config.sbx.json` (generated) |
+| **uat** | your **real** Jellyfin | `./scripts/uat.sh …` | `.env` + `.env.uat`, `config.uat.json` |
+
+**Layered env.** `.env` (copied from `.env.example`) holds the **shared** config
+every stack uses (`SESSION_SECRET`, `WATCHED_THRESHOLD`, `PORTAL_AUTO_LOGIN`,
+`JELLYFIN_DEBUG`, `REGISTRY_HOST`, the Vite/proof URLs). Each run stack appends an
+**overrides-only** `.env.<env>` on top — compose loads the env files in order, so
+later wins. The override file carries just the four connection/identity vars:
+`JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, `PORTAL_PASSWORD`.
+`.env.sbx` is **generated** by sandbox provisioning; `.env.uat` you create by hand.
+
+```bash
+# uat (real Jellyfin, e.g. to test a feature before pushing):
+cp .env.example .env                          # shared config (once)
+cat > .env.uat <<'EOF'                         # overrides-only: your real values
+JELLYFIN_URL=https://your-real-jellyfin
+JELLYFIN_API_KEY=...
+PORTAL_USERNAME=...
+PORTAL_PASSWORD=...
+EOF
+cp deploy/config.example.json config.uat.json # set real Jellyfin user ids
+./scripts/uat.sh up -d server client
+PROOF_FLOW=continue-watching ./scripts/uat.sh run --rm proof
+
+# sbx (seeded offline sandbox — see tools/sandbox/README.md to provision):
+./scripts/sbx.sh run --rm sandbox-reset
+./scripts/sbx.sh up -d server client
+PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
+```
 
 ### Delegated build–test–prove
 

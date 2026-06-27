@@ -9,7 +9,7 @@
 # Install (once, per clone):  git config core.hooksPath .githooks
 set -euo pipefail
 
-compose="docker compose -f docker-compose.dev.yml"
+compose="docker compose -f docker-compose.yml"
 
 echo "[pre-push] 1/3 working tree clean?"
 if [[ -n "$(git status --porcelain)" ]]; then

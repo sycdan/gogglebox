@@ -1,0 +1,46 @@
+# UAT overlay — the developer's REAL Jellyfin, for testing a feature end-to-end
+# before pushing. There is NO Jellyfin service here: the real server is external,
+# reached via JELLYFIN_URL in .env.uat.
+#
+# Always run on top of the base file. Use the wrapper so you never type -f -f:
+#   ./scripts/uat.sh up -d server client
+#   ./scripts/uat.sh run --rm proof
+#   ./scripts/uat.sh down
+#
+# (Equivalent explicit form:
+#   docker compose -f docker-compose.yml -f docker-compose.uat.yml ... )
+#
+# Layered env: .env carries the shared config; .env.uat holds ONLY the four
+# per-env overrides (JELLYFIN_URL, JELLYFIN_API_KEY, PORTAL_USERNAME,
+# PORTAL_PASSWORD). Create .env.uat by hand with your real values; supply the
+# household groups in config.uat.json (copy deploy/config.example.json).
+
+services:
+  server:
+    # Layered env: .env (shared base) then .env.uat (real Jellyfin URL/key +
+    # portal creds win over the shared .env). Compose REPLACES the base env_file
+    # list for an overridden service, so the full ordered list is restated here.
+    # .env.uat is hand-created and mandatory to run this stack — required:true is
+    # a clean fail-fast if you forgot to create it.
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.uat
+        required: true
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      # Mount the UAT household config over the path the server reads.
+      - ./config.uat.json:/app/config.json:ro
+
+  proof:
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.uat
+        required: true
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - ./artifacts:/app/artifacts
+      - ./config.uat.json:/app/config.json:ro

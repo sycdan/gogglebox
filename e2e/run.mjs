@@ -3,8 +3,8 @@
 // ./artifacts/<timestamp>/ so the Prover agent can Read them.
 //
 // Usage (via dev compose):
-//   docker compose -f docker-compose.dev.yml --profile proof run --rm proof
-//   docker compose -f docker-compose.dev.yml --profile proof run --rm -e PROOF_FLOW=my-feature proof
+//   docker compose --profile proof run --rm proof
+//   docker compose --profile proof run --rm -e PROOF_FLOW=my-feature proof
 //
 // Env:
 //   PROOF_URL        target client URL (default http://client:5173)

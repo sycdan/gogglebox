@@ -9,7 +9,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 // Read the household group's member GUIDs from config.json. The proof container
-// mounts the repo at /app, and the sandbox path mounts config.sandbox.json over
+// mounts the repo at /app, and the sandbox path mounts config.sbx.json over
 // /app/config.json, so this resolves correctly for both live and sandbox.
 async function readHouseholdMemberIds(configPath) {
   const resolved = configPath || process.env.GOGGLEBOX_CONFIG || path.resolve(process.cwd(), 'config.json');

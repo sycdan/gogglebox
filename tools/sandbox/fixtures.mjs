@@ -15,7 +15,7 @@
 //   - Reproduces real-Jellyfin quirks: notably a show whose episode PremiereDate
 //     (air) order diverges from its SxxExx (IndexNumber) order — see PROD_DIVERGENT.
 
-// Household users created in the sandbox. These map to config.sandbox.json
+// Household users created in the sandbox. These map to config.sbx.json
 // groups (emitted by the provisioner) so the server's activeViewersForSession /
 // fetchUsers see exactly this "Everyone" group. Names are fixed; GUIDs are minted
 // by Jellyfin at creation and captured by the provisioner.

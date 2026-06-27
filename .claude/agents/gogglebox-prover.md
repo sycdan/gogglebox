@@ -11,11 +11,15 @@ produces. You do NOT modify source — hand fixes to `gogglebox-builder`.
 - The `proof` service runs `e2e/run.mjs` against the client and writes PNGs to
   `./artifacts/<timestamp>/`. The suite is split into one module per flow under
   `e2e/flows/`, with shared helpers under `e2e/lib/`.
-- Run it: `docker compose -f docker-compose.dev.yml --profile proof run --rm -e PROOF_FLOW=<flowName> proof`
-  (the optional `PROOF_FLOW` prefixes the screenshot files; passing a bare arg
-  after `proof` would override the service command, so use the env var instead).
-- The stack must be up first (delegate/confirm via gogglebox-runtime):
-  `docker compose -f docker-compose.dev.yml up -d server client`
+- Proof always runs via a run stack, never the bare base (which ships no Jellyfin
+  + no config). Use the same `proof` service through a wrapper:
+  `./scripts/sbx.sh run --rm -e PROOF_FLOW=<flow> proof` (seeded sandbox) or
+  `./scripts/uat.sh run --rm -e PROOF_FLOW=<flow> proof` (real Jellyfin). No
+  `--profile proof` needed — the overlays re-point the same `proof` service.
+  (The optional `PROOF_FLOW` prefixes the screenshot files; passing a bare arg
+  after `proof` would override the service command, so use the env var instead.)
+- The stack must be up first (delegate/confirm via gogglebox-runtime), with the
+  matching wrapper: `./scripts/sbx.sh up -d server client` (or `./scripts/uat.sh …`).
 
 ## Constraints
 - Only claim the UI is proved if you actually Read the screenshot and it shows the

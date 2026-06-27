@@ -17,7 +17,7 @@ const url = process.env.JELLYFIN_URL || 'http://jellyfin-sandbox:8096';
 const apiKey = process.env.JELLYFIN_API_KEY;
 
 if (!apiKey) {
-  console.error('[reset] JELLYFIN_API_KEY is required (see .env.sandbox from provision.mjs).');
+  console.error('[reset] JELLYFIN_API_KEY is required (see .env.sbx from provision.mjs).');
   process.exit(1);
 }
 
