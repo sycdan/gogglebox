@@ -36,10 +36,11 @@ import * as markAllWatched from './flows/mark-all-watched.mjs';
 import * as cardOrder from './flows/card-order.mjs';
 import * as movieLeastWatched from './flows/movie-least-watched.mjs';
 import * as showCrossEpisode from './flows/show-cross-episode.mjs';
+import * as railPagination from './flows/rail-pagination.mjs';
 
 // Flow dispatch order — preserved from the original single-file script. Each
 // flow whose `match` matches the flowName runs; multiple may fire for one name.
-const flows = [playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode];
+const flows = [playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode, railPagination];
 
 const url = process.env.PROOF_URL ?? 'http://client:5173';
 const username = process.env.PORTAL_USERNAME ?? '';

@@ -38,6 +38,12 @@ button.ghost {
   color: #f4efe8;
 }
 
+button.compact {
+  padding: 0.45rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 button.selected,
 .viewer-card.selected {
   outline: 2px solid #f2c38d;
@@ -66,9 +72,9 @@ label span {
 }
 
 .shell {
-  width: min(1180px, calc(100vw - 2rem));
+  width: min(1320px, calc(100vw - 2rem));
   margin: 0 auto;
-  padding: 2rem 0 4rem;
+  padding: 1.25rem 0 4rem;
 }
 
 .panel,
@@ -89,10 +95,18 @@ label span {
 .hero {
   display: flex;
   justify-content: space-between;
-  gap: 1.25rem;
-  border-radius: 32px;
+  align-items: center;
+  gap: 1rem;
+  border-radius: 18px;
   margin-bottom: 1.25rem;
-  padding: 1.75rem;
+  padding: 0.7rem 1.1rem;
+}
+
+.brand {
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+  color: #f4efe8;
 }
 
 .hero-actions,
@@ -221,11 +235,57 @@ h3 {
 }
 
 .media-grid {
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  /* Rails page 3 at a time, so give each tile a full third of the row. */
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
 }
 
 .media-grid.compact {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+@media (max-width: 880px) {
+  .media-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .media-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rail-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rail-pager-status {
+  font-size: 0.85rem;
+  color: #cfbfaf;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.2rem;
+  text-align: center;
+}
+
+.rail-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 1.3rem;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4efe8;
+}
+
+.rail-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 .media-card {
@@ -395,13 +455,13 @@ video {
 }
 
 @media (max-width: 820px) {
-  .hero,
   .toolbar {
     grid-template-columns: 1fr;
     display: grid;
   }
 
   .hero {
-    padding: 1.4rem;
+    flex-wrap: wrap;
+    padding: 0.7rem 0.9rem;
   }
 }

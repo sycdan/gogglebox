@@ -122,6 +122,80 @@ function ViewerAvatar({ viewer }: { viewer: Viewer }) {
   return <span className="viewer-avatar">{viewer.name.slice(0, 1)}</span>;
 }
 
+const RAIL_PAGE_SIZE = 3;
+
+// Keeps a single rail's page index local + simple. Clamps when the underlying
+// list shrinks (e.g. a filter change) so we never page past the last group.
+function usePager<T>(items: T[], pageSize = RAIL_PAGE_SIZE) {
+  const [page, setPage] = useState(0);
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+
+  useEffect(() => {
+    if (page !== safePage) {
+      setPage(safePage);
+    }
+  }, [page, safePage]);
+
+  const start = safePage * pageSize;
+  const visible = items.slice(start, start + pageSize);
+
+  return {
+    page: safePage,
+    pageCount,
+    visible,
+    hasPrev: safePage > 0,
+    hasNext: safePage < pageCount - 1,
+    prev: () => setPage((current) => Math.max(0, current - 1)),
+    next: () => setPage((current) => Math.min(pageCount - 1, current + 1)),
+  };
+}
+
+function RailPager({
+  page,
+  pageCount,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
+}: {
+  page: number;
+  pageCount: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  if (pageCount <= 1) {
+    return null;
+  }
+  return (
+    <div className="rail-pager">
+      <button
+        className="rail-arrow"
+        type="button"
+        onClick={onPrev}
+        disabled={!hasPrev}
+        aria-label="Previous"
+      >
+        ‹
+      </button>
+      <span className="rail-pager-status" aria-hidden="true">
+        {page + 1}/{pageCount}
+      </span>
+      <button
+        className="rail-arrow"
+        type="button"
+        onClick={onNext}
+        disabled={!hasNext}
+        aria-label="Next"
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
 export function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [selectedViewerIds, setSelectedViewerIds] = useState<string[]>([]);
@@ -162,6 +236,10 @@ export function App() {
   // re-binding the listener on every change.
   const playingItemRef = useRef<PlaybackItem | null>(null);
   playingItemRef.current = playingItem;
+
+  // Per-rail pagination (3 tiles per page) so rails stay roomy, not cramped.
+  const continuePager = usePager(continueWatching);
+  const recommendationsPager = usePager(recommendations);
 
   async function loadSession() {
     const nextSession = await apiRequest<SessionResponse>('/api/session');
@@ -872,20 +950,16 @@ export function App() {
 
   return (
     <div className="shell">
-      <div className="hero">
-        <div>
-          <p className="eyebrow">Now watching</p>
-          <h1>{session.activeViewerIds.map((viewerId) => session.viewers.find((viewer) => viewer.id === viewerId)?.name).filter(Boolean).join(' + ')}</h1>
-          <p className="lead">Recommendations exclude anything already seen by anyone in this group.</p>
-        </div>
+      <header className="hero">
+        <span className="brand">{session.appName}</span>
         <div className="hero-actions">
-          <button className="ghost" onClick={() => setIgnoredOpen(true)} type="button">
+          <button className="ghost compact" onClick={() => setIgnoredOpen(true)} type="button">
             Ignored shows{ignoredShows.length > 0 ? ` (${ignoredShows.length})` : ''}
           </button>
-          <button className="ghost" onClick={() => void clearGroup()} type="button">Change viewers</button>
-          <button className="ghost" onClick={() => void logout()} type="button">Log out</button>
+          <button className="ghost compact" onClick={() => void clearGroup()} type="button">Change viewers</button>
+          <button className="ghost compact" onClick={() => void logout()} type="button">Log out</button>
         </div>
-      </div>
+      </header>
 
       <section className="panel section-block">
         <div className="row spread">
@@ -893,12 +967,20 @@ export function App() {
             <p className="eyebrow">Resume together</p>
             <h2>Continue watching</h2>
           </div>
+          <RailPager
+            page={continuePager.page}
+            pageCount={continuePager.pageCount}
+            hasPrev={continuePager.hasPrev}
+            hasNext={continuePager.hasNext}
+            onPrev={continuePager.prev}
+            onNext={continuePager.next}
+          />
         </div>
         {!libraryLoading && continueWatching.length === 0 ? (
           <p className="muted">Nothing in progress for this group yet.</p>
         ) : null}
-        <div className="media-grid compact">
-          {continueWatching.map((item) => (
+        <div className="media-grid">
+          {continuePager.visible.map((item) => (
             <article className="media-card" key={`continue-${item.id}-${item.sourceViewerId}`}>
               <div className="poster" style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : undefined}>
                 {!item.imageUrl ? <span>No artwork</span> : null}
@@ -994,6 +1076,14 @@ export function App() {
           <div className="row">
             {libraryLoading ? <span className="muted">Refreshing…</span> : null}
             {noMorePicks ? <span className="muted">No more picks</span> : null}
+            <RailPager
+              page={recommendationsPager.page}
+              pageCount={recommendationsPager.pageCount}
+              hasPrev={recommendationsPager.hasPrev}
+              hasNext={recommendationsPager.hasNext}
+              onPrev={recommendationsPager.prev}
+              onNext={recommendationsPager.next}
+            />
             <button
               onClick={() => void showOtherPicks()}
               type="button"
@@ -1013,8 +1103,8 @@ export function App() {
         {!libraryLoading && recommendations.length === 0 ? (
           <p className="muted">No fresh recommendations match this filter yet. Try another genre or turn off kids-only.</p>
         ) : null}
-        <div className="media-grid compact">
-          {recommendations.map((item) => (
+        <div className="media-grid">
+          {recommendationsPager.visible.map((item) => (
             <MediaCard
               key={`rec-${item.id}`}
               item={item}
