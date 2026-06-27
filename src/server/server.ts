@@ -75,8 +75,8 @@ function activeGroupKey(req: express.Request): string {
   return deriveGroupKey(jellyfinUserIds);
 }
 
-function ignoredShowsForSession(req: express.Request): Set<string> {
-  return new Set(appState.getIgnoredShows(activeGroupKey(req)));
+function ignoredItemsForSession(req: express.Request): Set<string> {
+  return new Set(appState.getIgnoredItems(activeGroupKey(req)));
 }
 
 // The id used to ignore an item: the series id for shows, the item id for movies.
@@ -360,8 +360,8 @@ app.get('/api/library', requireAuth, async (req, res) => {
     }
 
     if (req.session.activeViewerIds?.length) {
-      const ignoredShows = ignoredShowsForSession(req);
-      items = items.filter((item) => !ignoredShows.has(ignorableId(item)));
+      const ignoredItems = ignoredItemsForSession(req);
+      items = items.filter((item) => !ignoredItems.has(ignorableId(item)));
     }
 
     res.json({ items });
@@ -381,7 +381,7 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     );
     const viewers = activeViewersForSession(req);
     const watchedUnion = await getWatchedUnion(viewers, kind);
-    const ignoredShows = ignoredShowsForSession(req);
+    const ignoredItems = ignoredItemsForSession(req);
     let candidates = await jellyfin.listItems(kind, genre);
 
     if (kidsOnly) {
@@ -389,7 +389,7 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     }
 
     const items = candidates
-      .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id) && !ignoredShows.has(ignorableId(item)))
+      .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id) && !ignoredItems.has(ignorableId(item)))
       .sort((left, right) => (right.rating ?? 0) - (left.rating ?? 0))
       .slice(0, config.recommendations.count);
 
@@ -402,9 +402,9 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
 app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, res) => {
   try {
     const viewers = activeViewersForSession(req);
-    const ignoredShows = ignoredShowsForSession(req);
+    const ignoredItems = ignoredItemsForSession(req);
     const visible = (await getContinueWatchingItems(viewers)).filter(
-      (item) => !ignoredShows.has(ignorableId(item)),
+      (item) => !ignoredItems.has(ignorableId(item)),
     );
     if (jellyfinDebugEnabled) {
       for (const item of visible) {
@@ -426,40 +426,40 @@ app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, r
   }
 });
 
-app.get('/api/ignored-shows', requireAuth, requireViewerGroup, async (req, res) => {
-  const showIds = appState.getIgnoredShows(activeGroupKey(req));
+app.get('/api/ignored', requireAuth, requireViewerGroup, async (req, res) => {
+  const itemIds = appState.getIgnoredItems(activeGroupKey(req));
 
   // Resolve human-readable titles so the client doesn't render raw ids. An id
   // that no longer resolves (deleted item) or a lookup failure falls back to
   // showing the id.
   let names = new Map<string, string>();
   try {
-    names = await jellyfin.fetchItemNames(showIds);
+    names = await jellyfin.fetchItemNames(itemIds);
   } catch (error) {
     if (jellyfinDebugEnabled) {
-      console.log(`[ignored-shows] title lookup failed: ${error instanceof Error ? error.message : error}`);
+      console.log(`[ignored] title lookup failed: ${error instanceof Error ? error.message : error}`);
     }
   }
 
-  const shows = showIds.map((id) => ({ id, title: names.get(id) ?? id }));
-  res.json({ shows });
+  const items = itemIds.map((id) => ({ id, title: names.get(id) ?? id }));
+  res.json({ items });
 });
 
-app.post('/api/ignored-shows', requireAuth, requireViewerGroup, (req, res) => {
-  const showId = typeof req.body?.showId === 'string' ? req.body.showId.trim() : '';
-  if (!showId) {
-    res.status(400).json({ error: 'showId is required' });
+app.post('/api/ignored', requireAuth, requireViewerGroup, (req, res) => {
+  const itemId = typeof req.body?.itemId === 'string' ? req.body.itemId.trim() : '';
+  if (!itemId) {
+    res.status(400).json({ error: 'itemId is required' });
     return;
   }
 
-  const showIds = appState.ignoreShow(activeGroupKey(req), showId);
-  res.json({ showIds });
+  const itemIds = appState.ignoreItem(activeGroupKey(req), itemId);
+  res.json({ itemIds });
 });
 
-app.delete('/api/ignored-shows/:showId', requireAuth, requireViewerGroup, (req, res) => {
-  const showId = Array.isArray(req.params.showId) ? req.params.showId[0] : req.params.showId;
-  const showIds = appState.unignoreShow(activeGroupKey(req), showId);
-  res.json({ showIds });
+app.delete('/api/ignored/:itemId', requireAuth, requireViewerGroup, (req, res) => {
+  const itemId = Array.isArray(req.params.itemId) ? req.params.itemId[0] : req.params.itemId;
+  const itemIds = appState.unignoreItem(activeGroupKey(req), itemId);
+  res.json({ itemIds });
 });
 
 app.get('/api/shows/:seriesId/episodes', requireAuth, requireViewerGroup, async (req, res) => {

@@ -219,7 +219,7 @@ The service sets `pull_policy: always` and `restart: unless-stopped`, so each
 
 ### Writable state directory
 
-The portal writes runtime state (e.g. the per-group list of ignored shows) to
+The portal writes runtime state (e.g. the per-group list of ignored items) to
 `/data/state.json` inside the container. That path is bind-mounted from the host
 via `GOGGLEBOX_STATE_DIR` (default `./data`, relative to `deploy/`) so it
 survives redeploys. Set it to an absolute path for a real deployment:

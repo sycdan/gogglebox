@@ -51,7 +51,7 @@ interface PlaybackItem {
   seriesName?: string | null;
 }
 
-interface IgnoredShow {
+interface IgnoredItem {
   id: string;
   title: string;
 }
@@ -212,7 +212,7 @@ export function App() {
   const [noMorePicks, setNoMorePicks] = useState(false);
   const [picksLoading, setPicksLoading] = useState(false);
   const shownRecommendationIdsRef = useRef<Set<string>>(new Set());
-  const [ignoredShows, setIgnoredShows] = useState<IgnoredShow[]>([]);
+  const [ignoredItems, setIgnoredItems] = useState<IgnoredItem[]>([]);
   const [ignoredOpen, setIgnoredOpen] = useState(false);
   const [selectedSeries, setSelectedSeries] = useState<LibraryItem | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
@@ -322,12 +322,12 @@ export function App() {
     }
   }
 
-  async function loadIgnoredShows(activeSession: SessionResponse) {
+  async function loadIgnoredItems(activeSession: SessionResponse) {
     if (activeSession.activeViewerIds.length > 0) {
-      const response = await apiRequest<{ shows: IgnoredShow[] }>('/api/ignored-shows');
-      setIgnoredShows(response.shows);
+      const response = await apiRequest<{ items: IgnoredItem[] }>('/api/ignored');
+      setIgnoredItems(response.items);
     } else {
-      setIgnoredShows([]);
+      setIgnoredItems([]);
     }
   }
 
@@ -336,39 +336,39 @@ export function App() {
     return item.type === 'show' && item.seriesId ? item.seriesId : item.id;
   }
 
-  async function ignoreShow(item: LibraryItem | ContinueWatchingItem) {
-    const showId = ignorableId(item);
+  async function ignore(item: LibraryItem | ContinueWatchingItem) {
+    const itemId = ignorableId(item);
     try {
-      await apiRequest<{ showIds: string[] }>('/api/ignored-shows', {
+      await apiRequest<{ itemIds: string[] }>('/api/ignored', {
         method: 'POST',
-        body: JSON.stringify({ showId }),
+        body: JSON.stringify({ itemId }),
       });
       if (session) {
         await Promise.all([
-          loadIgnoredShows(session),
+          loadIgnoredItems(session),
           loadLibraryAndRecommendations(session, kind, genre, kidsOnly),
           loadContinueWatching(session),
         ]);
       }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not ignore show');
+      setError(nextError instanceof Error ? nextError.message : 'Could not ignore');
     }
   }
 
-  async function unignoreShow(showId: string) {
+  async function unignore(itemId: string) {
     try {
-      await apiRequest<{ showIds: string[] }>(`/api/ignored-shows/${showId}`, {
+      await apiRequest<{ itemIds: string[] }>(`/api/ignored/${itemId}`, {
         method: 'DELETE',
       });
       if (session) {
         await Promise.all([
-          loadIgnoredShows(session),
+          loadIgnoredItems(session),
           loadLibraryAndRecommendations(session, kind, genre, kidsOnly),
           loadContinueWatching(session),
         ]);
       }
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not unignore show');
+      setError(nextError instanceof Error ? nextError.message : 'Could not unignore');
     }
   }
 
@@ -416,7 +416,7 @@ export function App() {
 
     void (async () => {
       try {
-        await Promise.all([loadContinueWatching(session), loadIgnoredShows(session)]);
+        await Promise.all([loadContinueWatching(session), loadIgnoredItems(session)]);
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : 'Could not load continue watching');
       }
@@ -954,7 +954,7 @@ export function App() {
         <span className="brand">{session.appName}</span>
         <div className="hero-actions">
           <button className="ghost compact" onClick={() => setIgnoredOpen(true)} type="button">
-            Ignored shows{ignoredShows.length > 0 ? ` (${ignoredShows.length})` : ''}
+            Ignored{ignoredItems.length > 0 ? ` (${ignoredItems.length})` : ''}
           </button>
           <button className="ghost compact" onClick={() => void clearGroup()} type="button">Change viewers</button>
           <button className="ghost compact" onClick={() => void logout()} type="button">Log out</button>
@@ -1028,7 +1028,7 @@ export function App() {
                     ))}
                   </div>
                 </div>
-                <button className="ghost" onClick={() => void ignoreShow(item)} type="button">Ignore</button>
+                <button className="ghost" onClick={() => void ignore(item)} type="button">Ignore</button>
               </div>
             </article>
           ))}
@@ -1111,7 +1111,7 @@ export function App() {
               onMarkWatched={markWatched}
               onPlay={startPlayback}
               onOpenEpisodes={openEpisodes}
-              onIgnore={ignoreShow}
+              onIgnore={ignore}
             />
           ))}
         </div>
@@ -1135,7 +1135,7 @@ export function App() {
                 onMarkWatched={markWatched}
                 onPlay={startPlayback}
                 onOpenEpisodes={openEpisodes}
-                onIgnore={ignoreShow}
+                onIgnore={ignore}
               />
             ))}
           </div>
@@ -1204,22 +1204,22 @@ export function App() {
             <div className="row spread">
               <div>
                 <p className="eyebrow">This group</p>
-                <h2>Ignored shows</h2>
+                <h2>Ignored</h2>
               </div>
               <button className="ghost" onClick={() => setIgnoredOpen(false)} type="button">Close</button>
             </div>
-            {ignoredShows.length === 0 ? (
+            {ignoredItems.length === 0 ? (
               <p className="muted">Nothing is ignored for this group. Use “Ignore” on a card to hide it everywhere.</p>
             ) : (
               <div className="episode-list">
-                {ignoredShows.map((show) => (
-                  <article className="episode-card" key={`ignored-${show.id}`}>
+                {ignoredItems.map((item) => (
+                  <article className="episode-card" key={`ignored-${item.id}`}>
                     <div>
-                      <h3>{show.title || show.id}</h3>
+                      <h3>{item.title || item.id}</h3>
                       <p className="meta">Hidden from continue-watching, recommendations and search.</p>
                     </div>
                     <div className="row">
-                      <button onClick={() => void unignoreShow(show.id)} type="button">Unignore</button>
+                      <button onClick={() => void unignore(item.id)} type="button">Unignore</button>
                     </div>
                   </article>
                 ))}

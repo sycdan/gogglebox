@@ -2,9 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // Writable runtime state — distinct from the read-only config.json. Stores a map
-// of groupKey -> ignored show ids. Lives at a host-mounted location so it
-// survives redeploys.
+// of groupKey -> ignored item ids (shows and movies). Lives at a host-mounted
+// location so it survives redeploys.
 interface AppStateFile {
+  ignoredItems?: Record<string, string[]>;
+  // Legacy key (pre-rename). Read as a fallback; never written.
   ignoredShows?: Record<string, string[]>;
 }
 
@@ -29,43 +31,53 @@ function readState(filePath: string): AppStateFile {
   }
 }
 
+// Prefer the new key; fall back to the legacy `ignoredShows` key so a
+// pre-rename state file keeps working with zero data loss until its first write.
+function ignoredItemsFrom(state: AppStateFile): Record<string, string[]> {
+  return state.ignoredItems ?? state.ignoredShows ?? {};
+}
+
 // Write-then-rename so a concurrent reader never observes a truncated file.
-function writeState(filePath: string, state: AppStateFile): void {
+// Always persists the new `ignoredItems` key and drops the legacy
+// `ignoredShows` key so existing files migrate transparently on first write.
+function writeState(filePath: string, state: AppStateFile, ignoredItems: Record<string, string[]>): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
+  const { ignoredShows: _legacy, ...rest } = state;
+  const next: AppStateFile = { ...rest, ignoredItems };
   const tempPath = path.join(dir, `.state-${process.pid}-${Date.now()}.tmp`);
-  fs.writeFileSync(tempPath, JSON.stringify(state, null, 2));
+  fs.writeFileSync(tempPath, JSON.stringify(next, null, 2));
   fs.renameSync(tempPath, filePath);
 }
 
 export class AppState {
   constructor(private readonly filePath: string = STATE_PATH) {}
 
-  getIgnoredShows(groupKey: string): string[] {
+  getIgnoredItems(groupKey: string): string[] {
     const state = readState(this.filePath);
-    return state.ignoredShows?.[groupKey] ?? [];
+    return ignoredItemsFrom(state)[groupKey] ?? [];
   }
 
-  ignoreShow(groupKey: string, showId: string): string[] {
+  ignoreItem(groupKey: string, itemId: string): string[] {
     const state = readState(this.filePath);
-    const ignoredShows = state.ignoredShows ?? {};
-    const current = new Set(ignoredShows[groupKey] ?? []);
-    current.add(showId);
-    ignoredShows[groupKey] = [...current];
-    writeState(this.filePath, { ...state, ignoredShows });
-    return ignoredShows[groupKey];
+    const ignoredItems = ignoredItemsFrom(state);
+    const current = new Set(ignoredItems[groupKey] ?? []);
+    current.add(itemId);
+    ignoredItems[groupKey] = [...current];
+    writeState(this.filePath, state, ignoredItems);
+    return ignoredItems[groupKey];
   }
 
-  unignoreShow(groupKey: string, showId: string): string[] {
+  unignoreItem(groupKey: string, itemId: string): string[] {
     const state = readState(this.filePath);
-    const ignoredShows = state.ignoredShows ?? {};
-    const next = (ignoredShows[groupKey] ?? []).filter((id) => id !== showId);
+    const ignoredItems = ignoredItemsFrom(state);
+    const next = (ignoredItems[groupKey] ?? []).filter((id) => id !== itemId);
     if (next.length > 0) {
-      ignoredShows[groupKey] = next;
+      ignoredItems[groupKey] = next;
     } else {
-      delete ignoredShows[groupKey];
+      delete ignoredItems[groupKey];
     }
-    writeState(this.filePath, { ...state, ignoredShows });
+    writeState(this.filePath, state, ignoredItems);
     return next;
   }
 }

@@ -2,7 +2,7 @@ import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
 
 // ── ignore-shows flow ──────────────────────────────────────────────────────
 // Proves the per-group "Ignore" feature end-to-end: a card's Ignore button
-// hides that show from the Group-picks grid; the hero "Ignored shows" modal
+// hides that show from the Group-picks grid; the hero "Ignored" modal
 // lists it with an Unignore control; Unignore brings it back into the grid.
 export const match = /ignore/i;
 
@@ -116,26 +116,26 @@ export async function run(page, ctx) {
     console.error(`[proof] ignore-shows: FAIL — "${targetTitle}" still present in the grid after clicking Ignore`);
   }
 
-  // Open the hero "Ignored shows" modal.
-  const heroOpen = page.getByRole('button', { name: /^Ignored shows/ }).first();
+  // Open the hero "Ignored" modal.
+  const heroOpen = page.getByRole('button', { name: /^Ignored/ }).first();
   try {
     await heroOpen.waitFor({ state: 'visible', timeout: 10_000 });
     await heroOpen.click();
   } catch (error) {
     await shoot(page, `${flowName}-05-no-ignored-button`);
-    fail('ignore-shows: hero "Ignored shows" button not found', error);
+    fail('ignore-shows: hero "Ignored" button not found', error);
   }
 
-  // The modal: the .modal whose <h2> is "Ignored shows".
+  // The modal: the .modal whose <h2> is "Ignored".
   const ignoredModal = page
     .locator('.modal')
-    .filter({ has: page.locator('h2', { hasText: /^Ignored shows$/ }) })
+    .filter({ has: page.locator('h2', { hasText: /^Ignored$/ }) })
     .first();
   try {
     await ignoredModal.waitFor({ state: 'visible', timeout: 10_000 });
   } catch (error) {
     await shoot(page, `${flowName}-05-modal-did-not-open`);
-    fail('ignore-shows: "Ignored shows" modal did not appear', error);
+    fail('ignore-shows: "Ignored" modal did not appear', error);
   }
 
   // Find the modal row that exposes an Unignore control.
