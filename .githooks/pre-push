@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# pre-push gate: refuse to push unless the tree is clean, the typecheck
+# ("lint") passes, and the production image builds — then publish the image
+# to the registry. The push only proceeds if every step is green.
+#
+# Everything runs in Docker (the host has only docker + git, per CLAUDE.md).
+# There is no eslint in this repo, so "lint" == the typecheck (`npm run check`).
+#
+# Install (once, per clone):  git config core.hooksPath .githooks
+set -euo pipefail
+
+compose="docker compose -f docker-compose.dev.yml"
+
+echo "[pre-push] 1/3 working tree clean?"
+if [[ -n "$(git status --porcelain)" ]]; then
+	echo "[pre-push] FAIL: working tree is dirty — commit or stash first." >&2
+	git status --short >&2
+	exit 1
+fi
+
+echo "[pre-push] 2/3 typecheck (lint)…"
+# `check` needs no Jellyfin/portal creds, but compose parses the whole file
+# and some services declare required (:?) vars — stub them so interpolation
+# doesn't abort the run.
+export PORTAL_USERNAME="${PORTAL_USERNAME:-prepush}"
+export PORTAL_PASSWORD="${PORTAL_PASSWORD:-prepush}"
+$compose run --rm check
+
+echo "[pre-push] 3/3 build + publish image to registry…"
+# docker-publish.sh runs `docker build` itself, then tags + pushes. It reads
+# .env for REGISTRY_HOST and fails loudly if unset. No separate build step
+# needed here — this is the build gate too.
+./scripts/docker-publish.sh
+
+echo "[pre-push] all green — proceeding with push."

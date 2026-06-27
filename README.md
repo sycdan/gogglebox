@@ -62,6 +62,22 @@ code directly:
 
 See [CLAUDE.md](CLAUDE.md) for the full protocol.
 
+### Pre-push hook
+
+[.githooks/pre-push](.githooks/pre-push) gates every push: it fails if the
+working tree is dirty, runs the typecheck ("lint" — there is no eslint), then
+builds and publishes the production image to the registry via
+[scripts/docker-publish.sh](scripts/docker-publish.sh) (the script does the
+`docker build`). The push only proceeds if
+all of that is green, so `REGISTRY_HOST` must be set (in `.env` or the
+environment) or the publish step — and the push — will fail.
+
+Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Deployment
 
 Production runs a **single container** built from the root [Dockerfile](Dockerfile):
