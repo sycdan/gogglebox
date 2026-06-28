@@ -18,8 +18,13 @@ edit application code itself. Classify each request and delegate to a subagent:
 | Visually prove a user-visible feature | `gogglebox-prover` |
 
 Typical feature flow: **builder → verifier → prover**. The builder self-heals
-against typecheck/test failures before handing off. Only `gogglebox-builder` edits
-files under `src/` (and other app code); the other three are read-only on source.
+against typecheck/test failures before handing off. Before any agent starts
+running tests, booting the stack, or visual proof for a feature, the orchestrator
+must first make a git checkpoint commit containing the builder's current work.
+Use a clearly provisional message such as `checkpoint: before verification` if
+the work is not final; later agents may add follow-up fix commits. Only
+`gogglebox-builder` edits files under `src/` (and other app code); the other
+three are read-only on source.
 
 Subagents cannot spawn subagents, so the orchestrator sequences the chain.
 
