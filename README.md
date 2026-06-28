@@ -31,97 +31,6 @@ group-aware layer on top.
 
 See [BACKLOG.md](BACKLOG.md) for the roadmap.
 
-## Development (Docker)
-
-All dev execution runs in containers via [docker-compose.yml](docker-compose.yml),
-so the host only needs Docker + git: no Node install, no host `node_modules`
-(deps live in a named volume). `docker-compose.yml` is the compose default (the
-shared base), so no `-f` is needed for the no-config commands:
-
-```bash
-docker compose run --rm check   # typecheck (no Jellyfin)
-docker compose run --rm test    # unit tests (no Jellyfin)
-docker compose down             # stop
-```
-
-The bare base is **not** a way to run the app. It carries the shared service
-definitions plus `check`/`test` only. Running the actual app (`server`/`client`/
-`proof`) requires a stack overlay that supplies its own Jellyfin + config: use
-`./scripts/sbx.sh` (seeded offline sandbox) or `./scripts/uat.sh` (your real
-Jellyfin). See the next section.
-
-Client: `http://localhost:5173` - API: `http://localhost:3000`. The `proof`
-service drives the app with Playwright and writes screenshots to `./artifacts/`.
-
-### Two run stacks: sbx and uat
-
-The base only does typecheck/tests. To actually run the app, pick a stack: two
-thin overlays re-point `server`/`proof` (and mount their own config over
-`/app/config.json`) without duplicating services; wrapper scripts save you typing
-`-f -f`:
-
-| Stack | Jellyfin | Command | Env / config |
-| --- | --- | --- | --- |
-| base | none (shared defs + check/test only) | `docker compose ...` | `.env` - not a runnable app stack |
-| **sbx** | seeded offline sandbox | `./scripts/sbx.sh ...` | `.env` + `.env.sbx`, `config.sbx.json` (generated) |
-| **uat** | your **real** Jellyfin | `./scripts/uat.sh ...` | `.env` + `.env.uat`, `config.uat.json` |
-
-**Layered env.** `.env` (copied from `.env.example`) holds the **shared** config
-every stack uses (`SESSION_SECRET`, `WATCHED_THRESHOLD`, `PORTAL_AUTO_LOGIN`,
-`JELLYFIN_DEBUG`, the Vite/proof URLs). Each run stack appends an
-**overrides-only** `.env.<env>` on top; compose loads the env files in order, so
-later wins. The override file carries just the four connection/identity vars:
-`JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, `PORTAL_PASSWORD`.
-`.env.sbx` is **generated** by sandbox provisioning; `.env.uat` you create by hand.
-
-```bash
-# uat (real Jellyfin, e.g. to test a feature before pushing):
-cp .env.example .env                         # shared config (once)
-cat > .env.uat <<'EOF'                       # overrides-only: your real values
-JELLYFIN_URL=https://your-real-jellyfin
-JELLYFIN_API_KEY=...
-PORTAL_USERNAME=...
-PORTAL_PASSWORD=...
-EOF
-cp deploy/config.example.json config.uat.json # set real Jellyfin user ids
-./scripts/uat.sh up -d server client
-PROOF_FLOW=continue-watching ./scripts/uat.sh run --rm proof
-
-# sbx (seeded offline sandbox - see tools/sandbox/README.md to provision):
-./scripts/sbx.sh run --rm sandbox-reset
-./scripts/sbx.sh up -d server client
-PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
-```
-
-### Delegated build-test-prove
-
-This repo is set up so Claude's main session acts as an orchestrator that
-delegates to subagents in [.claude/agents/](.claude/agents/). It never edits app
-code directly:
-
-- **gogglebox-builder** - designs + implements features, self-heals against
-  failing checks/tests.
-- **gogglebox-runtime** - boots the stack and reports URLs/logs.
-- **gogglebox-verifier** - runs typecheck + tests.
-- **gogglebox-prover** - drives the UI with Playwright and reads the screenshots
-  to visually prove a feature works.
-
-See [CLAUDE.md](CLAUDE.md) for the full protocol.
-
-### Pre-push hook
-
-[.githooks/pre-push](.githooks/pre-push) gates every push: it fails if the
-working tree is dirty, runs the typecheck ("lint" - there is no eslint), then
-builds the production image as a gate. It does not publish — that is CI's job
-(see [Publishing images](#publishing-images)). The push only proceeds if all of
-that is green.
-
-Enable it once per clone:
-
-```bash
-git config core.hooksPath .githooks
-```
-
 ## Deployment
 
 Deployment is for someone who wants to run Gogglebox on their LAN, not work on
@@ -273,20 +182,129 @@ sudo mkdir -p /var/lib/gogglebox
 sudo chown -R 1000:1000 /var/lib/gogglebox
 ```
 
+## Development (Docker)
+
+All dev execution runs in containers via [docker-compose.yml](docker-compose.yml),
+so the host only needs Docker + git: no Node install, no host `node_modules`
+(deps live in a named volume). `docker-compose.yml` is the compose default (the
+shared base), so no `-f` is needed for the no-config commands:
+
+```bash
+docker compose run --rm check   # typecheck (no Jellyfin)
+docker compose run --rm test    # unit tests (no Jellyfin)
+docker compose down             # stop
+```
+
+The bare base is **not** a way to run the app. It carries the shared service
+definitions plus `check`/`test` only. Running the actual app (`server`/`client`/
+`proof`) requires a stack overlay that supplies its own Jellyfin + config: use
+`./scripts/sbx.sh` (seeded offline sandbox) or `./scripts/uat.sh` (your real
+Jellyfin). See the next section.
+
+Client: `http://localhost:5173` - API: `http://localhost:3000`. The `proof`
+service drives the app with Playwright and writes screenshots to `./artifacts/`.
+
+### Two run stacks: sbx and uat
+
+The base only does typecheck/tests. To actually run the app, pick a stack: two
+thin overlays re-point `server`/`proof` (and mount their own config over
+`/app/config.json`) without duplicating services; wrapper scripts save you typing
+`-f -f`:
+
+| Stack | Jellyfin | Command | Env / config |
+| --- | --- | --- | --- |
+| base | none (shared defs + check/test only) | `docker compose ...` | `.env` - not a runnable app stack |
+| **sbx** | seeded offline sandbox | `./scripts/sbx.sh ...` | `.env` + `.env.sbx`, `config.sbx.json` (generated) |
+| **uat** | your **real** Jellyfin | `./scripts/uat.sh ...` | `.env` + `.env.uat`, `config.uat.json` |
+
+**Layered env.** `.env` (copied from `.env.example`) holds the **shared** config
+every stack uses (`SESSION_SECRET`, `WATCHED_THRESHOLD`, `PORTAL_AUTO_LOGIN`,
+`JELLYFIN_DEBUG`, the Vite/proof URLs). Each run stack appends an
+**overrides-only** `.env.<env>` on top; compose loads the env files in order, so
+later wins. The override file carries just the four connection/identity vars:
+`JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, `PORTAL_PASSWORD`.
+`.env.sbx` is **generated** by sandbox provisioning; `.env.uat` you create by hand.
+
+```bash
+# uat (real Jellyfin, e.g. to test a feature before pushing):
+cp .env.example .env                         # shared config (once)
+cat > .env.uat <<'EOF'                       # overrides-only: your real values
+JELLYFIN_URL=https://your-real-jellyfin
+JELLYFIN_API_KEY=...
+PORTAL_USERNAME=...
+PORTAL_PASSWORD=...
+EOF
+cp deploy/config.example.json config.uat.json # set real Jellyfin user ids
+./scripts/uat.sh up -d server client
+PROOF_FLOW=continue-watching ./scripts/uat.sh run --rm proof
+
+# sbx (seeded offline sandbox - see tools/sandbox/README.md to provision):
+./scripts/sbx.sh run --rm sandbox-reset
+./scripts/sbx.sh up -d server client
+PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
+```
+
+### Delegated build-test-prove
+
+This repo is set up so Claude's main session acts as an orchestrator that
+delegates to subagents in [.claude/agents/](.claude/agents/). It never edits app
+code directly:
+
+- **gogglebox-builder** - designs + implements features, self-heals against
+  failing checks/tests.
+- **gogglebox-runtime** - boots the stack and reports URLs/logs.
+- **gogglebox-verifier** - runs typecheck + tests.
+- **gogglebox-prover** - drives the UI with Playwright and reads the screenshots
+  to visually prove a feature works.
+
+See [CLAUDE.md](CLAUDE.md) for the full protocol.
+
+### Pre-push hook
+
+[.githooks/pre-push](.githooks/pre-push) gates every push: it fails if the
+working tree is dirty, runs the typecheck ("lint" - there is no eslint), then
+builds the production image as a gate. It does not publish — that is CI's job
+(see [Publishing images](#publishing-images)). The push only proceeds if all of
+that is green.
+
+Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ### Publishing images
 
-End users do not run this — images are published automatically. GitHub Actions
-([.github/workflows/publish.yml](.github/workflows/publish.yml)) builds the
-multi-arch (`linux/amd64`, `linux/arm64`) image and pushes it to GHCR using the
-built-in `GITHUB_TOKEN` (no PAT). It runs on every push to `main` (and manual
-`workflow_dispatch`), tagging each build twice:
+End users do not run this — images are published automatically. There are two
+channels:
+
+**Rolling** ([.github/workflows/publish.yml](.github/workflows/publish.yml)) —
+runs on every push to `main`. Builds the multi-arch (`linux/amd64`,
+`linux/arm64`) image with the built-in `GITHUB_TOKEN` (no PAT) and tags it twice:
 
 - `latest` — rolling pointer to the newest build,
-- `yyyymmddhhmmss` (UTC) — immutable, sortable pin for reproducible deploys.
+- `yyyymmddhhmmss` (UTC) — immutable, sortable pin for ad-hoc reproducible pulls.
 
-The package must be public for unauthenticated `docker pull` to work: after the
-first run, open the `gogglebox` package on GitHub -> Package settings -> change
-visibility to **Public**.
+**Release** ([.github/workflows/release.yml](.github/workflows/release.yml)) —
+the pinnable channel. One manual run does everything:
+
+```bash
+gh workflow run release.yml
+```
+
+It computes a calendar version `YYYY.M.D` (e.g. `2026.6.28`), stamps it into
+`package.json` and commits that to `main` (with `[skip ci]` so the rolling build
+does not double-fire), builds + pushes the image tagged `YYYY.M.D` (and
+`latest`), pushes the git tag `v2026.6.28`, and opens a GitHub Release with
+generated notes. The image tag / pin is bare (`2026.6.28`) while the git tag
+carries a `v` (gh convention), so a deployer who pins
+`GOGGLEBOX_VERSION=2026.6.28` runs `git checkout v2026.6.28` to get the exact
+`deploy/` shape that shipped with it.
+
+One release per day: a second run the same day fails on the collision guard
+before changing anything. The package must be public for unauthenticated
+`docker pull` to work: after the first run, open the `gogglebox` package on
+GitHub -> Package settings -> change visibility to **Public**.
 
 To publish manually (rare), log in to GHCR with a PAT that has `write:packages`,
 then build and push:
@@ -298,5 +316,3 @@ docker push ghcr.io/sycdan/gogglebox:latest
 ```
 
 ---
-
-In loving memory of [Oggie](mascot.jpg).
