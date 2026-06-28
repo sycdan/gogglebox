@@ -4,7 +4,9 @@ import { pickFirstViewerAndContinue } from '../lib/viewer.mjs';
 // Proves the player-modal hotkey/focus fix: opening the player must move focus
 // onto the role="dialog" container (not the Play button), Space toggles
 // video.paused (not re-activating Play), and Esc closes the modal.
-export const match = /player|focus/i;
+// NOTE: scoped to NOT match the player-handoff flow (which would also match a
+// bare /player/). player-focus runs for "player-focus" / "focus" flow names.
+export const match = /player-focus|focus/i;
 
 export async function run(page, ctx) {
   const { fail, shoot, shootView, flowName } = ctx;

@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+
 import { ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind } from './types';
 
 interface JellyfinUserRecord {
@@ -41,6 +43,25 @@ interface JellyfinNextUpResponse {
   Items: JellyfinItem[];
 }
 
+interface JellyfinSessionRecord {
+  UserId?: string;
+  UserName?: string;
+  NowPlayingItem?: JellyfinItem;
+  PlayState?: {
+    PositionTicks?: number;
+  };
+}
+
+// A compact, normalized view of an active Jellyfin playback session for the
+// Stage B watched fan-out poller. positionTicks/runtimeTicks are 0 when unknown.
+export interface PlayerSessionProgress {
+  userId: string;
+  userName: string;
+  itemId: string;
+  positionTicks: number;
+  runtimeTicks: number;
+}
+
 export interface EpisodeItem {
   id: string;
   name: string;
@@ -70,14 +91,39 @@ function toRuntimeMinutes(runTimeTicks?: number): number | null {
   return Math.round(runTimeTicks / 600000000);
 }
 
+export interface PlayerSessionToken {
+  accessToken: string;
+  userId: string;
+  serverId: string;
+}
+
 export class JellyfinClient {
+  // Base URL normalized to ALWAYS end in a trailing slash. Without this, a
+  // configured base path (e.g. http://host:8096/player) is silently dropped:
+  // `new URL('/Users', 'http://host:8096/player')` resolves to
+  // 'http://host:8096/Users' because the leading-slash pathname is absolute.
+  // With a trailing slash + relative (no leading slash) pathnames, the base
+  // path is preserved: `new URL('Users', 'http://host:8096/player/')` ->
+  // 'http://host:8096/player/Users'. A no-path base behaves identically to
+  // before.
+  private readonly baseUrl: string;
+
   constructor(
-    private readonly baseUrl: string,
+    baseUrl: string,
     private readonly apiKey: string,
-  ) { }
+  ) {
+    this.baseUrl = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  }
+
+  // Build a Jellyfin API URL that preserves any base path. Accepts pathnames
+  // with or without a leading slash; the leading slash is stripped so the
+  // pathname joins RELATIVE to the (trailing-slash) base, keeping the base path.
+  private apiUrl(pathname: string): URL {
+    return new URL(pathname.replace(/^\/+/, ''), this.baseUrl);
+  }
 
   private async request<T>(pathname: string, query: URLSearchParams = new URLSearchParams(), init?: RequestInit): Promise<T> {
-    const url = new URL(pathname, this.baseUrl);
+    const url = this.apiUrl(pathname);
     query.forEach((value, key) => {
       url.searchParams.set(key, value);
     });
@@ -137,7 +183,7 @@ export class JellyfinClient {
       return null;
     }
 
-    const url = new URL(`/Items/${itemId}/Images/Primary`, this.baseUrl);
+    const url = this.apiUrl(`/Items/${itemId}/Images/Primary`);
     url.searchParams.set('quality', '90');
     url.searchParams.set('fillWidth', '480');
     url.searchParams.set('fillHeight', '720');
@@ -488,12 +534,63 @@ export class JellyfinClient {
     });
   }
 
+  // Best-effort current playback progress for an item across active Jellyfin
+  // sessions. Returns null when the item is not currently being played.
+  async getPlaybackProgressForItem(itemId: string): Promise<number | null> {
+    const sessions = await this.request<JellyfinSessionRecord[]>('/Sessions');
+    let maxProgress: number | null = null;
+
+    for (const session of sessions) {
+      const nowPlaying = session.NowPlayingItem;
+      if (!nowPlaying || nowPlaying.Id !== itemId) {
+        continue;
+      }
+
+      const runtimeTicks = nowPlaying.RunTimeTicks ?? 0;
+      const positionTicks = session.PlayState?.PositionTicks ?? nowPlaying.UserData?.PlaybackPositionTicks ?? 0;
+      if (runtimeTicks <= 0) {
+        continue;
+      }
+
+      const progress = Math.max(0, Math.min(1, positionTicks / runtimeTicks));
+      maxProgress = maxProgress == null ? progress : Math.max(maxProgress, progress);
+    }
+
+    return maxProgress;
+  }
+
+  // Active Jellyfin playback sessions normalized for the Stage B fan-out poller:
+  // one entry per session that has a NowPlayingItem, carrying the session's
+  // UserId and the item's position/runtime ticks. Sessions without an item are
+  // omitted (nothing to fan out).
+  async listSessions(): Promise<PlayerSessionProgress[]> {
+    const sessions = await this.request<JellyfinSessionRecord[]>('/Sessions');
+    const out: PlayerSessionProgress[] = [];
+
+    for (const session of sessions) {
+      const nowPlaying = session.NowPlayingItem;
+      if (!nowPlaying?.Id || !session.UserId) {
+        continue;
+      }
+
+      out.push({
+        userId: session.UserId,
+        userName: session.UserName ?? '',
+        itemId: nowPlaying.Id,
+        positionTicks: session.PlayState?.PositionTicks ?? nowPlaying.UserData?.PlaybackPositionTicks ?? 0,
+        runtimeTicks: nowPlaying.RunTimeTicks ?? 0,
+      });
+    }
+
+    return out;
+  }
+
   private buildUserAvatarUrl(userId: string, tag?: string): string | null {
     if (!tag) {
       return null;
     }
 
-    const url = new URL(`/Users/${userId}/Images/Primary`, this.baseUrl);
+    const url = this.apiUrl(`/Users/${userId}/Images/Primary`);
     url.searchParams.set('tag', tag);
     url.searchParams.set('api_key', this.apiKey);
     return url.toString();
@@ -509,17 +606,143 @@ export class JellyfinClient {
     }));
   }
 
-  async fetchMovieStream(itemId: string, rangeHeader?: string, signal?: AbortSignal): Promise<Response> {
-    const url = new URL(`/Videos/${itemId}/stream`, this.baseUrl);
-    url.searchParams.set('static', 'true');
-    url.searchParams.set('api_key', this.apiKey);
+  // The Jellyfin base path (e.g. "/player"), derived from the configured base
+  // URL's pathname, WITHOUT a trailing slash. Empty string when no base path.
+  private get basePath(): string {
+    const pathname = new URL(this.baseUrl).pathname;
+    return pathname === '/' ? '' : pathname.replace(/\/$/, '');
+  }
 
-    return fetch(url, {
-      signal,
-      headers: {
-        'X-Emby-Token': this.apiKey,
-        ...(rangeHeader ? { Range: rangeHeader } : {}),
-      },
+  // Build the player URL as an ORIGIN-RELATIVE path (e.g.
+  // "/player/web/index.html#/details?...") so the client opens it on the CURRENT
+  // browser origin (the same-origin proxy), NOT the internal Jellyfin host. The
+  // base path is taken from the configured Jellyfin URL so this stays correct
+  // whether the base is "/player" or empty.
+  buildPlaybackUrl(itemId: string, startPositionTicks?: number): string {
+    const params = new URLSearchParams({
+      id: itemId,
+      play: 'true',
+      autoplay: 'true',
     });
+
+    if (Number.isFinite(startPositionTicks) && Number(startPositionTicks) > 0) {
+      const ticks = Math.floor(Number(startPositionTicks));
+      params.set('resume', 'true');
+      params.set('startPositionTicks', String(ticks));
+      // Keep both names for compatibility across Jellyfin web route versions.
+      params.set('startTimeTicks', String(ticks));
+    }
+
+    // Jellyfin 10.11 routes item pages under "#/details". The old
+    // "#!/video/video.html" hashbang route is not available in newer builds
+    // and can land on a page-not-found screen.
+    return `${this.basePath}/web/index.html#/details?${params.toString()}`;
+  }
+
+  // --- Per-group playback user (Stage A) ----------------------------------
+  //
+  // gbx owns a dedicated Jellyfin user PER GROUP (username gbx-grp-<groupId>).
+  // We persist only the group->jellyfinUserId mapping (never passwords): the
+  // password is random, rotated on every mint, used immediately, never stored.
+
+  // The deterministic Jellyfin username for a group's gbx-owned playback user.
+  // Public so the server can pass it to rotatePasswordAndAuthenticate.
+  groupUserName(groupId: string): string {
+    return `gbx-grp-${groupId}`;
+  }
+
+  // JF 10.9.11 validates these provider ids as REQUIRED on a UserPolicy update
+  // (POST /Users/{id}/Policy). Omitting them returns
+  // 400 "PasswordResetProviderId field is required". These are Jellyfin's
+  // built-in defaults, which is what a normally-created user already uses.
+  private static readonly DEFAULT_AUTH_PROVIDER_ID =
+    'Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider';
+  private static readonly DEFAULT_PASSWORD_RESET_PROVIDER_ID =
+    'Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider';
+
+  // Find (or create) the gbx-owned Jellyfin user for a group and return its id.
+  // Idempotent: an existing user is reused. Newly created users are granted
+  // access to all libraries and confirmed enabled.
+  async ensureGroupUser(groupId: string): Promise<string> {
+    const name = this.groupUserName(groupId);
+    const users = await this.request<JellyfinUserRecord[]>('/Users');
+    const existing = users.find((user) => user.Name === name);
+    if (existing) {
+      return existing.Id;
+    }
+
+    const created = await this.request<JellyfinUserRecord>('/Users/New', new URLSearchParams(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Name: name }),
+    });
+
+    // Grant library access; ensure the account is not disabled. The provider ids
+    // are REQUIRED by JF 10.9.11's policy validation (cold-create path otherwise
+    // 400s on the first mint with "PasswordResetProviderId field is required").
+    await this.request(`/Users/${created.Id}/Policy`, new URLSearchParams(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        IsDisabled: false,
+        EnableAllFolders: true,
+        EnabledFolders: [],
+        AuthenticationProviderId: JellyfinClient.DEFAULT_AUTH_PROVIDER_ID,
+        PasswordResetProviderId: JellyfinClient.DEFAULT_PASSWORD_RESET_PROVIDER_ID,
+      }),
+    });
+
+    return created.Id;
+  }
+
+  // Rotate the per-group user's password to a fresh random value, then
+  // authenticate as that user to obtain a short-lived access token. The password
+  // is used immediately and never persisted. Returns the token + identity the
+  // client needs to seed Jellyfin-web's localStorage.
+  async rotatePasswordAndAuthenticate(
+    userId: string,
+    name: string,
+    deviceId: string,
+  ): Promise<PlayerSessionToken> {
+    const newPassword = crypto.randomBytes(24).toString('base64url');
+
+    // Admin reset to clear any existing password (newly created users have an
+    // empty password; ResetPassword:true is a safe no-op then), then set the
+    // fresh password. On 10.9.11 the admin set-password call does not require
+    // CurrentPw when ResetPassword cleared it first.
+    await this.request(`/Users/${userId}/Password`, new URLSearchParams(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ResetPassword: true }),
+    });
+    await this.request(`/Users/${userId}/Password`, new URLSearchParams(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ CurrentPw: '', NewPw: newPassword }),
+    });
+
+    const auth = await this.request<{
+      AccessToken?: string;
+      ServerId?: string;
+      User?: { Id?: string };
+    }>('/Users/AuthenticateByName', new URLSearchParams(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Emby-Authorization':
+          `MediaBrowser Client="Gogglebox", Device="Gogglebox-Player", DeviceId="${deviceId}", Version="1.0"`,
+      },
+      body: JSON.stringify({ Username: name, Pw: newPassword }),
+    });
+
+    if (!auth?.AccessToken || !auth.User?.Id) {
+      throw new Error('Jellyfin did not return an access token for the group user');
+    }
+
+    return {
+      accessToken: auth.AccessToken,
+      userId: auth.User.Id,
+      serverId: auth.ServerId ?? '',
+    };
   }
 }

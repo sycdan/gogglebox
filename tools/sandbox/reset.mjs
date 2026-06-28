@@ -12,8 +12,8 @@
 // Env: JELLYFIN_URL (default http://jellyfin-sandbox:8096), JELLYFIN_API_KEY.
 
 import { makeJellyfin } from '../../e2e/lib/jellyfin.mjs';
+import { resolveJellyfinBase } from './baseUrl.mjs';
 
-const url = process.env.JELLYFIN_URL || 'http://jellyfin-sandbox:8096';
 const apiKey = process.env.JELLYFIN_API_KEY;
 
 if (!apiKey) {
@@ -21,6 +21,12 @@ if (!apiKey) {
   process.exit(1);
 }
 
-const jf = makeJellyfin(url, apiKey);
+// reset runs post-provision (BaseUrl already /player), but the anchor may inject a
+// BARE JELLYFIN_URL. Discover the active base (bare vs /player) so we don't hit a
+// 302 like provision did before this fix.
+const base = await resolveJellyfinBase(process.env.JELLYFIN_URL, { token: apiKey });
+console.log(`[reset] active base: ${base}`);
+
+const jf = makeJellyfin(base, apiKey);
 await jf.resetAllPlayedState(console.log);
 console.log('[reset] sandbox played-state is clean.');

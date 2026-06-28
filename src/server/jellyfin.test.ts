@@ -133,25 +133,174 @@ test('markPlayed and markUnplayed call expected verbs', async () => {
   }
 });
 
-test('fetchMovieStream uses query token and forwards range header', async () => {
+test('buildPlaybackUrl returns an origin-relative web player path with autoplay', () => {
+  // No base path -> path starts at /web/index.html (origin-relative, no host).
+  const client = new JellyfinClient('https://example.com', 'abc123');
+  const raw = client.buildPlaybackUrl('item1');
+
+  assert.equal(raw.startsWith('/web/index.html#/details?'), true);
+
+  const url = new URL(raw, 'http://localhost:8080');
+  assert.equal(url.origin, 'http://localhost:8080');
+  assert.equal(url.pathname, '/web/index.html');
+
+  const hashParams = new URLSearchParams(url.hash.replace(/^#\/details\?/, ''));
+  assert.equal(hashParams.get('id'), 'item1');
+  assert.equal(hashParams.get('autoplay'), 'true');
+  assert.equal(hashParams.has('startPositionTicks'), false);
+  assert.equal(hashParams.has('startTimeTicks'), false);
+});
+
+test('buildPlaybackUrl preserves the /player base path origin-relative', () => {
+  const client = new JellyfinClient('http://jellyfin-sandbox:8096/player', 'abc123');
+  const raw = client.buildPlaybackUrl('item1');
+
+  assert.equal(raw.startsWith('/player/web/index.html#/details?'), true);
+
+  const url = new URL(raw, 'http://localhost:8080');
+  assert.equal(url.pathname, '/player/web/index.html');
+});
+
+test('buildPlaybackUrl includes start ticks when provided', () => {
+  const client = new JellyfinClient('https://example.com', 'abc123');
+  const url = new URL(client.buildPlaybackUrl('item1', 25_000_000), 'http://localhost:8080');
+  const hashParams = new URLSearchParams(url.hash.replace(/^#\/details\?/, ''));
+
+  assert.equal(hashParams.get('startPositionTicks'), '25000000');
+  assert.equal(hashParams.get('startTimeTicks'), '25000000');
+});
+
+test('request preserves a configured base path on API calls', async () => {
+  const calls: string[] = [];
   const originalFetch = globalThis.fetch;
 
-  globalThis.fetch = (async (input: URL | string, init?: RequestInit) => {
-    const url = new URL(String(input));
-
-    assert.equal(url.searchParams.get('api_key'), 'abc123');
-    assert.equal(url.searchParams.get('static'), 'true');
-    assert.equal((init?.headers as Record<string, string>).Range, 'bytes=0-10');
-    assert.equal((init?.headers as Record<string, string>)['X-Emby-Token'], 'abc123');
-
-    return new Response(null, { status: 206 });
+  globalThis.fetch = (async (input: URL | string) => {
+    calls.push(String(input));
+    return new Response(JSON.stringify({ Items: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }) as typeof fetch;
 
   try {
-    const client = new JellyfinClient('https://example.com', 'abc123');
-    const response = await client.fetchMovieStream('item1', 'bytes=0-10');
+    // No base path: /Items resolves directly under the host.
+    const noPath = new JellyfinClient('http://host:8096', 'abc123');
+    await noPath.listItems('movie');
+    const noPathUrl = new URL(calls[0]);
+    assert.equal(noPathUrl.pathname, '/Items');
 
-    assert.equal(response.status, 206);
+    // /player base path: the base path MUST be preserved on the REST call.
+    const withPath = new JellyfinClient('http://host:8096/player', 'abc123');
+    await withPath.listItems('movie');
+    const withPathUrl = new URL(calls[1]);
+    assert.equal(withPathUrl.pathname, '/player/Items');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('ensureGroupUser reuses an existing group user and creates one when missing', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string; body?: string }> = [];
+
+  // First scenario: user already exists -> no creation call.
+  globalThis.fetch = (async (input: URL | string, init?: RequestInit) => {
+    calls.push({ url: String(input), method: String(init?.method ?? 'GET'), body: init?.body as string });
+    return new Response(
+      JSON.stringify([{ Id: 'existing-id', Name: 'gbx-grp-group1' }]),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  }) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('http://host:8096', 'abc123');
+    const id = await client.ensureGroupUser('group1');
+    assert.equal(id, 'existing-id');
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /\/Users$/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  // Second scenario: user missing -> POST /Users/New then POST policy.
+  calls.length = 0;
+  let step = 0;
+  globalThis.fetch = (async (input: URL | string, init?: RequestInit) => {
+    calls.push({ url: String(input), method: String(init?.method ?? 'GET'), body: init?.body as string });
+    step += 1;
+    if (step === 1) {
+      // /Users list (empty)
+      return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (step === 2) {
+      // /Users/New
+      return new Response(JSON.stringify({ Id: 'new-id', Name: 'gbx-grp-group2' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    // /Users/new-id/Policy
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('http://host:8096', 'abc123');
+    const id = await client.ensureGroupUser('group2');
+    assert.equal(id, 'new-id');
+    assert.equal(calls.length, 3);
+    assert.match(calls[1].url, /\/Users\/New$/);
+    assert.equal(calls[1].method, 'POST');
+    assert.match(String(calls[1].body), /gbx-grp-group2/);
+    assert.match(calls[2].url, /\/Users\/new-id\/Policy$/);
+    // JF 10.9.11 requires the provider ids on the policy update or the cold
+    // create path 400s on the first mint ("PasswordResetProviderId required").
+    const policyBody = JSON.parse(String(calls[2].body));
+    assert.equal(
+      policyBody.AuthenticationProviderId,
+      'Jellyfin.Server.Implementations.Users.DefaultAuthenticationProvider',
+    );
+    assert.equal(
+      policyBody.PasswordResetProviderId,
+      'Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('rotatePasswordAndAuthenticate resets+sets password then authenticates', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string; headers?: Record<string, string>; body?: string }> = [];
+
+  globalThis.fetch = (async (input: URL | string, init?: RequestInit) => {
+    calls.push({
+      url: String(input),
+      method: String(init?.method ?? 'GET'),
+      headers: init?.headers as Record<string, string> | undefined,
+      body: init?.body as string,
+    });
+    if (String(input).endsWith('/Users/AuthenticateByName')) {
+      return new Response(
+        JSON.stringify({ AccessToken: 'tok-1', ServerId: 'srv-1', User: { Id: 'user-1' } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('http://host:8096', 'abc123');
+    const result = await client.rotatePasswordAndAuthenticate('user-1', 'gbx-grp-group1', 'device-abc');
+
+    assert.deepEqual(result, { accessToken: 'tok-1', userId: 'user-1', serverId: 'srv-1' });
+    assert.equal(calls.length, 3);
+    assert.match(calls[0].url, /\/Users\/user-1\/Password$/);
+    assert.match(String(calls[0].body), /ResetPassword/);
+    assert.match(calls[1].url, /\/Users\/user-1\/Password$/);
+    assert.match(String(calls[1].body), /NewPw/);
+    assert.match(calls[2].url, /\/Users\/AuthenticateByName$/);
+    const authHeader = (calls[2].headers as Record<string, string>)['X-Emby-Authorization'];
+    assert.match(authHeader, /DeviceId="device-abc"/);
   } finally {
     globalThis.fetch = originalFetch;
   }

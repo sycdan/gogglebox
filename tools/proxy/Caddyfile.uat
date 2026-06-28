@@ -1,0 +1,25 @@
+# Same-origin reverse proxy for UAT.
+#
+# The real Jellyfin server is reached at its normal LAN origin, such as
+# http://htpc.lan:8096, and does not need Jellyfin BaseUrl=/player. The browser
+# still opens /player/... on localhost:8080; this proxy strips /player before
+# forwarding to the HTPC.
+
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	handle /api/* {
+		reverse_proxy server:3000
+	}
+
+	handle_path /player/* {
+		reverse_proxy {$JELLYFIN_PROXY_UPSTREAM:jellyfin-unconfigured:8096}
+	}
+
+	handle {
+		reverse_proxy client:5173
+	}
+}

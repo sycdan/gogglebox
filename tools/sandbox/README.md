@@ -16,7 +16,7 @@ only the **mutable** per-user played-state is reset between tests.
 
 | Committed (in git) | Generated (gitignored) |
 | --- | --- |
-| `fixtures.mjs` — the library/users spec | `tools/sandbox/media/` and the `sandbox_media` volume (tiny .mkv stubs + .nfo) |
+| `fixtures.mjs` — the library/users spec | `tools/sandbox/media/` and the `sandbox_media` volume (tiny .mp4 stubs + .nfo) |
 | `generate-fixtures.mjs`, `provision.mjs`, `reset.mjs` | `sandbox_config` / `sandbox_cache` volumes (Jellyfin state) |
 | `Dockerfile` (Node + ffmpeg tooling image) | `.env.sbx` (overrides-only: minted API key + URL + admin creds) |
 | this `README.md` | `config.sbx.json` (groups with the minted user GUIDs) |
@@ -121,8 +121,9 @@ await jf.resetAllPlayedState();   // 1. clean slate for every user
 
 ## Fixture library
 
-Tiny but broad. Each video is a **1-second, 32×32 ffmpeg encode** (a few KB) so
-Jellyfin probes a **real (short) `RunTimeTicks`** — resume %/`setPlaybackPosition`
+Tiny but broad. Each video is a **short, 32×32 ffmpeg encode** (default 12s; set
+`SANDBOX_VIDEO_SECONDS` to override) so Jellyfin probes a **real (short)
+`RunTimeTicks`** — resume %/`setPlaybackPosition`
 math needs real ticks, so zero-byte files are not used. Total library is
 single-digit MB. Folder/file paths are **fixed** so Jellyfin item GUIDs are
 reproducible across rebuilds. Online metadata providers are **disabled** on the

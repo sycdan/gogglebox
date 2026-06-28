@@ -11,6 +11,17 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 const jellyfinUrl = process.env.JELLYFIN_URL?.trim();
 const jellyfinApiKey = process.env.JELLYFIN_API_KEY?.trim();
 
+// These tests talk to a LIVE Jellyfin. They run ONLY via `npm run test:e2e:real`
+// (which sets RUN_REAL_E2E=1 and is pointed at a properly-configured .env with a
+// reachable Jellyfin at the correct base path). The file ALSO matches the
+// default `npm test` glob (`src/server/*.test.ts`), which runs in the base
+// container that has NO Jellyfin — and even when a sandbox happens to be up, the
+// base .env JELLYFIN_URL may lack the /player base path, so a reachability probe
+// alone is misleading (it would run real assertions against the wrong base URL).
+// Gating on the explicit RUN_REAL_E2E flag is deterministic and keeps the
+// documented "base test needs no Jellyfin" contract true.
+const runRealE2e = process.env.RUN_REAL_E2E === '1' || process.env.RUN_REAL_E2E === 'true';
+
 function getRealEnv(): { url: string; key: string } {
   if (!jellyfinUrl || !jellyfinApiKey) {
     throw new Error('Missing JELLYFIN_URL or JELLYFIN_API_KEY in .env for real-service E2E tests.');
@@ -41,7 +52,11 @@ async function getFirstJellyfinUserId(url: string, key: string): Promise<string>
   return firstId;
 }
 
-test('real e2e: list movies and shows from live Jellyfin service', async () => {
+test('real e2e: list movies and shows from live Jellyfin service', async (t) => {
+  if (!runRealE2e) {
+    t.skip("Real-Jellyfin e2e: run via npm run test:e2e:real (RUN_REAL_E2E=1)");
+    return;
+  }
   const env = getRealEnv();
   const client = new JellyfinClient(env.url, env.key);
 
@@ -62,7 +77,11 @@ test('real e2e: list movies and shows from live Jellyfin service', async () => {
   }
 });
 
-test('real e2e: watched ids are available for movie and show kinds', async () => {
+test('real e2e: watched ids are available for movie and show kinds', async (t) => {
+  if (!runRealE2e) {
+    t.skip("Real-Jellyfin e2e: run via npm run test:e2e:real (RUN_REAL_E2E=1)");
+    return;
+  }
   const env = getRealEnv();
   const client = new JellyfinClient(env.url, env.key);
   const userId = await getFirstJellyfinUserId(env.url, env.key);
@@ -74,7 +93,11 @@ test('real e2e: watched ids are available for movie and show kinds', async () =>
   assert.ok(watchedShows instanceof Set);
 });
 
-test('real e2e: stream endpoint responds for at least one movie when available', async () => {
+test('real e2e: buildPlaybackUrl produces Jellyfin web player deep-link', async (t) => {
+  if (!runRealE2e) {
+    t.skip("Real-Jellyfin e2e: run via npm run test:e2e:real (RUN_REAL_E2E=1)");
+    return;
+  }
   const env = getRealEnv();
   const client = new JellyfinClient(env.url, env.key);
   const movies = await client.listItems('movie');
@@ -83,11 +106,18 @@ test('real e2e: stream endpoint responds for at least one movie when available',
     return;
   }
 
-  const response = await client.fetchMovieStream(movies[0].id, 'bytes=0-1');
-  assert.ok(response.status === 200 || response.status === 206);
+  // buildPlaybackUrl is now ORIGIN-RELATIVE; resolve against a base to inspect.
+  const url = new URL(client.buildPlaybackUrl(movies[0].id, 10_000_000), 'http://localhost:8080');
+  const basePath = new URL(env.url.endsWith('/') ? env.url : `${env.url}/`).pathname.replace(/\/$/, '');
+  assert.equal(url.pathname, `${basePath}/web/index.html`);
+  assert.match(url.hash, /^#\/details\?/);
 });
 
-test('real e2e: list episodes for one series when series exist', async () => {
+test('real e2e: list episodes for one series when series exist', async (t) => {
+  if (!runRealE2e) {
+    t.skip("Real-Jellyfin e2e: run via npm run test:e2e:real (RUN_REAL_E2E=1)");
+    return;
+  }
   const env = getRealEnv();
   const client = new JellyfinClient(env.url, env.key);
   const shows = await client.listItems('show');

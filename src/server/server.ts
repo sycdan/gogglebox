@@ -1,5 +1,5 @@
+import crypto from 'node:crypto';
 import path from 'node:path';
-import { Readable } from 'node:stream';
 
 import express from 'express';
 import session from 'express-session';
@@ -15,6 +15,7 @@ import {
 import { deriveGroupKey } from './groupKey';
 import { JellyfinClient } from './jellyfin';
 import { ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind, ViewerWatchedState } from './types';
+import { computeWatchedFanout } from './watchedFanout';
 
 const config = loadConfig();
 const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
@@ -22,7 +23,6 @@ const appState = new AppState();
 const app = express();
 const clientDist = path.resolve(process.cwd(), 'dist/client');
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
-const activeStreamControllers = new Map<string, AbortController>();
 
 function isKidsContent(item: LibraryItem): boolean {
   const rating = item.officialRating?.toUpperCase() ?? '';
@@ -86,10 +86,6 @@ function ignorableId(item: { type: LibraryKind; id: string; seriesId?: string | 
 
 function getItemId(req: express.Request): string {
   return Array.isArray(req.params.itemId) ? req.params.itemId[0] : req.params.itemId;
-}
-
-function getRangeHeader(req: express.Request): string | undefined {
-  return typeof req.headers.range === 'string' ? req.headers.range : undefined;
 }
 
 async function getWatchedUnion(viewers: FamilyMember[], kind: LibraryKind): Promise<Set<string>> {
@@ -522,8 +518,8 @@ app.post('/api/items/:itemId/progress/sync', requireAuth, requireViewerGroup, as
       return;
     }
 
-    if (!Number.isFinite(playbackPositionTicks) || playbackPositionTicks <= 0) {
-      res.status(400).json({ error: 'Playback position must be a positive number of ticks' });
+    if (!Number.isFinite(playbackPositionTicks) || playbackPositionTicks < 0) {
+      res.status(400).json({ error: 'Playback position must be a non-negative number of ticks' });
       return;
     }
 
@@ -555,101 +551,77 @@ app.delete('/api/items/:itemId/watched', requireAuth, requireViewerGroup, async 
   }
 });
 
-app.get('/api/items/:itemId/stream', requireAuth, requireViewerGroup, async (req, res) => {
-  const itemId = getItemId(req);
-  const streamKey = `${req.sessionID}:${itemId}`;
+// Stage A: mint a fresh Jellyfin playback session for the active group's
+// gbx-owned JF user, so the client can seed Jellyfin-web's localStorage and
+// auto-login in the /player tab. The active group id is the deterministic,
+// order-independent key derived from the active viewers' Jellyfin user ids
+// (activeGroupKey / deriveGroupKey) — same set of people -> same JF user. We
+// rotate a random password on every mint and persist only the group->userId
+// mapping (never the password).
+app.post('/api/player/session', requireAuth, requireViewerGroup, async (req, res) => {
+  try {
+    const groupKey = activeGroupKey(req);
+    const userId = await jellyfin.ensureGroupUser(groupKey);
+    // Stage B: persist the group player user id AND the member ids (the active
+    // viewers' Jellyfin user ids) so the watched fan-out poller can map this
+    // player user's sessions back to the individual members to mark played.
+    const memberIds = activeViewersForSession(req).map((viewer) => viewer.jellyfinUserId);
+    appState.setGroupPlayerUser(groupKey, userId, memberIds);
 
-  const previousController = activeStreamControllers.get(streamKey);
-  if (previousController) {
-    previousController.abort();
-    if (jellyfinDebugEnabled) {
-      console.log(`[stream] xx item=${itemId} replaced by newer request`);
-    }
+    const deviceId = crypto.randomUUID();
+    const token = await jellyfin.rotatePasswordAndAuthenticate(
+      userId,
+      jellyfin.groupUserName(groupKey),
+      deviceId,
+    );
+
+    res.json({
+      serverId: token.serverId,
+      userId: token.userId,
+      accessToken: token.accessToken,
+      deviceId,
+      playerOrigin: '/player',
+    });
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Could not start player session' });
+  }
+});
+
+app.get('/api/items/:itemId/playback-url', requireAuth, requireViewerGroup, (req, res) => {
+  const itemId = getItemId(req);
+  const hasStartPosition = typeof req.query.startPositionTicks === 'string';
+  const startPositionTicks = hasStartPosition ? Number(req.query.startPositionTicks) : undefined;
+
+  if (hasStartPosition && (!Number.isFinite(startPositionTicks) || Number(startPositionTicks) < 0)) {
+    res.status(400).json({ error: 'startPositionTicks must be a non-negative number of ticks' });
+    return;
   }
 
-  const abortController = new AbortController();
-  let upstreamAborted = false;
-  activeStreamControllers.set(streamKey, abortController);
+  const rawUrl = jellyfin.buildPlaybackUrl(itemId, startPositionTicks);
+  const playerOrigin = '/player';
+  const parsedUrl = new URL(rawUrl, 'http://localhost');
+  const url = parsedUrl.pathname.startsWith(`${playerOrigin}/`)
+    ? rawUrl
+    : `${playerOrigin}${rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`}`;
+  res.json({ url });
+});
 
-  const abortUpstream = () => {
-    if (upstreamAborted) {
-      return;
-    }
-
-    upstreamAborted = true;
-    abortController.abort();
-    if (activeStreamControllers.get(streamKey) === abortController) {
-      activeStreamControllers.delete(streamKey);
-    }
-  };
-
-  req.on('aborted', abortUpstream);
-  res.on('close', abortUpstream);
-
+app.get('/api/items/:itemId/playback-progress', requireAuth, requireViewerGroup, async (req, res) => {
   try {
-    if (jellyfinDebugEnabled) {
-      console.log(`[stream] -> item=${itemId} range=${getRangeHeader(req) ?? 'full'}`);
-    }
+    const itemId = getItemId(req);
+    const viewers = activeViewersForSession(req);
 
-    const upstream = await jellyfin.fetchMovieStream(itemId, getRangeHeader(req), abortController.signal);
-    if (!upstream.ok && upstream.status !== 206) {
-      const body = await upstream.text();
-      res.status(upstream.status).json({ error: body.slice(0, 200) });
-      return;
-    }
+    const [viewerPlayed, progressPercent] = await Promise.all([
+      Promise.all(viewers.map((viewer) => jellyfin.getItemPlayedState(viewer.jellyfinUserId, itemId))),
+      jellyfin.getPlaybackProgressForItem(itemId),
+    ]);
 
-    res.status(upstream.status);
-    const headerNames = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
-    headerNames.forEach((name) => {
-      const value = upstream.headers.get(name);
-      if (value) {
-        res.setHeader(name, value);
-      }
+    res.json({
+      progressPercent,
+      played: viewerPlayed.some(Boolean),
     });
-
-    if (!upstream.body) {
-      res.end();
-      return;
-    }
-
-    const stream = Readable.fromWeb(upstream.body as globalThis.ReadableStream<Uint8Array>);
-
-    stream.on('error', (error) => {
-      if (!res.headersSent) {
-        res.status(502).json({ error: error instanceof Error ? error.message : 'Could not open stream' });
-        return;
-      }
-
-      res.destroy(error instanceof Error ? error : undefined);
-    });
-
-    stream.on('close', abortUpstream);
-    res.on('finish', () => {
-      upstreamAborted = true;
-      if (activeStreamControllers.get(streamKey) === abortController) {
-        activeStreamControllers.delete(streamKey);
-      }
-      if (jellyfinDebugEnabled) {
-        console.log(`[stream] <- item=${itemId} status=${upstream.status}`);
-      }
-    });
-
-    stream.pipe(res);
   } catch (error) {
-    if (error instanceof Error && error.name === 'AbortError') {
-      if (jellyfinDebugEnabled) {
-        console.log(`[stream] xx item=${itemId} aborted`);
-      }
-      return;
-    }
-
-    res.status(502).json({ error: error instanceof Error ? error.message : 'Could not open stream' });
-  } finally {
-    req.off('aborted', abortUpstream);
-    res.off('close', abortUpstream);
-    if (activeStreamControllers.get(streamKey) === abortController && upstreamAborted) {
-      activeStreamControllers.delete(streamKey);
-    }
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Could not fetch playback progress' });
   }
 });
 
@@ -663,6 +635,84 @@ app.get('/{*rest}', (_req, res, next) => {
   });
 });
 
+// ── Stage B: watched fan-out poller ────────────────────────────────────────
+//
+// A single server-side interval polls Jellyfin's active sessions. When a GROUP
+// PLAYER user (minted by POST /api/player/session) crosses the watched threshold
+// on the item it's playing, gbx marks that item Played for every INDIVIDUAL
+// member id of the group. The decision logic is the pure computeWatchedFanout;
+// this wrapper does the IO. Idempotent across ticks via the marked-set carried in
+// `watchedFanoutMarked`.
+const WATCHED_FANOUT_INTERVAL_MS = 5000;
+let watchedFanoutMarked = new Set<string>();
+let watchedFanoutRunning = false;
+
+async function runWatchedFanoutTick(): Promise<void> {
+  // Overlap guard: a slow tick must not stack with the next interval fire.
+  if (watchedFanoutRunning) {
+    return;
+  }
+  watchedFanoutRunning = true;
+
+  try {
+    // Map each group player jellyfinUserId -> the member ids to fan out to.
+    const players = appState.getGroupPlayerUsers();
+    const playerUserMembers = new Map<string, string[]>();
+    for (const { jellyfinUserId, memberIds } of Object.values(players)) {
+      if (jellyfinUserId && memberIds.length > 0) {
+        playerUserMembers.set(jellyfinUserId, memberIds);
+      }
+    }
+    if (playerUserMembers.size === 0) {
+      // No minted group players yet (or none with members) — nothing to poll.
+      watchedFanoutMarked = new Set<string>();
+      return;
+    }
+
+    const sessions = await jellyfin.listSessions();
+    const { marks, nextMarked } = computeWatchedFanout(
+      watchedFanoutMarked,
+      sessions,
+      config.watchedThreshold,
+      playerUserMembers,
+    );
+    watchedFanoutMarked = nextMarked;
+
+    for (const mark of marks) {
+      try {
+        await jellyfin.markPlayed(mark.memberId, mark.itemId);
+        if (jellyfinDebugEnabled) {
+          console.log(
+            `[fanout] marked played member=${mark.memberId} item=${mark.itemId} (player=${mark.playerUserId})`,
+          );
+        }
+      } catch (markError) {
+        // One member's mark failing shouldn't abort the rest or the poller.
+        console.error(
+          `[fanout] failed to mark played member=${mark.memberId} item=${mark.itemId}:`,
+          markError instanceof Error ? markError.message : markError,
+        );
+      }
+    }
+  } catch (error) {
+    // A poll error (e.g. Jellyfin blip) must NOT crash the server.
+    console.error('[fanout] poll tick failed:', error instanceof Error ? error.message : error);
+  } finally {
+    watchedFanoutRunning = false;
+  }
+}
+
+function startWatchedFanoutPoller(): void {
+  const timer = setInterval(() => {
+    void runWatchedFanoutTick();
+  }, WATCHED_FANOUT_INTERVAL_MS);
+  // Don't let the interval keep the process alive on shutdown.
+  if (typeof timer.unref === 'function') {
+    timer.unref();
+  }
+  console.log(`[fanout] watched fan-out poller started (every ${WATCHED_FANOUT_INTERVAL_MS}ms, threshold ${config.watchedThreshold}).`);
+}
+
 void (async () => {
   try {
     const jellyfinUsers = await jellyfin.fetchUsers();
@@ -672,6 +722,8 @@ void (async () => {
     console.error('[startup] Failed to load viewers from Jellyfin:', err instanceof Error ? err.message : err);
     process.exit(1);
   }
+
+  startWatchedFanoutPoller();
 
   app.listen(config.port, () => {
     console.log(`Gogglebox listening on http://localhost:${config.port}`);

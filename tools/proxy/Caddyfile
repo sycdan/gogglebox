@@ -1,0 +1,41 @@
+# Same-origin reverse proxy — the shipped front door for Gogglebox.
+#
+# Everything is served from ONE origin (http://localhost:8080) so that the
+# gbx client JS (served at /) and Jellyfin-web (served at /player) share a
+# localStorage origin. That lets the client seed Jellyfin-web's credentials
+# for the same origin, so opening /player in a new tab auto-logs-in as a
+# gbx-controlled, per-group Jellyfin user.
+#
+# Routes:
+#   /api/*    -> gbx server  (Express :3000)
+#   /player/* -> Jellyfin    (base path /player; {$JELLYFIN_PROXY_UPSTREAM})
+#   /*        -> gbx client  (Vite dev :5173, with HMR websockets)
+#
+# The Jellyfin upstream differs per env, so it's an env var. The bare base sets
+# a harmless default; the sbx/uat overlays set JELLYFIN_PROXY_UPSTREAM to their
+# own Jellyfin host on the proxy service.
+
+{
+	# No HTTPS/ACME for the LAN dev front door.
+	auto_https off
+	admin off
+}
+
+:8080 {
+	# gbx API.
+	handle /api/* {
+		reverse_proxy server:3000
+	}
+
+	# Jellyfin, mounted under its configured BaseUrl (/player). Jellyfin prefixes
+	# ALL routes (web UI + REST) with /player, so we pass the path through as-is.
+	handle /player/* {
+		reverse_proxy {$JELLYFIN_PROXY_UPSTREAM:jellyfin-unconfigured:8096}
+	}
+
+	# Everything else -> the Vite dev client. reverse_proxy transparently
+	# upgrades websockets, so Vite HMR (/@vite/client) works through the proxy.
+	handle {
+		reverse_proxy client:5173
+	}
+}

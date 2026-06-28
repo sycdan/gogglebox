@@ -18,6 +18,15 @@ export default defineConfig({
     allowedHosts: true,
     port: 5173,
     strictPort: true,
+    // The shipped front door is the same-origin proxy on :8080 (Caddy ->
+    // client:5173). When the page is served through the proxy, the HMR
+    // websocket must connect back on the proxy's port/origin, not Vite's
+    // internal :5173 (which isn't published behind the proxy). clientPort
+    // pins the browser-side websocket to 8080 so HMR works through the proxy.
+    // Direct :5173 access still works for HMR over the same connection.
+    hmr: {
+      clientPort: 8080,
+    },
     proxy: {
       // VITE_API_PROXY points at the server service inside dev compose;
       // falls back to localhost for plain host `npm run dev`.

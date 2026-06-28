@@ -1,4 +1,11 @@
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { PlayerSessionPayload, seedJellyfinWebSession } from './jellyfinSession';
+import { clickEl, discoverPlayControl, isPlaybackStarted } from './playerLaunch';
+
+const playerStartMuted =
+  import.meta.env.VITE_PLAYER_START_MUTED === '1' ||
+  import.meta.env.VITE_PLAYER_START_MUTED === 'true';
 
 type LibraryKind = 'movie' | 'show';
 
@@ -42,13 +49,16 @@ interface EpisodeItem {
   imageUrl: string | null;
 }
 
-interface PlaybackItem {
+interface ActivePlaybackItem {
   id: string;
   title: string;
   subtitle?: string;
-  startPositionSeconds?: number;
-  seriesId?: string | null;
-  seriesName?: string | null;
+  url: string;
+}
+
+interface PlaybackProgressResponse {
+  progressPercent: number | null;
+  played: boolean;
 }
 
 interface IgnoredItem {
@@ -217,25 +227,16 @@ export function App() {
   const [selectedSeries, setSelectedSeries] = useState<LibraryItem | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(false);
-  const [playingItem, setPlayingItem] = useState<PlaybackItem | null>(null);
+  const [playingItem, setPlayingItem] = useState<ActivePlaybackItem | null>(null);
+  const [playerStarted, setPlayerStarted] = useState(false);
+  const [playerNeedsUserStart, setPlayerNeedsUserStart] = useState(false);
+  const playerFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const [autoMarked, setAutoMarked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [libraryLoading, setLibraryLoading] = useState(false);
-  const [autoMarked, setAutoMarked] = useState(false);
   const [credentials, setCredentials] = useState({ username: '', password: '' });
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const playerModalRef = useRef<HTMLDivElement | null>(null);
-  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-  // Cache of episode lists keyed by seriesId so repeated S-skips within the same
-  // series don't refetch the ordered episode list each time.
-  const seriesEpisodesCacheRef = useRef<Map<string, EpisodeItem[]>>(new Map());
-  // Guards against double-trigger / races while a skip is resolving in flight.
-  const skipInFlightRef = useRef(false);
-  // Latest playingItem, readable from the document-level keydown handler without
-  // re-binding the listener on every change.
-  const playingItemRef = useRef<PlaybackItem | null>(null);
-  playingItemRef.current = playingItem;
 
   // Per-rail pagination (3 tiles per page) so rails stay roomy, not cramped.
   const continuePager = usePager(continueWatching);
@@ -633,237 +634,433 @@ export function App() {
     }
   }
 
-  function startPlayback(item: PlaybackItem) {
-    setAutoMarked(false);
-    setPlayingItem(item);
+  async function openPlayback({
+    id,
+    title,
+    subtitle,
+    startPositionTicks,
+  }: {
+    id: string;
+    title: string;
+    subtitle?: string;
+    startPositionTicks?: number;
+  }) {
+    try {
+      const params = new URLSearchParams();
+      if (Number.isFinite(startPositionTicks) && Number(startPositionTicks) > 0) {
+        params.set('startPositionTicks', String(Math.floor(Number(startPositionTicks))));
+      }
+
+      const query = params.toString();
+      // Mint a fresh per-group Jellyfin playback session, then seed Jellyfin-web's
+      // localStorage on THIS origin so the /player tab auto-logs-in, then resolve
+      // the origin-relative playback path. Mint + seed happen right before open so
+      // the rotated token is fresh.
+      const [playerSession, response] = await Promise.all([
+        apiRequest<PlayerSessionPayload>('/api/player/session', { method: 'POST' }),
+        apiRequest<{ url: string }>(
+          `/api/items/${id}/playback-url${query ? `?${query}` : ''}`,
+        ),
+      ]);
+
+      seedJellyfinWebSession(window.localStorage, playerSession, window.location.origin);
+
+      // Build the same-origin player URL. serverId is appended to the details
+      // hash because some jellyfin-web routes need it to resolve the server.
+      const playbackUrl = new URL(response.url, window.location.origin);
+      if (playerSession.serverId) {
+        // The route/item id lives in the hash (#/details?id=...), so add serverId
+        // to the hash query, not the search string.
+        const hash = playbackUrl.hash;
+        playbackUrl.hash = hash.includes('serverId=')
+          ? hash
+          : `${hash}${hash.includes('?') ? '&' : '?'}serverId=${encodeURIComponent(playerSession.serverId)}`;
+      }
+      const playbackUrlStr = playbackUrl.toString();
+
+      setAutoMarked(false);
+      setPlayerStarted(false);
+      setPlayerNeedsUserStart(false);
+      setPlayingItem({
+        id,
+        title,
+        subtitle,
+        url: playbackUrlStr,
+      });
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not launch Jellyfin playback');
+    }
   }
 
   async function startContinuePlayback(item: ContinueWatchingItem) {
-    try {
-      await apiRequest(`/api/items/${item.id}/progress/sync`, {
-        method: 'POST',
-        body: JSON.stringify({
-          sourceViewerId: item.sourceViewerId,
-          playbackPositionTicks: item.playbackPositionTicks,
-        }),
-      });
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not sync continue watching progress');
+    if (item.playbackPositionTicks > 0) {
+      try {
+        await apiRequest(`/api/items/${item.id}/progress/sync`, {
+          method: 'POST',
+          body: JSON.stringify({
+            sourceViewerId: item.sourceViewerId,
+            playbackPositionTicks: item.playbackPositionTicks,
+          }),
+        });
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'Could not sync continue watching progress');
+      }
     }
 
-    const isShow = item.type === 'show';
-    startPlayback({
+    await openPlayback({
       id: item.id,
       title: item.name,
-      subtitle: isShow
+      subtitle: item.type === 'show'
         ? `${item.seriesName ?? item.name}${item.seasonNumber && item.episodeNumber
           ? ` • S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}`
           : ''}`
         : undefined,
-      startPositionSeconds: item.playbackPositionTicks / 10_000_000,
-      seriesId: isShow ? item.seriesId : undefined,
-      seriesName: isShow ? item.seriesName : undefined,
+      startPositionTicks: item.playbackPositionTicks,
     });
   }
 
-  async function resolveSeriesEpisodes(seriesId: string): Promise<EpisodeItem[]> {
-    const cached = seriesEpisodesCacheRef.current.get(seriesId);
-    if (cached) {
-      return cached;
-    }
-    const response = await apiRequest<{ items: EpisodeItem[] }>(`/api/shows/${seriesId}/episodes`);
-    seriesEpisodesCacheRef.current.set(seriesId, response.items);
-    return response.items;
-  }
-
-  // Skip to the next episode of the current show (S hotkey). Marks the current
-  // episode watched in every case; swaps to the next episode when one exists,
-  // otherwise stays put on the last episode. No-op for movies (no seriesId).
-  async function skipToNextEpisode() {
-    const current = playingItemRef.current;
-    if (!current || !current.seriesId || skipInFlightRef.current) {
+  useEffect(() => {
+    if (!playingItem || !session || autoMarked) {
       return;
     }
-    skipInFlightRef.current = true;
-    try {
-      const list = await resolveSeriesEpisodes(current.seriesId);
-      const index = list.findIndex((episode) => episode.id === current.id);
-      const next = index >= 0 ? list[index + 1] : undefined;
 
-      if (next) {
-        const label = [
-          next.seasonNumber ? `S${String(next.seasonNumber).padStart(2, '0')}` : null,
-          next.episodeNumber ? `E${String(next.episodeNumber).padStart(2, '0')}` : null,
-        ].filter(Boolean).join(' ');
-        const seriesName = next.seriesName ?? current.seriesName ?? next.name;
-        // Swap first so the player lands on the new episode before the heavy
-        // mark-watched refresh runs; the refresh leaves playingItem untouched.
-        startPlayback({
-          id: next.id,
-          title: next.name,
-          subtitle: `${seriesName}${label ? ` • ${label}` : ''}`,
-          seriesId: next.seriesId,
-          seriesName: next.seriesName,
-          startPositionSeconds: 0,
-        });
+    let cancelled = false;
+    let running = false;
+
+    const poll = async () => {
+      if (running || cancelled) {
+        return;
       }
 
-      // Always mark the current episode watched (both has-next and last cases).
-      await markWatched(current.id);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not skip to the next episode');
-    } finally {
-      skipInFlightRef.current = false;
-    }
-  }
+      running = true;
+      try {
+        const response = await apiRequest<PlaybackProgressResponse>(`/api/items/${playingItem.id}/playback-progress`);
+        if (cancelled || autoMarked) {
+          return;
+        }
 
-  async function handleAutoTrack() {
-    if (!playingItem || autoMarked) {
+        if (response.played || (response.progressPercent != null && response.progressPercent >= session.watchedThreshold)) {
+          setAutoMarked(true);
+          await markWatched(playingItem.id);
+        }
+      } catch (nextError) {
+        if (!cancelled) {
+          setError(nextError instanceof Error ? nextError.message : 'Could not poll playback progress');
+        }
+      } finally {
+        running = false;
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => {
+      void poll();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [playingItem, session, autoMarked]);
+
+  const clickJellyfinPlayControl = useCallback((reason: string): boolean => {
+    const frame = playerFrameRef.current;
+    const win = frame?.contentWindow ?? null;
+    let doc: Document | null = null;
+    try {
+      doc = win?.document ?? null;
+    } catch {
+      doc = null;
+    }
+
+    const jflog = (...args: unknown[]) => {
+      try {
+        (win as unknown as { console?: Console } | null)?.console?.log('[gbx-trigger]', ...args);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    if (!doc || !win) {
+      jflog(reason + ': no same-origin document yet');
+      return false;
+    }
+
+    const result = discoverPlayControl(
+      doc as unknown as Parameters<typeof discoverPlayControl>[0],
+    );
+    if (!result.candidate) {
+      jflog(reason + ': no play candidate');
+      return false;
+    }
+
+    const el = result.candidate.el as unknown as {
+      tagName?: string;
+      getAttribute?: (n: string) => string | null;
+      textContent?: string | null;
+    };
+    jflog(
+      reason + ': clicking via=' + result.candidate.via +
+      ' el=<' + (el.tagName ?? '').toLowerCase() +
+      ' class="' + (el.getAttribute?.('class') ?? '') + '"' +
+      ' title="' + (el.getAttribute?.('title') ?? '') + '"' +
+      ' aria-label="' + (el.getAttribute?.('aria-label') ?? '') + '"' +
+      ' data-action="' + (el.getAttribute?.('data-action') ?? '') + '"' +
+      ' text="' + (el.textContent ?? '').trim().slice(0, 30) + '">',
+    );
+
+    const FrameMouseEvent = (win as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
+    return clickEl(result.candidate.el, () =>
+      new FrameMouseEvent('click', { bubbles: true, cancelable: true, view: win }),
+    );
+  }, []);
+
+  const installMutedAutoplay = useCallback((
+    win: Window,
+    doc: Document,
+    jflog: (...args: unknown[]) => void,
+  ) => {
+    if (!playerStartMuted) {
       return;
     }
 
-    setAutoMarked(true);
-    try {
-      await markWatched(playingItem.id);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not mark item watched');
-    }
-  }
+    const gbxWin = win as Window & {
+      __gbxMutedAutoplayDoc?: Document;
+      __gbxMutedAutoplayObserver?: MutationObserver;
+    };
 
+    if (gbxWin.__gbxMutedAutoplayDoc === doc) {
+      return;
+    }
+
+    gbxWin.__gbxMutedAutoplayObserver?.disconnect();
+
+    const tryPlayMuted = (video: HTMLVideoElement) => {
+      video.muted = true;
+      video.defaultMuted = true;
+      video.volume = 0;
+      video.setAttribute('muted', '');
+      video.setAttribute('playsinline', '');
+
+      if (!video.paused && video.currentTime > 0) {
+        return;
+      }
+
+      try {
+        const result = video.play();
+        if (result && typeof result.catch === 'function') {
+          result.catch((error: unknown) => {
+            jflog('muted autoplay play() rejected: ' + String(error));
+          });
+        }
+      } catch (error) {
+        jflog('muted autoplay play() threw: ' + String(error));
+      }
+    };
+
+    const scan = () => {
+      for (const video of Array.from(doc.querySelectorAll('video'))) {
+        tryPlayMuted(video as HTMLVideoElement);
+      }
+    };
+
+    scan();
+    const Observer = (win as unknown as { MutationObserver?: typeof MutationObserver }).MutationObserver;
+    const target = doc.documentElement ?? doc.body;
+    if (Observer && target) {
+      const observer = new Observer(scan);
+      observer.observe(target, { childList: true, subtree: true });
+      gbxWin.__gbxMutedAutoplayObserver = observer;
+    }
+    gbxWin.__gbxMutedAutoplayDoc = doc;
+    jflog('muted autoplay watcher installed');
+  }, []);
+
+  // Drive the same-origin Jellyfin-web iframe into ACTUAL playback. Opening the
+  // details URL only lands on the details PAGE — jellyfin-web has no reliable
+  // auto-START route, so once the iframe has auto-logged-in and BOUND the details
+  // view, we reach into its same-origin document and click the primary Play
+  // control (discoverPlayControl, which finds icon-only buttons too). We try as
+  // soon as the iframe loads, keep short adaptive retries while Jellyfin binds
+  // the details page, stop once a <video> is playing / the OSD is up, and
+  // swallow cross-frame errors.
+  //
+  // Observability: this effect runs in the gbx TOP frame, so we log INTO THE
+  // IFRAME'S OWN console (iframe.contentWindow.console.log('[gbx-trigger] ...'))
+  // so the e2e flow's [jf-console] (frame-scoped) listener captures it.
   useEffect(() => {
     if (!playingItem) {
       return;
     }
 
-    // Remember what had focus so we can restore it when the modal closes.
-    previouslyFocusedRef.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setPlayerStarted(false);
 
-    // Move focus onto the modal container so the close button / Esc are
-    // reachable. Hotkeys no longer depend on this focus — they're handled by a
-    // document-level listener below — but we still focus so keyboard users land
-    // inside the dialog rather than on the Play button that opened it.
-    const frame = requestAnimationFrame(() => {
-      playerModalRef.current?.focus();
-    });
-
-    // Lock background scroll while the modal is open. This kills the page
-    // scroll that the very first Space press would otherwise cause (before
-    // focus settles), independent of keydown timing.
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    // Document-level keydown handler: active only while the modal is open.
-    // Living on `document` (not the dialog container) means hotkeys fire no
-    // matter what is focused and no matter which element is fullscreened —
-    // including when the <video> itself is fullscreened. We call
-    // preventDefault() on every key we handle so the native <video> control
-    // (which also reacts to Space/arrows when focused) doesn't double-fire.
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      const video = videoRef.current;
-
-      if (event.key === 'Escape') {
-        // When the video is fullscreen the browser eats the first Esc to exit
-        // fullscreen; a second Esc reaches here and closes the modal.
-        if (document.fullscreenElement) {
-          return;
-        }
-        event.preventDefault();
-        setPlayingItem(null);
-        return;
+    let cancelled = false;
+    let clickedOnce = false;
+    const startedAt = Date.now();
+    const MAX_MS = 25_000;
+    const pendingTimers = new Set<number>();
+    const userStartTimer = window.setTimeout(() => {
+      if (!cancelled) {
+        setPlayerNeedsUserStart(true);
       }
+    }, 6_000);
 
-      if (!video) {
-        return;
-      }
-
-      switch (event.key) {
-        case ' ':
-        case 'k':
-          event.preventDefault();
-          if (video.paused) {
-            void video.play();
-          } else {
-            video.pause();
-          }
-          break;
-        case 'ArrowLeft':
-          event.preventDefault();
-          video.currentTime = Math.max(0, video.currentTime - 5);
-          break;
-        case 'ArrowRight':
-          event.preventDefault();
-          video.currentTime = Math.min(video.duration || video.currentTime + 5, video.currentTime + 5);
-          break;
-        case 'ArrowUp':
-          event.preventDefault();
-          video.volume = Math.min(1, video.volume + 0.1);
-          break;
-        case 'ArrowDown':
-          event.preventDefault();
-          video.volume = Math.max(0, video.volume - 0.1);
-          break;
-        case 'm':
-        case 'M':
-          event.preventDefault();
-          video.muted = !video.muted;
-          break;
-        case 's':
-        case 'S':
-          event.preventDefault();
-          void skipToNextEpisode();
-          break;
-        case 'f':
-        case 'F':
-          event.preventDefault();
-          if (document.fullscreenElement) {
-            void document.exitFullscreen();
-          } else {
-            // Fullscreen the <video> itself so the user sees only the native
-            // player chrome — no modal header/footer/border.
-            void video.requestFullscreen?.();
-          }
-          break;
-        default:
-          break;
-      }
+    const markLaunchAccepted = () => {
+      window.clearTimeout(userStartTimer);
+      setPlayerStarted(true);
+      setPlayerNeedsUserStart(false);
     };
-    document.addEventListener('keydown', handleKeyDown);
+
+    const scheduleTick = (delayMs: number) => {
+      if (cancelled || Date.now() - startedAt >= MAX_MS) {
+        return;
+      }
+      const timer = window.setTimeout(() => {
+        pendingTimers.delete(timer);
+        tick();
+      }, delayMs);
+      pendingTimers.add(timer);
+    };
+
+    const tick = () => {
+      if (cancelled) {
+        return;
+      }
+      const frame = playerFrameRef.current;
+      const win = frame?.contentWindow ?? null;
+      let doc: Document | null = null;
+      try {
+        doc = win?.document ?? null;
+      } catch {
+        // Cross-origin access would throw — but /player is same-origin, so this
+        // only happens transiently during navigation. Keep polling.
+        doc = null;
+      }
+
+      // Log into the IFRAME's console so the frame-scoped proof listener sees it.
+      const jflog = (...args: unknown[]) => {
+        try {
+          (win as unknown as { console?: Console } | null)?.console?.log('[gbx-trigger]', ...args);
+        } catch {
+          /* ignore */
+        }
+      };
+
+      if (doc) {
+        try {
+          if (win) {
+            installMutedAutoplay(win, doc, jflog);
+          }
+
+          const video = doc.querySelector('video') as HTMLVideoElement | null;
+          if (video && playerStartMuted) {
+            video.muted = true;
+            video.defaultMuted = true;
+            video.volume = 0;
+            video.setAttribute('muted', '');
+            video.setAttribute('playsinline', '');
+            if (video.paused) {
+              try {
+                void video.play()?.catch((error: unknown) => {
+                  jflog('muted playback retry rejected: ' + String(error));
+                });
+              } catch (error) {
+                jflog('muted playback retry threw: ' + String(error));
+              }
+            }
+          }
+
+          const isFrameVisible = (el: Element | null): boolean => {
+            if (!el || !win) return false;
+            const rect = el.getBoundingClientRect();
+            const style = win.getComputedStyle(el);
+            return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+          };
+          const osd = doc.querySelector('.videoOsd');
+          const osdPresent = isFrameVisible(osd) && [
+            'button',
+            '[role="button"]',
+            '[role="slider"]',
+            '.sliderContainer',
+            '.osdControls',
+          ].some((selector) => isFrameVisible(osd?.querySelector(selector) ?? null));
+          if (
+            isPlaybackStarted({
+              video: video ? { paused: video.paused, currentTime: video.currentTime } : null,
+              osdPresent,
+            })
+          ) {
+            jflog('playback started (osd=' + osdPresent + ', paused=' + (video ? video.paused : 'n/a') + ')');
+            setPlayerStarted(true);
+            setPlayerNeedsUserStart(false);
+            return; // stop driving.
+          }
+
+          // Gate: only attempt once the details view is actually bound — a title
+          // is rendered AND a play candidate exists. The itemDetails chunk binds
+          // handlers AFTER data loads, so an early click hits nothing.
+          const titleEl = doc.querySelector('.detailPagePrimaryContainer h1, .itemName, h1.parentName, h1');
+          const titleText = (titleEl?.textContent ?? '').trim();
+
+          const result = discoverPlayControl(
+            doc as unknown as Parameters<typeof discoverPlayControl>[0],
+          );
+
+          // Log selector match counts each tick so we can see discovery progress.
+          jflog(
+            'tick t+' + (Date.now() - startedAt) + 'ms title=' + JSON.stringify(titleText.slice(0, 60)) +
+            ' selectorCounts=' + JSON.stringify(result.selectorCounts) +
+            ' candidate=' + (result.candidate ? result.candidate.via : 'none'),
+          );
+
+          if (!titleText) {
+            // Details view not bound yet - wait.
+          } else if (result.candidate && !clickedOnce) {
+            clickedOnce = clickJellyfinPlayControl('auto');
+            if (clickedOnce) {
+              markLaunchAccepted();
+            }
+          } else if (clickedOnce) {
+            jflog('waiting for playback after first click');
+            if (Date.now() - startedAt > 5_000) {
+              setPlayerNeedsUserStart(true);
+            }
+          } else if (!clickedOnce) {
+            // No candidate AND we've never clicked — dump every button/anchor so
+            // we can SEE the real play control in the proof console.
+            jflog('NO play candidate; enumerating controls:');
+            for (const desc of result.enumerated ?? []) {
+              jflog('  ctrl ' + desc);
+            }
+          }
+        } catch {
+          /* swallow — transient re-render / detached node */
+        }
+      }
+
+      scheduleTick(clickedOnce ? 500 : 250);
+    };
+
+    // Try immediately after React commits the iframe, and again on the iframe's
+    // own load event. The short poll is the resilience layer for Jellyfin's SPA
+    // work after load (auto-login, data fetch, and handler binding).
+    const frame = playerFrameRef.current;
+    const handleFrameLoad = () => tick();
+    frame?.addEventListener('load', handleFrameLoad);
+    const raf = window.requestAnimationFrame(() => tick());
 
     return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
-      previouslyFocusedRef.current?.focus();
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(userStartTimer);
+      frame?.removeEventListener('load', handleFrameLoad);
+      for (const timer of pendingTimers) {
+        window.clearTimeout(timer);
+      }
+      pendingTimers.clear();
     };
-  }, [playingItem]);
-
-  // Trap focus within the modal: cycle Tab between the focusable elements.
-  // This stays on the container (not document) because it operates on the
-  // dialog's focusable set; the playback hotkeys are handled document-level.
-  function handlePlayerTabTrap(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key !== 'Tab') {
-      return;
-    }
-    const focusable = playerModalRef.current?.querySelectorAll<HTMLElement>(
-      'button, [href], video, input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    if (!focusable || focusable.length === 0) {
-      event.preventDefault();
-      playerModalRef.current?.focus();
-      return;
-    }
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    const active = document.activeElement;
-    if (event.shiftKey && (active === first || active === playerModalRef.current)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && active === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  }
+  }, [playingItem, clickJellyfinPlayControl, installMutedAutoplay]);
 
   if (loading || !session) {
     return <div className="shell"><div className="panel">Loading Gogglebox…</div></div>;
@@ -1068,53 +1265,53 @@ export function App() {
 
       {searchQuery.trim() ? null : (
         <section className="panel section-block">
-        <div className="row spread">
-          <div>
-            <p className="eyebrow">Group picks</p>
-            <h2>Because none of you have seen this</h2>
+          <div className="row spread">
+            <div>
+              <p className="eyebrow">Group picks</p>
+              <h2>Because none of you have seen this</h2>
+            </div>
+            <div className="row">
+              {libraryLoading ? <span className="muted">Refreshing…</span> : null}
+              {noMorePicks ? <span className="muted">No more picks</span> : null}
+              <RailPager
+                page={recommendationsPager.page}
+                pageCount={recommendationsPager.pageCount}
+                hasPrev={recommendationsPager.hasPrev}
+                hasNext={recommendationsPager.hasNext}
+                onPrev={recommendationsPager.prev}
+                onNext={recommendationsPager.next}
+              />
+              <button
+                onClick={() => void showOtherPicks()}
+                type="button"
+                disabled={
+                  libraryLoading ||
+                  picksLoading ||
+                  noMorePicks ||
+                  !session ||
+                  session.activeViewerIds.length === 0
+                }
+              >
+                {picksLoading ? 'Finding…' : 'Show me other picks'}
+              </button>
+            </div>
           </div>
-          <div className="row">
-            {libraryLoading ? <span className="muted">Refreshing…</span> : null}
-            {noMorePicks ? <span className="muted">No more picks</span> : null}
-            <RailPager
-              page={recommendationsPager.page}
-              pageCount={recommendationsPager.pageCount}
-              hasPrev={recommendationsPager.hasPrev}
-              hasNext={recommendationsPager.hasNext}
-              onPrev={recommendationsPager.prev}
-              onNext={recommendationsPager.next}
-            />
-            <button
-              onClick={() => void showOtherPicks()}
-              type="button"
-              disabled={
-                libraryLoading ||
-                picksLoading ||
-                noMorePicks ||
-                !session ||
-                session.activeViewerIds.length === 0
-              }
-            >
-              {picksLoading ? 'Finding…' : 'Show me other picks'}
-            </button>
+          {libraryLoading ? <p className="muted">Loading recommendations…</p> : null}
+          {!libraryLoading && recommendations.length === 0 ? (
+            <p className="muted">No fresh recommendations match this filter yet. Try another genre or turn off kids-only.</p>
+          ) : null}
+          <div className="media-grid">
+            {recommendationsPager.visible.map((item) => (
+              <MediaCard
+                key={`rec-${item.id}`}
+                item={item}
+                onMarkWatched={markWatched}
+                onPlay={openPlayback}
+                onOpenEpisodes={openEpisodes}
+                onIgnore={ignore}
+              />
+            ))}
           </div>
-        </div>
-        {libraryLoading ? <p className="muted">Loading recommendations…</p> : null}
-        {!libraryLoading && recommendations.length === 0 ? (
-          <p className="muted">No fresh recommendations match this filter yet. Try another genre or turn off kids-only.</p>
-        ) : null}
-        <div className="media-grid">
-          {recommendationsPager.visible.map((item) => (
-            <MediaCard
-              key={`rec-${item.id}`}
-              item={item}
-              onMarkWatched={markWatched}
-              onPlay={startPlayback}
-              onOpenEpisodes={openEpisodes}
-              onIgnore={ignore}
-            />
-          ))}
-        </div>
         </section>
       )}
 
@@ -1133,7 +1330,7 @@ export function App() {
                 key={item.id}
                 item={item}
                 onMarkWatched={markWatched}
-                onPlay={startPlayback}
+                onPlay={openPlayback}
                 onOpenEpisodes={openEpisodes}
                 onIgnore={ignore}
               />
@@ -1175,12 +1372,10 @@ export function App() {
                     <div className="row">
                       <button
                         onClick={() => {
-                          startPlayback({
+                          void openPlayback({
                             id: episode.id,
                             title: episode.name,
                             subtitle: `${selectedSeries.name}${label ? ` • ${label}` : ''}`,
-                            seriesId: episode.seriesId,
-                            seriesName: episode.seriesName,
                           });
                           setSelectedSeries(null);
                         }}
@@ -1231,16 +1426,7 @@ export function App() {
 
       {playingItem ? (
         <div className="modal-backdrop" onClick={() => setPlayingItem(null)}>
-          <div
-            className="modal"
-            ref={playerModalRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Now playing ${playingItem.title}`}
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={handlePlayerTabTrap}
-          >
+          <div className="modal player-modal" onClick={(event) => event.stopPropagation()}>
             <div className="row spread">
               <div>
                 <p className="eyebrow">Now playing</p>
@@ -1249,31 +1435,42 @@ export function App() {
               </div>
               <button className="ghost" onClick={() => setPlayingItem(null)} type="button">Close</button>
             </div>
-            <video
-              ref={videoRef}
-              controls
-              autoPlay
-              onLoadedMetadata={() => {
-                const video = videoRef.current;
-                if (video && playingItem.startPositionSeconds && playingItem.startPositionSeconds > 0) {
-                  video.currentTime = Math.min(playingItem.startPositionSeconds, Math.max(0, video.duration - 1));
-                }
-                setAutoMarked(false);
-              }}
-              onTimeUpdate={() => {
-                const video = videoRef.current;
-                if (!video || !video.duration || autoMarked) {
-                  return;
-                }
-
-                if (video.currentTime / video.duration >= session.watchedThreshold) {
-                  void handleAutoTrack();
-                }
-              }}
-              src={`/api/items/${playingItem.id}/stream`}
-            />
-            <p className="muted">Playback auto-marks watched at {Math.round(session.watchedThreshold * 100)}%. Press <i>f</i> to toggle fullscreen.</p>
-            {playingItem.seriesId ? <p className="muted">Press <i>S</i> for next episode.</p> : null}
+            {/* Same-origin Jellyfin-web iframe. The seeded localStorage logs it
+                in automatically; the autoplay-driving effect dispatches a click
+                on the details Play button to START playback in-frame. */}
+            <div className="player-stage">
+              <iframe
+                ref={playerFrameRef}
+                className="player-frame"
+                src={playingItem.url}
+                title={`Jellyfin player - ${playingItem.title}`}
+                allow="autoplay; fullscreen; picture-in-picture"
+              />
+              {!playerStarted ? (
+                <div className="player-starting" aria-live="polite">
+                  <p className="eyebrow">Starting player</p>
+                  <p>{playingItem.title}</p>
+                  {playerNeedsUserStart ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlayerNeedsUserStart(false);
+                        if (clickJellyfinPlayControl('user')) {
+                          setPlayerStarted(true);
+                        } else {
+                          setPlayerNeedsUserStart(true);
+                        }
+                      }}
+                    >
+                      Start playback
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            <p className="muted">
+              Auto-mark watched at {Math.round(session.watchedThreshold * 100)}%
+            </p>
           </div>
         </div>
       ) : null}
@@ -1290,7 +1487,7 @@ function MediaCard({
 }: {
   item: LibraryItem;
   onMarkWatched: (itemId: string) => Promise<void>;
-  onPlay: (item: PlaybackItem) => void;
+  onPlay: (item: { id: string; title: string }) => Promise<void>;
   onOpenEpisodes: (series: LibraryItem) => Promise<void>;
   onIgnore: (item: LibraryItem) => Promise<void>;
 }) {
@@ -1314,7 +1511,7 @@ function MediaCard({
       </div>
       <div className="row spread">
         {item.playable ? (
-          <button onClick={() => onPlay({ id: item.id, title: item.name })} type="button">Play</button>
+          <button onClick={() => void onPlay({ id: item.id, title: item.name })} type="button">Play</button>
         ) : (
           <button onClick={() => void onOpenEpisodes(item)} type="button">Episodes</button>
         )}

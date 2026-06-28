@@ -53,6 +53,8 @@ services:
     environment:
       # vite proxies /api to the server service (see vite.config.ts)
       - VITE_API_PROXY=http://server:3000
+      # Dev-only browser autoplay workaround. Production builds leave this unset.
+      - VITE_PLAYER_START_MUTED=${VITE_PLAYER_START_MUTED:-true}
     ports:
       - "5173:5173"
     # Vite's dep-optimizer cache (cacheDir=/tmp/vite) lives on an ephemeral
@@ -73,6 +75,24 @@ services:
     depends_on:
       deps:
         condition: service_completed_successfully
+
+  # Same-origin reverse proxy (the shipped front door). Publishes ONE host port
+  # 8080 and routes /api -> server, /player -> Jellyfin, /* -> client. Serving
+  # everything from one origin (http://localhost:8080) is what lets the client
+  # seed Jellyfin-web's localStorage for /player (auto-login as the per-group JF
+  # user). The Jellyfin upstream differs per env: the base sets a harmless
+  # default and the sbx/uat overlays override JELLYFIN_PROXY_UPSTREAM +
+  # depends_on. (The bare base has no Jellyfin, so /player is non-functional
+  # here — only the sbx/uat run stacks wire a real upstream.)
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./tools/proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - server
+      - client
 
   # Typecheck — no Jellyfin needed. `run --rm check`
   check:

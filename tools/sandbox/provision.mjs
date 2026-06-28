@@ -31,8 +31,20 @@ import {
   SHOWS_LIBRARY_NAME,
   MOVIES_LIBRARY_NAME,
 } from './fixtures.mjs';
+import { resolveJellyfinBase } from './baseUrl.mjs';
 
-const JF_URL = (process.env.JELLYFIN_URL || 'http://jellyfin-sandbox:8096').replace(/\/$/, '');
+// The configured URL may already carry the /player base (from .env.sbx). Strip
+// any trailing slash AND a trailing /player so JF_ROOT is the BARE server root;
+// the active base (bare vs /player) is then DISCOVERED at runtime (see
+// resolveActiveBase) because it differs between a fresh volume (bare; provision
+// is what SETS BaseUrl=/player) and an already-provisioned one (/player).
+const JF_ROOT = (process.env.JELLYFIN_URL || 'http://jellyfin-sandbox:8096')
+  .replace(/\/$/, '')
+  .replace(/\/player$/, '');
+const PLAYER_BASE = `${JF_ROOT}/player`;
+// Mutable: the base every api() call uses. Starts at the bare root and is updated
+// by resolveActiveBase() (and after we SET BaseUrl=/player during this run).
+let JF_URL = JF_ROOT;
 const ADMIN_USER = process.env.SANDBOX_ADMIN_USER || 'gogglebox-admin';
 const ADMIN_PASS = process.env.SANDBOX_ADMIN_PASS || 'gogglebox-sandbox';
 const USER_PASS = process.env.SANDBOX_USER_PASS || 'sandbox';
@@ -62,7 +74,13 @@ function authHeader(token) {
 }
 
 async function api(pathname, { method = 'GET', token, body, query } = {}) {
-  const url = new URL(pathname, JF_URL);
+  // PRESERVE the base path: with JF_URL=http://host:8096/player, a leading-slash
+  // pathname in `new URL(pathname, JF_URL)` REPLACES /player (WHATWG URL rule) ->
+  // the request hits the bare path -> 302 -> HTML -> no AccessToken. Normalize the
+  // base to a trailing slash and join a RELATIVE (no leading slash) pathname so
+  // /player is kept. A bare base (no /player) behaves identically.
+  const base = JF_URL.endsWith('/') ? JF_URL : `${JF_URL}/`;
+  const url = new URL(String(pathname).replace(/^\/+/, ''), base);
   if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
   const headers = { Authorization: authHeader(token) };
   if (token) headers['X-Emby-Token'] = token;
@@ -85,16 +103,14 @@ async function api(pathname, { method = 'GET', token, body, query } = {}) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Discover and switch JF_URL to whichever base currently serves the API (bare on
+// a fresh volume; /player once provisioned). The shared resolver tries bare first,
+// then /player, retrying while JF boots — so first-run bootstrap (BaseUrl not yet
+// set) AND a re-run against an already-provisioned (/player) volume both work.
 async function waitForServer() {
-  for (let i = 0; i < 120; i += 1) {
-    try {
-      const info = await api('/System/Info/Public');
-      return info;
-    } catch {
-      await sleep(2000);
-    }
-  }
-  throw new Error('Jellyfin sandbox did not become reachable in time');
+  JF_URL = await resolveJellyfinBase(JF_ROOT);
+  console.log(`[provision] active base: ${JF_URL}${JF_URL === PLAYER_BASE ? ' (/player)' : ' (bare)'}`);
+  return api('/System/Info/Public');
 }
 
 // True if the startup wizard still needs running.
@@ -237,6 +253,39 @@ async function scanAndWait(token) {
   console.warn('[provision] scan wait timed out; continuing (library may be empty).');
 }
 
+// Set Jellyfin's network BaseUrl to /player (idempotent). Jellyfin prefixes ALL
+// routes — web UI AND REST API — with this base path, which is what lets the
+// same-origin proxy mount Jellyfin under /player. On 10.9.11 the named network
+// config is read/written via /System/Configuration/network.
+const PLAYER_BASE_PATH = '/player';
+async function ensureBaseUrl(token) {
+  let netConfig = {};
+  try {
+    netConfig = (await api('/System/Configuration/network', { token })) ?? {};
+  } catch (err) {
+    console.warn(`[provision] could not read network config (${err.message}); attempting to set BaseUrl anyway.`);
+  }
+
+  if (netConfig.BaseUrl === PLAYER_BASE_PATH) {
+    console.log(`[provision] BaseUrl already "${PLAYER_BASE_PATH}".`);
+    JF_URL = PLAYER_BASE; // already under /player — keep the active base correct.
+    return;
+  }
+
+  await api('/System/Configuration/network', {
+    method: 'POST',
+    token,
+    body: { ...netConfig, BaseUrl: PLAYER_BASE_PATH },
+  });
+  console.log(`[provision] set network BaseUrl to "${PLAYER_BASE_PATH}". Restart Jellyfin to apply.`);
+  // Jellyfin applies BaseUrl after a restart. Best-effort trigger so the next
+  // provision/usage sees it live; ignore failures (it may already be applying).
+  await api('/System/Restart', { method: 'POST', token }).catch(() => {});
+  // From here on (and on the next run) the API lives under /player. Switch the
+  // active base so any subsequent call in this process targets the right place.
+  JF_URL = PLAYER_BASE;
+}
+
 async function ensureApiKey(token) {
   const keys = (await api('/Auth/Keys', { token })) ?? {};
   const list = keys.Items ?? keys ?? [];
@@ -267,7 +316,9 @@ async function emitArtifacts(apiKey, usersByName) {
     '# Generated by tools/sandbox/provision.mjs — the sandbox OVERRIDE file.',
     '# Layered ON TOP of the shared .env by the sbx overlay (later file wins), so',
     '# it carries ONLY the four per-env override keys, not the shared config.',
-    `JELLYFIN_URL=http://jellyfin-sandbox:8096`,
+    // BaseUrl is /player, and Jellyfin prefixes the REST API with it too, so the
+    // server's direct API calls MUST target the /player base.
+    `JELLYFIN_URL=http://jellyfin-sandbox:8096/player`,
     `JELLYFIN_API_KEY=${apiKey}`,
     `PORTAL_USERNAME=${ADMIN_USER}`,
     `PORTAL_PASSWORD=${ADMIN_PASS}`,
@@ -295,7 +346,7 @@ async function emitArtifacts(apiKey, usersByName) {
 }
 
 async function main() {
-  console.log(`[provision] target: ${JF_URL}`);
+  console.log(`[provision] server root: ${JF_ROOT} (active base discovered at runtime)`);
   await waitForServer();
 
   if (await isFirstRun()) {
@@ -320,7 +371,12 @@ async function main() {
   const apiKey = await ensureApiKey(token);
   await emitArtifacts(apiKey, usersByName);
 
-  console.log('[provision] done. Sandbox is ready.');
+  // Set BaseUrl LAST: it requires a Jellyfin restart and moves ALL routes under
+  // /player, so do it after users/libraries/apikey are provisioned against the
+  // no-base API. The emitted .env.sbx already points JELLYFIN_URL at /player.
+  await ensureBaseUrl(token);
+
+  console.log('[provision] done. Sandbox is ready (BaseUrl=/player; allow a moment for the restart to apply).');
 }
 
 main().catch((err) => {

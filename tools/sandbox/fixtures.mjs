@@ -1,12 +1,12 @@
 // Single source of truth for the deterministic sandbox Jellyfin library.
 //
 // This spec is consumed by THREE scripts so they never drift:
-//   - generate-fixtures.mjs : writes tiny .mkv stubs + .nfo sidecars to disk
+//   - generate-fixtures.mjs : writes tiny .mp4 stubs (H264+AAC, DirectPlay) + .nfo sidecars to disk
 //   - provision.mjs         : creates users, adds the library, waits for scan
 //   - reset.mjs             : clears every user's played-state between flows
 //
 // Design goals:
-//   - Tiny + offline: each video is a 1s/32x32 ffmpeg encode (a few KB) so
+//   - Tiny + offline: each video is a short 32x32 ffmpeg encode (default 12s) so
 //     Jellyfin probes a REAL (short) RunTimeTicks. Resume %/setPlaybackPosition
 //     math needs real ticks, so zero-byte files are NOT acceptable.
 //   - Deterministic GUIDs: Jellyfin derives item GUIDs from the on-disk path, so
@@ -155,8 +155,8 @@ export const MOVIES = [
 // FIXED on-disk layout. Jellyfin derives item GUIDs from these paths, so do not
 // reorganise them casually — a path change re-mints the GUIDs.
 //
-//   <root>/shows/<Title> (<Year>)/Season 0N/<Title> SxxEyy ....mkv  (+ .nfo)
-//   <root>/movies/<Title> (<Year>)/<Title> (<Year>).mkv             (+ .nfo)
+//   <root>/shows/<Title> (<Year>)/Season 0N/<Title> SxxEyy ....mp4  (+ .nfo)
+//   <root>/movies/<Title> (<Year>)/<Title> (<Year>).mp4             (+ .nfo)
 
 export const sanitize = (s) => s.replace(/[\\/:*?"<>|]/g, '').trim();
 

@@ -14,13 +14,18 @@
 const TICKS_PER_MINUTE = 60 * 10_000_000;
 
 export function makeJellyfin(rawUrl, apiKey) {
-  const baseUrl = (rawUrl ?? '').trim().replace(/\/$/, '');
-  if (!baseUrl || !apiKey) {
+  const trimmed = (rawUrl ?? '').trim().replace(/\/$/, '');
+  if (!trimmed || !apiKey) {
     throw new Error('JELLYFIN_URL / JELLYFIN_API_KEY not set in the proof environment');
   }
+  // Normalize to a trailing slash so a configured BASE PATH (e.g. .../player) is
+  // PRESERVED when joining. `new URL('/Users', '.../player')` drops to .../Users
+  // (bare), which 302-redirects once JF BaseUrl=/player is set; joining a relative
+  // pathname against a trailing-slash base keeps the base path.
+  const baseUrl = `${trimmed}/`;
 
   async function request(pathname, { method = 'GET', query = {}, body } = {}) {
-    const url = new URL(pathname, baseUrl);
+    const url = new URL(String(pathname).replace(/^\/+/, ''), baseUrl);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
     url.searchParams.set('api_key', apiKey);
     const res = await fetch(url, {
