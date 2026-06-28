@@ -55,6 +55,8 @@ services:
       - VITE_API_PROXY=http://server:3000
       # Dev-only browser autoplay workaround. Production builds leave this unset.
       - VITE_PLAYER_START_MUTED=${VITE_PLAYER_START_MUTED:-true}
+      # Dev-only escape hatch for debugging Jellyfin-web behind the launch cover.
+      - VITE_PLAYER_HIDE_STARTING_OVERLAY=${VITE_PLAYER_HIDE_STARTING_OVERLAY:-false}
     ports:
       - "5173:5173"
     # Vite's dep-optimizer cache (cacheDir=/tmp/vite) lives on an ephemeral

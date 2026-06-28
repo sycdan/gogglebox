@@ -6,6 +6,9 @@ import { clickEl, discoverPlayControl, isPlaybackStarted } from './playerLaunch'
 const playerStartMuted =
   import.meta.env.VITE_PLAYER_START_MUTED === '1' ||
   import.meta.env.VITE_PLAYER_START_MUTED === 'true';
+const playerHideStartingOverlay =
+  import.meta.env.VITE_PLAYER_HIDE_STARTING_OVERLAY === '1' ||
+  import.meta.env.VITE_PLAYER_HIDE_STARTING_OVERLAY === 'true';
 
 type LibraryKind = 'movie' | 'show';
 
@@ -897,6 +900,9 @@ export function App() {
 
     let cancelled = false;
     let clickedOnce = false;
+    let progressPollRunning = false;
+    let lastProgressPollAt = 0;
+    let lastPlaybackProgress: number | null = null;
     const startedAt = Date.now();
     const MAX_MS = 25_000;
     const pendingTimers = new Set<number>();
@@ -905,12 +911,6 @@ export function App() {
         setPlayerNeedsUserStart(true);
       }
     }, 6_000);
-
-    const markLaunchAccepted = () => {
-      window.clearTimeout(userStartTimer);
-      setPlayerStarted(true);
-      setPlayerNeedsUserStart(false);
-    };
 
     const scheduleTick = (delayMs: number) => {
       if (cancelled || Date.now() - startedAt >= MAX_MS) {
@@ -923,10 +923,39 @@ export function App() {
       pendingTimers.add(timer);
     };
 
+    const pollPlaybackStarted = () => {
+      const now = Date.now();
+      if (progressPollRunning || now - lastProgressPollAt < 1000) {
+        return;
+      }
+      lastProgressPollAt = now;
+      progressPollRunning = true;
+      apiRequest<PlaybackProgressResponse>(`/api/items/${playingItem.id}/playback-progress`)
+        .then((response) => {
+          if (cancelled || response.progressPercent == null) {
+            return;
+          }
+          const nextProgress = response.progressPercent;
+          if (lastPlaybackProgress != null && nextProgress > lastPlaybackProgress) {
+            setPlayerStarted(true);
+            setPlayerNeedsUserStart(false);
+            return;
+          }
+          lastPlaybackProgress = nextProgress;
+        })
+        .catch(() => {
+          /* best-effort overlay clearing; the watched-progress poll reports errors */
+        })
+        .finally(() => {
+          progressPollRunning = false;
+        });
+    };
+
     const tick = () => {
       if (cancelled) {
         return;
       }
+      pollPlaybackStarted();
       const frame = playerFrameRef.current;
       const win = frame?.contentWindow ?? null;
       let doc: Document | null = null;
@@ -1019,7 +1048,7 @@ export function App() {
           } else if (result.candidate && !clickedOnce) {
             clickedOnce = clickJellyfinPlayControl('auto');
             if (clickedOnce) {
-              markLaunchAccepted();
+              setPlayerNeedsUserStart(false);
             }
           } else if (clickedOnce) {
             jflog('waiting for playback after first click');
@@ -1446,7 +1475,7 @@ export function App() {
                 title={`Jellyfin player - ${playingItem.title}`}
                 allow="autoplay; fullscreen; picture-in-picture"
               />
-              {!playerStarted ? (
+              {!playerStarted && !playerHideStartingOverlay ? (
                 <div className="player-starting" aria-live="polite">
                   <p className="eyebrow">Starting player</p>
                   <p>{playingItem.title}</p>
@@ -1455,9 +1484,7 @@ export function App() {
                       type="button"
                       onClick={() => {
                         setPlayerNeedsUserStart(false);
-                        if (clickJellyfinPlayControl('user')) {
-                          setPlayerStarted(true);
-                        } else {
+                        if (!clickJellyfinPlayControl('user')) {
                           setPlayerNeedsUserStart(true);
                         }
                       }}

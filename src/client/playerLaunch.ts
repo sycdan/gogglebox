@@ -179,6 +179,7 @@ export interface DiscoveryResult {
 export function discoverPlayControl(doc: DocumentLike): DiscoveryResult {
   const selectorCounts: Record<string, number> = {};
   const matches: PlayCandidate[] = [];
+  const hiddenHeaderMatches: PlayCandidate[] = [];
 
   // 1. Class selectors — but ONLY accept matches in the detail header (not in a
   // card/rail). selectorCounts records the RAW count for diagnostics.
@@ -193,6 +194,8 @@ export function discoverPlayControl(doc: DocumentLike): DiscoveryResult {
     for (const el of els) {
       if (isVisible(el) && isEnabled(el) && isHeaderPlay(el)) {
         matches.push({ el, via: `selector:${selector}`, preferred: true });
+      } else if (isEnabled(el) && isHeaderPlay(el)) {
+        hiddenHeaderMatches.push({ el, via: `hidden-selector:${selector}`, preferred: true });
       }
     }
   }
@@ -206,10 +209,16 @@ export function discoverPlayControl(doc: DocumentLike): DiscoveryResult {
     controls = [];
   }
   for (const el of controls) {
-    if (!isVisible(el) || !isEnabled(el)) continue;
-    if (looksLikePlay(el) && isHeaderPlay(el)) {
+    if (!isEnabled(el)) continue;
+    if (isVisible(el) && looksLikePlay(el) && isHeaderPlay(el)) {
       matches.push({ el, via: 'heuristic:play-like', preferred: true });
+    } else if (looksLikePlay(el) && isHeaderPlay(el)) {
+      hiddenHeaderMatches.push({ el, via: 'hidden-heuristic:play-like', preferred: true });
     }
+  }
+
+  if (matches.length === 0 && hiddenHeaderMatches.length > 0) {
+    return { candidate: hiddenHeaderMatches[0], selectorCounts, enumerated: null };
   }
 
   if (matches.length === 0) {

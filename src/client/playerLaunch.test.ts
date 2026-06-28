@@ -164,7 +164,7 @@ test('discoverPlayControl: chooses the HEADER play over card-overlay resume butt
   assert.match(res.candidate!.via, /\.btnPlay/);
 });
 
-test('discoverPlayControl: skips hidden (zero-size) and disabled HEADER controls', () => {
+test('discoverPlayControl: uses a hidden HEADER control as a last-resort fallback', () => {
   const hidden = el({ attrs: { class: 'btnPlay' }, rect: { width: 0, height: 0 }, container: '.mainDetailButtons' });
   const disabled = el({ attrs: { class: 'btnPlay', disabled: 'disabled' }, disabled: true, container: '.mainDetailButtons' });
   const doc = makeDoc({
@@ -174,9 +174,23 @@ test('discoverPlayControl: skips hidden (zero-size) and disabled HEADER controls
   });
 
   const res = discoverPlayControl(doc);
-  assert.equal(res.candidate, null);
-  assert.ok(Array.isArray(res.enumerated));
-  assert.equal(res.enumerated?.length, 2);
+  assert.equal(res.candidate?.el, hidden);
+  assert.match(res.candidate!.via, /^hidden-selector:/);
+  assert.equal(res.enumerated, null);
+});
+
+test('discoverPlayControl: prefers a visible HEADER control over a hidden fallback', () => {
+  const hidden = el({ attrs: { class: 'btnPlay' }, rect: { width: 0, height: 0 }, container: '.mainDetailButtons' });
+  const visible = el({ attrs: { class: 'btnPlay' }, container: '.mainDetailButtons' });
+  const doc = makeDoc({
+    '.btnPlay': [hidden, visible],
+    'button, a, [data-action]': [hidden, visible],
+    'button, a': [hidden, visible],
+  });
+
+  const res = discoverPlayControl(doc);
+  assert.equal(res.candidate?.el, visible);
+  assert.match(res.candidate!.via, /^selector:/);
 });
 
 test('discoverPlayControl: no candidate enumerates all buttons/anchors for diagnostics', () => {
