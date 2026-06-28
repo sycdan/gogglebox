@@ -1,0 +1,22 @@
+# Same-origin reverse proxy for deploy.
+#
+# The browser opens Gogglebox at this one origin. /player is stripped and
+# forwarded to the normal Jellyfin LAN origin, matching the UAT proxy shape.
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	handle /api/* {
+		reverse_proxy gogglebox:3000
+	}
+
+	handle_path /player/* {
+		reverse_proxy {$JELLYFIN_PROXY_UPSTREAM}
+	}
+
+	handle {
+		reverse_proxy gogglebox:3000
+	}
+}

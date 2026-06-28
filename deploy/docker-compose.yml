@@ -14,9 +14,21 @@ services:
       - PORTAL_USERNAME
       - PORTAL_PASSWORD
       - PORTAL_AUTO_LOGIN
+      - JELLYFIN_DEBUG
     volumes:
       - ./config.json:/app/config.json:ro
       # writable app state; host-mounted so it survives redeploys
       - ${GOGGLEBOX_STATE_DIR:-./data}:/data
+
+  proxy:
+    image: caddy:2-alpine
+    container_name: gogglebox-proxy
+    restart: unless-stopped
+    environment:
+      - JELLYFIN_PROXY_UPSTREAM=${JELLYFIN_PROXY_UPSTREAM:?required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
-      - "${GOGGLEBOX_PORT:?host port to expose}:3000"
+      - "${GOGGLEBOX_PORT:?host port to expose}:8080"
+    depends_on:
+      - gogglebox
