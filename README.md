@@ -181,16 +181,14 @@ Required values:
 | `GOGGLEBOX_PORT` | Host port for the app front door |
 | `JELLYFIN_URL` | Jellyfin URL used by Gogglebox server/API calls |
 | `JELLYFIN_API_KEY` | Jellyfin API key |
-| `JELLYFIN_PROXY_UPSTREAM` | Jellyfin origin for `/player/*`, usually the same origin as `JELLYFIN_URL` but without any `/player` base path |
 | `SESSION_SECRET` | Long random string for session cookies |
 
-Example for a LAN Jellyfin at `http://htpc.lan:8096`:
+Example for a LAN Jellyfin at `http://jellyfin.lan:8096`:
 
 ```env
 REGISTRY_HOST=registry.example.com:5000
 GOGGLEBOX_PORT=3000
-JELLYFIN_URL=http://htpc.lan:8096
-JELLYFIN_PROXY_UPSTREAM=http://htpc.lan:8096
+JELLYFIN_URL=http://jellyfin.lan:8096
 JELLYFIN_API_KEY=replace-me
 SESSION_SECRET=replace-with-a-long-random-secret
 ```
@@ -211,6 +209,7 @@ Optional values:
 | `PORTAL_USERNAME` / `PORTAL_PASSWORD` | unset | Shared household login credentials |
 | `PORTAL_AUTO_LOGIN` | `false` | Skip the login screen on a trusted LAN |
 | `JELLYFIN_DEBUG` | `false` | Log outbound Jellyfin requests with timing |
+| `JELLYFIN_PROXY_UPSTREAM` | `JELLYFIN_URL` | Override the `/player/*` proxy origin; only needed when the proxy must reach Jellyfin at a different origin than the portal |
 
 ### 4. Start Gogglebox
 

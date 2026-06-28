@@ -25,7 +25,7 @@ services:
     container_name: gogglebox-proxy
     restart: unless-stopped
     environment:
-      - JELLYFIN_PROXY_UPSTREAM=${JELLYFIN_PROXY_UPSTREAM:?required}
+      - JELLYFIN_PROXY_UPSTREAM=${JELLYFIN_PROXY_UPSTREAM:-${JELLYFIN_URL:?required}}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     ports:
