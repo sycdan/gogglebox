@@ -68,7 +68,7 @@ thin overlays re-point `server`/`proof` (and mount their own config over
 
 **Layered env.** `.env` (copied from `.env.example`) holds the **shared** config
 every stack uses (`SESSION_SECRET`, `WATCHED_THRESHOLD`, `PORTAL_AUTO_LOGIN`,
-`JELLYFIN_DEBUG`, `REGISTRY_HOST`, the Vite/proof URLs). Each run stack appends an
+`JELLYFIN_DEBUG`, the Vite/proof URLs). Each run stack appends an
 **overrides-only** `.env.<env>` on top; compose loads the env files in order, so
 later wins. The override file carries just the four connection/identity vars:
 `JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, `PORTAL_PASSWORD`.
@@ -112,11 +112,9 @@ See [CLAUDE.md](CLAUDE.md) for the full protocol.
 
 [.githooks/pre-push](.githooks/pre-push) gates every push: it fails if the
 working tree is dirty, runs the typecheck ("lint" - there is no eslint), then
-builds and publishes the production image to the registry via
-[scripts/docker-publish.sh](scripts/docker-publish.sh) (the script does the
-`docker build`). The push only proceeds if all of that is green, so
-`REGISTRY_HOST` must be set (in `.env` or the environment) or the publish step,
-and the push, will fail.
+builds the production image as a gate. It does not publish — that is CI's job
+(see [Publishing images](#publishing-images)). The push only proceeds if all of
+that is green.
 
 Enable it once per clone:
 
@@ -177,16 +175,17 @@ Required values:
 
 | Var | Purpose |
 | --- | --- |
-| `REGISTRY_HOST` | Registry host to pull the Gogglebox image from |
 | `GOGGLEBOX_PORT` | Host port for the app front door |
 | `JELLYFIN_URL` | Jellyfin URL used by Gogglebox server/API calls |
 | `JELLYFIN_API_KEY` | Jellyfin API key |
 | `SESSION_SECRET` | Long random string for session cookies |
 
+The image is pulled from the project's public GHCR namespace
+(`ghcr.io/sycdan/gogglebox`) — no registry login or config needed.
+
 Example for a LAN Jellyfin at `http://jellyfin.lan:8096`:
 
 ```env
-REGISTRY_HOST=registry.example.com:5000
 GOGGLEBOX_PORT=3000
 JELLYFIN_URL=http://jellyfin.lan:8096
 JELLYFIN_API_KEY=replace-me
@@ -274,23 +273,28 @@ sudo mkdir -p /var/lib/gogglebox
 sudo chown -R 1000:1000 /var/lib/gogglebox
 ```
 
-### Publishing Images
+### Publishing images
 
-End users normally do not need this step if a Gogglebox image has already been
-published to your registry. Maintainers can build and publish from the repo root
-with [scripts/docker-publish.sh](scripts/docker-publish.sh). It reads `.env` for
-defaults, then pushes both `latest` and a timestamped `yyyy.m.d.<minute-of-day>`
-tag from the same build:
+End users do not run this — images are published automatically. GitHub Actions
+([.github/workflows/publish.yml](.github/workflows/publish.yml)) builds the
+multi-arch (`linux/amd64`, `linux/arm64`) image and pushes it to GHCR using the
+built-in `GITHUB_TOKEN` (no PAT). It runs on every push to `main` (and manual
+`workflow_dispatch`), tagging each build twice:
+
+- `latest` — rolling pointer to the newest build,
+- `yyyymmddhhmmss` (UTC) — immutable, sortable pin for reproducible deploys.
+
+The package must be public for unauthenticated `docker pull` to work: after the
+first run, open the `gogglebox` package on GitHub -> Package settings -> change
+visibility to **Public**.
+
+To publish manually (rare), log in to GHCR with a PAT that has `write:packages`,
+then build and push:
 
 ```bash
-REGISTRY_HOST=registry.example.com:5000 ./scripts/docker-publish.sh
-```
-
-Overrides:
-
-```bash
-REGISTRY_HOST=registry.example.com:5000 IMAGE_NAME=gogglebox ./scripts/docker-publish.sh
-REGISTRY_HOST=registry.example.com:5000 PLATFORM=linux/amd64 ./scripts/docker-publish.sh
+echo "$GHCR_PAT" | docker login ghcr.io -u sycdan --password-stdin
+docker build -t ghcr.io/sycdan/gogglebox:latest .
+docker push ghcr.io/sycdan/gogglebox:latest
 ```
 
 ---

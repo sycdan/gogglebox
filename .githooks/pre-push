@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # pre-push gate: refuse to push unless the tree is clean, the typecheck
-# ("lint") passes, and the production image builds — then publish the image
-# to the registry. The push only proceeds if every step is green.
+# ("lint") passes, and the production image builds. Publishing is handled by
+# CI (GitHub Actions -> GHCR), so this hook only proves the image builds; it
+# does not push. The push only proceeds if every step is green.
 #
 # Everything runs in Docker (the host has only docker + git, per CLAUDE.md).
 # There is no eslint in this repo, so "lint" == the typecheck (`npm run check`).
@@ -26,10 +27,9 @@ export PORTAL_USERNAME="${PORTAL_USERNAME:-prepush}"
 export PORTAL_PASSWORD="${PORTAL_PASSWORD:-prepush}"
 $compose run --rm check
 
-echo "[pre-push] 3/3 build + publish image to registry…"
-# docker-publish.sh runs `docker build` itself, then tags + pushes. It reads
-# .env for REGISTRY_HOST and fails loudly if unset. No separate build step
-# needed here — this is the build gate too.
-./scripts/docker-publish.sh
+echo "[pre-push] 3/3 production image builds…"
+# Build gate only — CI publishes to GHCR after the push lands. Build the same
+# image the Dockerfile produces; fail the push if it doesn't build.
+docker build -t gogglebox:prepush .
 
 echo "[pre-push] all green — proceeding with push."

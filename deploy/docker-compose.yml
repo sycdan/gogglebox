@@ -1,6 +1,6 @@
 services:
   gogglebox:
-    image: ${REGISTRY_HOST:?your docker registry host:port}/gogglebox:${GOGGLEBOX_VERSION:-latest}
+    image: ghcr.io/sycdan/gogglebox:${GOGGLEBOX_VERSION:-latest}
     pull_policy: always
     container_name: gogglebox
     restart: unless-stopped
