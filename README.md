@@ -316,3 +316,5 @@ docker push ghcr.io/sycdan/gogglebox:latest
 ```
 
 ---
+
+In loving memory of [Oggie](./mascot.jpg).
