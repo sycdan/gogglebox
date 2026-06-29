@@ -3,9 +3,26 @@ name: Publish image
 # Build the production image and push it to GitHub Container Registry (GHCR).
 # Runs on pushes to main and on version tags. No PAT needed — the built-in
 # GITHUB_TOKEN has package write scope for this repo.
+#
+# The `paths` filter keeps a push from rebuilding when nothing that actually goes
+# INTO the image changed. Keep this list in lockstep with the Dockerfile's build
+# inputs (the COPY sources) — docs, e2e/, scripts/, tools/, compose files, and
+# config*.json are NOT in the image and intentionally do not trigger a build.
+# Use the manual `workflow_dispatch` to force a build regardless.
 on:
   push:
     branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - 'tsconfig*.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/publish.yml'
   workflow_dispatch:
 
 env:
