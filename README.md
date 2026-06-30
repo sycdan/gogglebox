@@ -261,11 +261,12 @@ See [CLAUDE.md](CLAUDE.md) for the full protocol.
 
 ### Pre-push hook
 
-[.githooks/pre-push](.githooks/pre-push) gates every push: it fails if the
-working tree is dirty, runs the typecheck ("lint" - there is no eslint), then
-builds the production image as a gate. It does not publish — that is CI's job
-(see [Publishing images](#publishing-images)). The push only proceeds if all of
-that is green.
+[.githooks/pre-push](.githooks/pre-push) gates every push — clean tree, a version
+bump when an image input changed on `main` (see
+[Versioning + publishing](#versioning--publishing)), typecheck, unit tests, and a
+production image build. The exact steps and the image-input rule live in the hook's
+header comment. The same typecheck + tests also gate the publish workflow
+server-side, so a known-broken image is never built.
 
 Enable it once per clone:
 
@@ -273,47 +274,33 @@ Enable it once per clone:
 git config core.hooksPath .githooks
 ```
 
-### Publishing images
+### Versioning + publishing
 
-End users do not run this — images are published automatically. There are two
-channels:
+Images publish automatically — deployers run none of this. The model is **build
+once, test once, promote**: each publish-worthy change on `main` is built and tested
+as an immutable prerelease image, and a release _promotes_ one of those prebuilt
+images to a pinnable tag (no rebuild), so released bits are byte-identical to what
+was tested. Versions are calendar-based: a prerelease between releases, stripped
+to a clean `YYYY.M.D` on release. The exact prerelease format lives in
+[scripts/bump.sh](scripts/bump.sh).
 
-**Rolling** ([.github/workflows/publish.yml](.github/workflows/publish.yml)) —
-runs on every push to `main`. Builds the multi-arch (`linux/amd64`,
-`linux/arm64`) image with the built-in `GITHUB_TOKEN` (no PAT) and tags it twice:
+The mechanics live in each file's header comment (the single source of truth — this
+section stays high-level so it can't drift). A maintainer runs two commands:
 
-- `latest` — rolling pointer to the newest build,
-- `yyyymmddhhmmss` (UTC) — immutable, sortable pin for ad-hoc reproducible pulls.
+- **Bump** before pushing an image change to `main`: `./scripts/bump.sh`
+  ([scripts/bump.sh](scripts/bump.sh)) — enforced by the
+  [pre-push hook](.githooks/pre-push), which owns the image-input list.
+- **Release**: `gh workflow run release.yml`
+  ([release.yml](.github/workflows/release.yml)) — promotes the prebuilt image to
+  `YYYY.M.D` + `latest` and opens a GitHub Release.
 
-**Release** ([.github/workflows/release.yml](.github/workflows/release.yml)) —
-the pinnable channel. One manual run does everything:
+The build+test-on-bump workflow is
+[publish.yml](.github/workflows/publish.yml) (tags the image with the exact
+prerelease version; no `latest`).
 
-```bash
-gh workflow run release.yml
-```
-
-It computes a calendar version `YYYY.M.D` (e.g. `2026.6.28`), stamps it into
-`package.json` and commits that to `main` (with `[skip ci]` so the rolling build
-does not double-fire), builds + pushes the image tagged `YYYY.M.D` (and
-`latest`), pushes the git tag `v2026.6.28`, and opens a GitHub Release with
-generated notes. The image tag / pin is bare (`2026.6.28`) while the git tag
-carries a `v` (gh convention), so a deployer who pins
-`GOGGLEBOX_VERSION=2026.6.28` runs `git checkout v2026.6.28` to get the exact
-`deploy/` shape that shipped with it.
-
-One release per day: a second run the same day fails on the collision guard
-before changing anything. The package must be public for unauthenticated
-`docker pull` to work: after the first run, open the `gogglebox` package on
-GitHub -> Package settings -> change visibility to **Public**.
-
-To publish manually (rare), log in to GHCR with a PAT that has `write:packages`,
-then build and push:
-
-```bash
-echo "$GHCR_PAT" | docker login ghcr.io -u sycdan --password-stdin
-docker build -t ghcr.io/sycdan/gogglebox:latest .
-docker push ghcr.io/sycdan/gogglebox:latest
-```
+**Deployers** pin a release with `GOGGLEBOX_VERSION=2026.6.29` and
+`git checkout v2026.6.29` for the matching `deploy/` shape. One release per date (a
+collision guard blocks a second).
 
 ---
 

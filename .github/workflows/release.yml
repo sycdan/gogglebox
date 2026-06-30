@@ -1,62 +1,64 @@
 name: Release
 
-# Cut a dated release: stamp the version, build + push the image, tag the repo,
-# and publish a GitHub Release — all from one manual run. Use this (not a push
-# to main) when you want a pinnable version.
+# Promote a prebuilt, already-tested PRERELEASE image to a pinnable calendar
+# release. This does NOT rebuild and does NOT re-run tests: it retags the exact
+# multi-arch image publish.yml built (and gated) for the current package version,
+# so the released bits are byte-identical to what was tested.
 #
-# Version scheme is calendar-based: YYYY.M.D (no leading zeros, e.g. 2026.6.28).
-# One release per day. A second run the same day hits the collision guard and
-# fails loudly before changing anything.
+# Run it AFTER the prerelease bump has landed on main and publish.yml has finished
+# building its image:  gh workflow run release.yml
 #
-# Run it with:  gh workflow run release.yml
+# Preconditions (fail loudly otherwise):
+#  - package.json is at a PRERELEASE version, YYYY.M.D-<ts> (the `-` suffix marks
+#    it). A clean version means nothing new to promote — release refuses (run
+#    scripts/bump.sh first).
+#  - ghcr/<repo>:<that prerelease version> exists (publish.yml built it).
+#
+# What it does: retags that image as <YYYY.M.D> + `latest` (promotion, no build),
+# strips the -<ts> suffix from package.json and commits it to main ([skip ci]
+# so publish doesn't fire), tags vYYYY.M.D, and opens a GitHub Release. Stripping
+# the suffix leaves main at a clean, npm-publishable version until the next bump.
 on:
   workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }} # owner/repo, lowercased by metadata-action
+  IMAGE_NAME: ${{ github.repository }} # owner/repo
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # commit the version bump, push the tag, create the release
-      packages: write # push the image to GHCR
+      contents: write # commit the suffix strip, push the tag, create the release
+      packages: write # retag (promote) the image in GHCR
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # full history so --generate-notes has commits to diff
 
-      - name: Compute version
+      - name: Resolve versions from package.json
         id: ver
         run: |
-          VER="$(date -u +%Y.%-m.%-d)"
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "Release version: $VER"
+          FULL="$(jq -r .version package.json)"
+          if [[ "$FULL" != *-* ]]; then
+            echo "::error::package.json version '$FULL' is not a prerelease (expected YYYY.M.D-<ts>). Nothing to promote — run scripts/bump.sh, push to main, let publish build it, then release."
+            exit 1
+          fi
+          BASE="${FULL%%-*}" # strip the -<ts> prerelease suffix
+          echo "full=$FULL" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+          echo "Promoting $FULL -> $BASE"
 
       - name: Guard against same-day collision
         env:
-          VER: ${{ steps.ver.outputs.version }}
+          BASE: ${{ steps.ver.outputs.base }}
         run: |
           # git tags carry a v prefix (gh convention); the image tag / pin does not.
-          if git rev-parse "refs/tags/v$VER" >/dev/null 2>&1; then
-            echo "::error::Tag v$VER already exists — already released today. Aborting."
+          if git rev-parse "refs/tags/v$BASE" >/dev/null 2>&1; then
+            echo "::error::Tag v$BASE already exists — already released today. Aborting."
             exit 1
           fi
-
-      - name: Stamp version into package.json and commit
-        env:
-          VER: ${{ steps.ver.outputs.version }}
-        run: |
-          npm version "$VER" --no-git-tag-version
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -am "release: $VER [skip ci]"
-          git push origin HEAD:${{ github.ref_name }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -68,32 +70,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags + labels
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest
-            type=raw,value=${{ steps.ver.outputs.version }}
+      - name: Promote the prebuilt prerelease image (no rebuild)
+        env:
+          FULL: ${{ steps.ver.outputs.full }}
+          BASE: ${{ steps.ver.outputs.base }}
+        run: |
+          IMG="${REGISTRY}/${IMAGE_NAME,,}" # GHCR requires a lowercase path
+          # Copy the multi-arch manifest from the tested prerelease tag onto the
+          # release tag + latest. Fails if publish.yml hasn't built FULL yet.
+          docker buildx imagetools create \
+            -t "${IMG}:${BASE}" \
+            -t "${IMG}:latest" \
+            "${IMG}:${FULL}"
+          echo "Promoted ${IMG}:${FULL} -> ${IMG}:${BASE} (+ latest)"
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          node-version: 22
 
-      - name: Create GitHub Release
+      - name: Strip prerelease suffix and commit
+        env:
+          BASE: ${{ steps.ver.outputs.base }}
+        run: |
+          # npm version normalizes package.json + package-lock.json to the clean
+          # release version. [skip ci] keeps publish.yml from rebuilding it.
+          npm version "$BASE" --no-git-tag-version
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -am "release: $BASE [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Tag and create the GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VER: ${{ steps.ver.outputs.version }}
+          BASE: ${{ steps.ver.outputs.base }}
         run: |
-          gh release create "v$VER" \
+          git tag "v$BASE"
+          git push origin "v$BASE"
+          gh release create "v$BASE" \
             --target "$(git rev-parse HEAD)" \
-            --title "v$VER" \
+            --title "v$BASE" \
             --generate-notes

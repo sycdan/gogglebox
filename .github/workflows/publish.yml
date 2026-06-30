@@ -1,28 +1,27 @@
 name: Publish image
 
-# Build the production image and push it to GitHub Container Registry (GHCR).
-# Runs on pushes to main and on version tags. No PAT needed — the built-in
+# Build, TEST-GATE, and push the production image to GHCR when a VERSION BUMP lands
+# on main — tagged with the exact (prerelease) package version. This is the
+# only place the image is built: release.yml promotes one of these prebuilt,
+# already-tested images, it does not rebuild. No PAT needed — the built-in
 # GITHUB_TOKEN has package write scope for this repo.
 #
-# The `paths` filter keeps a push from rebuilding when nothing that actually goes
-# INTO the image changed. Keep this list in lockstep with the Dockerfile's build
-# inputs (the COPY sources) — docs, e2e/, scripts/, tools/, compose files, and
-# config*.json are NOT in the image and intentionally do not trigger a build.
-# Use the manual `workflow_dispatch` to force a build regardless.
+# Tag = the full package version, e.g. 2026.6.29-55527303 (the pre-push hook +
+# scripts/bump.sh guarantee main carries a fresh version per publish-worthy change,
+# so the tag is unique). `latest` is NOT set here — it tracks releases, set by
+# release.yml when it promotes a version to its clean YYYY.M.D tag.
+#
+# Trigger: a `package.json` change on main. The decision of WHICH file changes are
+# publish-worthy lives in the pre-push hook (its image-input list, in lockstep with
+# the Dockerfile COPY) — a publish-worthy change is bumped, and a bump edits
+# package.json. The `gate` job below then builds ONLY when the version actually
+# changed (vs the push's `before` SHA), so a non-bump package.json edit (e.g. a
+# dependency tweak) does not publish. Use `workflow_dispatch` to force a build.
 on:
   push:
     branches: [main]
     paths:
-      - 'src/**'
-      - 'public/**'
-      - 'index.html'
-      - 'vite.config.ts'
-      - 'tsconfig*.json'
       - 'package.json'
-      - 'package-lock.json'
-      - 'Dockerfile'
-      - '.dockerignore'
-      - '.github/workflows/publish.yml'
   workflow_dispatch:
 
 env:
@@ -30,7 +29,58 @@ env:
   IMAGE_NAME: ${{ github.repository }} # owner/repo, lowercased below by metadata-action
 
 jobs:
+  # Quick exit: only proceed when this push actually bumped the version. Compares
+  # the version at the push's `before` SHA to HEAD; a manual dispatch (no before)
+  # always proceeds. This is what makes "trigger on package.json" mean "trigger on
+  # a real version bump".
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      bump: ${{ steps.check.outputs.bump }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          HEAD_VER="$(jq -r .version package.json)"
+          if [[ -z "$BEFORE" || "$BEFORE" =~ ^0+$ ]]; then
+            echo "manual/initial run — proceeding (HEAD=$HEAD_VER)"
+            echo "bump=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          BEFORE_VER="$(git show "$BEFORE:package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo '')"
+          if [[ "$HEAD_VER" != "$BEFORE_VER" ]]; then
+            echo "version bump $BEFORE_VER -> $HEAD_VER — building"
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "package.json changed but version unchanged ($HEAD_VER) — skipping build"
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Correctness gate: typecheck + unit tests must be green before the image is
+  # built or pushed, so we can never publish a known-broken build.
+  test:
+    needs: gate
+    if: needs.gate.outputs.bump == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run check
+      - name: Unit tests
+        run: npm test
+
+  # No `if` here: publish `needs: test`, and a skipped dependency (test, when the
+  # gate said not a bump) skips this job too. It only runs when test ran and passed.
   publish:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,15 +102,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Read package version
+        id: pkg
+        # The immutable image tag = the exact package version (a prerelease, e.g.
+        # 2026.6.29-<ts>). release.yml promotes this tag to its clean release.
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
       - name: Compute tags + labels
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # latest = rolling newest; yyyymmddhhmmss (UTC) = immutable pin.
+          # No `latest` here — release.yml sets latest when it promotes a release.
           tags: |
-            type=raw,value=latest
-            type=raw,value={{date 'YYYYMMDDHHmmss'}}
+            type=raw,value=${{ steps.pkg.outputs.version }}
 
       - name: Build and push
         uses: docker/build-push-action@v6

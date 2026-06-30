@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# pre-push gate: refuse to push unless the tree is clean, the typecheck
-# ("lint") passes, and the production image builds. Publishing is handled by
-# CI (GitHub Actions -> GHCR), so this hook only proves the image builds; it
-# does not push. The push only proceeds if every step is green.
+# pre-push gate: refuse to push unless the tree is clean, the package version is
+# bumped when an image input changed (for pushes to main), the typecheck + unit
+# tests pass, and the production image builds. Publishing is handled by CI (GitHub
+# Actions -> GHCR), so this hook does not push. The push only proceeds if every
+# step is green.
 #
 # Everything runs in Docker (the host has only docker + git, per CLAUDE.md).
 # There is no eslint in this repo, so "lint" == the typecheck (`npm run check`).
@@ -12,22 +13,76 @@ set -euo pipefail
 
 compose="docker compose -f docker-compose.yml"
 
-echo "[pre-push] 1/3 working tree clean?"
+# Files that actually go INTO the image — keep in lockstep with the Dockerfile's
+# COPY sources. This is the single source of truth for "publish-worthy": the CI
+# publish workflow triggers only on package.json, so a change to any of these must
+# be accompanied by a version bump (which edits package.json) to get published.
+# (case globs: `*` matches `/`, so src/* covers nested paths.)
+is_image_input() {
+	case "$1" in
+		src/*|public/*|index.html|vite.config.ts|tsconfig*.json|package.json|package-lock.json|Dockerfile|.dockerignore) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+image_inputs_changed() {
+	local f
+	while IFS= read -r f; do
+		is_image_input "$f" && return 0
+	done < <(git diff --name-only origin/main HEAD)
+	return 1
+}
+
+# pre-push receives one line per ref being pushed on stdin:
+#   <local ref> <local sha> <remote ref> <remote sha>
+# Capture them so the version-bump gate can tell whether main is being pushed.
+push_refs="$(cat || true)"
+
+pkg_version() { grep -m1 '"version"' package.json | sed -E 's/.*"version" *: *"([^"]+)".*/\1/'; }
+remote_main_version() { git show origin/main:package.json 2>/dev/null | grep -m1 '"version"' | sed -E 's/.*"version" *: *"([^"]+)".*/\1/' || true; }
+
+echo "[pre-push] 1/5 working tree clean?"
 if [[ -n "$(git status --porcelain)" ]]; then
 	echo "[pre-push] FAIL: working tree is dirty — commit or stash first." >&2
 	git status --short >&2
 	exit 1
 fi
 
-echo "[pre-push] 2/3 typecheck (lint)…"
-# `check` needs no Jellyfin/portal creds, but compose parses the whole file
+echo "[pre-push] 2/5 version bumped when image inputs changed (pushes to main)?"
+# A bump is required only when something that goes into the image changed — the
+# release pipeline promotes the image built for that exact version. Docs/test/
+# tooling-only pushes need no bump (and won't trigger a publish).
+if grep -q 'refs/heads/main' <<<"$push_refs"; then
+	if image_inputs_changed; then
+		head_ver="$(pkg_version)"
+		base_ver="$(remote_main_version)"
+		if [[ -n "$base_ver" && "$head_ver" == "$base_ver" ]]; then
+			echo "[pre-push] FAIL: image inputs changed but package.json version ($head_ver) is unchanged from origin/main." >&2
+			echo "[pre-push]       Run ./scripts/bump.sh to bump to a fresh YYYY.M.D-<ts>, then push." >&2
+			exit 1
+		fi
+		echo "[pre-push]       ok (image inputs changed; $base_ver -> $head_ver)"
+	else
+		echo "[pre-push]       skipped (no image-input changes)"
+	fi
+else
+	echo "[pre-push]       skipped (not pushing main)"
+fi
+
+echo "[pre-push] 3/5 typecheck (lint)…"
+# `check`/`test` need no Jellyfin/portal creds, but compose parses the whole file
 # and some services declare required (:?) vars — stub them so interpolation
 # doesn't abort the run.
 export PORTAL_USERNAME="${PORTAL_USERNAME:-prepush}"
 export PORTAL_PASSWORD="${PORTAL_PASSWORD:-prepush}"
 $compose run --rm check
 
-echo "[pre-push] 3/3 production image builds…"
+echo "[pre-push] 4/5 unit tests…"
+# Same suite CI runs (also gated server-side as a prerequisite of publish); fail
+# the push if anything is red.
+$compose run --rm test
+
+echo "[pre-push] 5/5 production image builds…"
 # Build gate only — CI publishes to GHCR after the push lands. Build the same
 # image the Dockerfile produces; fail the push if it doesn't build.
 docker build -t gogglebox:prepush .
