@@ -25,9 +25,12 @@ after that is scoped to that group.
 - **Find, don't browse.** Rather than rendering the whole library, the selector
   drives a small set of recommendations plus a search box.
 
-Viewers and groups map to Jellyfin user ids in `config.json`. Jellyfin remains
-the source of truth for library, metadata, and watch history; Gogglebox is a thin
-group-aware layer on top.
+Users are referenced by their (unique) Jellyfin name in `config.json`; Gogglebox
+resolves names to ids itself at startup. One or more login `accounts[]` each see
+only the users they are allowed to, and groups are formed live in the UI (a
+group is a Jellyfin user created on demand). Jellyfin remains the source of truth
+for library, metadata, and watch history; Gogglebox is a thin group-aware layer
+on top.
 
 See [BACKLOG.md](BACKLOG.md) for the roadmap.
 
@@ -55,22 +58,55 @@ cd gogglebox
 
 You will only edit files under `deploy/`.
 
-### 2. Configure the household
+### 2. Configure users and accounts
 
-Copy the example config and replace the placeholder Jellyfin user ids with the
-real Jellyfin user ids for your household. Groups are configured here, not baked
-into the image.
+Copy the example config and edit it. Config is **schemaVersion 1**
+(`"schemaVersion": 1`): list your Jellyfin users by **name** under `users[]`,
+then add one or more login
+`accounts[]` (a household), each listing the users it may see under
+`visible_users[]`. A user can optionally have a `pin`, and an account can mark a
+visible user `pin_required` so forming a group with them prompts for that pin.
 
 ```bash
 cp deploy/config.example.json deploy/config.json
 ```
 
-`deploy/config.json` is mounted read-only into the container at
-`/app/config.json`. The server fails fast at startup if it is missing, empty, or
-invalid JSON.
+```jsonc
+{
+  "schemaVersion": 1,
+  "users": [
+    { "jellyfin_name": "A", "pin": "1234" },
+    { "jellyfin_name": "B" }
+  ],
+  "accounts": [
+    {
+      "username": "house1",
+      "password": "set-a-real-password",
+      "visible_users": [{ "jellyfin_name": "A" }, { "jellyfin_name": "B" }]
+    },
+    {
+      "username": "house2",
+      "password": "set-a-real-password",
+      "visible_users": [{ "jellyfin_name": "A", "pin_required": true }]
+    }
+  ]
+}
+```
 
-To find Jellyfin user ids, open Jellyfin as an admin and inspect each user's id
-from the user details page/API, then put those ids in the `memberIds` arrays.
+`deploy/config.json` is mounted read-only into the container at
+`/app/config.json` as a **source of overrides**. On startup the server
+**auto-migrates** it forward to the schema the running image expects (an integer
+`schemaVersion`; a config with no `schemaVersion` is treated as the legacy v1
+UUID-based config and migrated automatically), seeds defaults from the bundled
+example, overlays your values, and caches the derived "effective config" in its
+writable `/data` state — your file is never rewritten. Reverting to an older
+image re-derives from the same file, so rollback just works. Unresolvable
+references (a `jellyfin_name` with no matching Jellyfin user) are **dropped with
+a warning** rather than crashing; startup fails fast only if the result is
+unusable (no users or no accounts) or the file's `schemaVersion` is newer than
+this image understands. Use the exact Jellyfin user **names** (Jellyfin admin →
+Users) — you never paste a UUID. Noteworthy config changes are called out in the
+GitHub release notes.
 
 ### 3. Configure the environment
 
@@ -114,8 +150,7 @@ Optional values:
 | `GOGGLEBOX_VERSION` | `latest` | Image tag to pull; pin a version tag for reproducible deploys |
 | `GOGGLEBOX_STATE_DIR` | `./data` under `deploy/` | Host directory for writable app state |
 | `WATCHED_THRESHOLD` | `0.9` | Fraction watched before an item counts as watched |
-| `PORTAL_USERNAME` / `PORTAL_PASSWORD` | unset | Shared household login credentials |
-| `PORTAL_AUTO_LOGIN` | `false` | Skip the login screen on a trusted LAN |
+| `PORTAL_USERNAME` / `PORTAL_PASSWORD` | unset | Optional auto-login: when set AND matching an `accounts[]` entry, that account is logged in automatically (skipping the login screen); otherwise leave unset and log in via the UI |
 | `JELLYFIN_DEBUG` | `false` | Log outbound Jellyfin requests with timing |
 | `JELLYFIN_PROXY_UPSTREAM` | `JELLYFIN_URL` | Override the `/player/*` proxy origin; only needed when the proxy must reach Jellyfin at a different origin than the portal |
 
@@ -221,8 +256,8 @@ thin overlays re-point `server`/`proof` (and mount their own config over
 | **uat** | your **real** Jellyfin | `./scripts/uat.sh ...` | `.env` + `.env.uat`, `config.uat.json` |
 
 **Layered env.** `.env` (copied from `.env.example`) holds the **shared** config
-every stack uses (`SESSION_SECRET`, `WATCHED_THRESHOLD`, `PORTAL_AUTO_LOGIN`,
-`JELLYFIN_DEBUG`, the Vite/proof URLs). Each run stack appends an
+every stack uses (`SESSION_SECRET`, `WATCHED_THRESHOLD`, `JELLYFIN_DEBUG`, the
+Vite/proof URLs). Each run stack appends an
 **overrides-only** `.env.<env>` on top; compose loads the env files in order, so
 later wins. The override file carries just the four connection/identity vars:
 `JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, `PORTAL_PASSWORD`.
@@ -237,7 +272,7 @@ JELLYFIN_API_KEY=...
 PORTAL_USERNAME=...
 PORTAL_PASSWORD=...
 EOF
-cp deploy/config.example.json config.uat.json # set real Jellyfin user ids
+cp deploy/config.example.json config.uat.json # set real Jellyfin user names + an account matching PORTAL_*
 ./scripts/uat.sh up -d                        # server + client + proxy (single door :8080)
 PROOF_FLOW=continue-watching ./scripts/uat.sh run --rm proof
 
@@ -304,6 +339,9 @@ prerelease version; no `latest`).
 **Deployers** pin a release with `GOGGLEBOX_VERSION=2026.6.29` and
 `git checkout v2026.6.29` for the matching `deploy/` shape. One release per date (a
 collision guard blocks a second).
+
+## Roadmap
+
 
 ---
 

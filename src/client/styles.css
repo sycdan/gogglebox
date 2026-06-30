@@ -230,6 +230,21 @@ h3 {
   font-size: 1.4rem;
 }
 
+/* Saved (managed) groups on the picker: alias-first selectable cards, and the
+   active-group alias label in the hero. Cards reuse .viewer-card layout. */
+.saved-groups {
+  margin-top: 0.5rem;
+}
+
+.saved-group-card strong {
+  font-size: 1.05rem;
+}
+
+.group-alias {
+  align-self: center;
+  font-size: 0.85rem;
+}
+
 .section-block {
   margin-bottom: 1.25rem;
 }

@@ -19,7 +19,7 @@ only the **mutable** per-user played-state is reset between tests.
 | `fixtures.mjs` — the library/users spec | `tools/sandbox/media/` and the `sandbox_media` volume (tiny .webm stubs + .nfo) |
 | `generate-fixtures.mjs`, `provision.mjs`, `reset.mjs` | `sandbox_config` / `sandbox_cache` volumes (Jellyfin state) |
 | `Dockerfile` (Node + ffmpeg tooling image) | `.env.sbx` (overrides-only: minted API key + URL + admin creds) |
-| this `README.md` | `config.sbx.json` (groups with the minted user GUIDs) |
+| this `README.md` | `config.sbx.json` (schemaVersion 1: name-based `users[]` + `accounts[]`) |
 
 ## Bring it up (zero manual steps)
 
@@ -40,11 +40,19 @@ After step 3 you have, at the project root:
 - `.env.sbx` — the **overrides-only** env file layered on top of the shared
   `.env` (later file wins). It carries only the four per-env override keys:
   `JELLYFIN_URL=http://jellyfin-sandbox:8096`, the minted `JELLYFIN_API_KEY`, and
-  the admin `PORTAL_USERNAME`/`PORTAL_PASSWORD`. Shared keys (e.g.
-  `PORTAL_AUTO_LOGIN`) stay in `.env`.
-- `config.sbx.json` — `groups` whose `memberIds` are the **actual GUIDs** of
-  the provisioned users (Alice/Bob/Carol/Dave), so the server's `fetchUsers` /
-  `activeViewersForSession` see exactly this "Everyone" group.
+  the admin `PORTAL_USERNAME`/`PORTAL_PASSWORD`. (Auto-login is implicit: with
+  those PORTAL creds set and matching the `gogglebox-admin` account, the app logs
+  in automatically — there is no separate auto-login env var.) Shared keys (e.g.
+  `WATCHED_THRESHOLD`, `JELLYFIN_DEBUG`) stay in `.env`.
+- `config.sbx.json` — **schemaVersion 1** (`schemaVersion: 1`): name-based `users[]`
+  (Alice/Bob/Carol/Dave, with Carol carrying `pin: "5678"`) and two `accounts[]`:
+  - `gogglebox-admin` / `gogglebox-sandbox` — sees all four users, none
+    pin-gated. Matches the `.env.sbx` `PORTAL_*` so admin auto-login works.
+  - `visitor` / `visitor-pass` — sees Carol (`pin_required: true`) + Dave, for
+    the PIN-gated group proof (`PROOF_FLOW=group-pin`).
+
+  The server resolves these names → Jellyfin ids at startup (`fetchUsers`); no
+  UUIDs, `groups[]`, or `household` are written.
 
 Re-running any step is **idempotent**: generate skips existing files (`FORCE=1`
 to re-encode), provision skips existing users/libraries and reuses the existing

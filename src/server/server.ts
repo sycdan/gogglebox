@@ -1,11 +1,18 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import express from 'express';
 import session from 'express-session';
 
+import {
+  authenticateAccount,
+  verifyGroupPins,
+  visibleViewersForAccount,
+} from './accounts';
 import { AppState } from './appState';
-import { loadConfig } from './config';
+import { buildEffectiveConfig, loadConfig, readSourceHash, resolveViewers } from './config';
+import { CachedEffectiveConfig } from './appState';
 import { anchorShowCards } from './anchorShowCards';
 import {
   ContinueWatchingCandidate,
@@ -13,8 +20,9 @@ import {
   mergeContinueWatching,
 } from './continueWatching';
 import { deriveGroupKey } from './groupKey';
+import { buildGroupAlias, resolveGroupForMembers, visibleGroupsForAccount } from './groups';
 import { JellyfinClient } from './jellyfin';
-import { ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind, ViewerWatchedState } from './types';
+import { ConfigAccount, ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind, ViewerWatchedState } from './types';
 import { computeWatchedFanout } from './watchedFanout';
 
 const config = loadConfig();
@@ -23,6 +31,27 @@ const appState = new AppState();
 const app = express();
 const clientDist = path.resolve(process.cwd(), 'dist/client');
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
+
+// The running image's package version. Stamped onto the cached effective config
+// so a new/rolled-back image (whose migrations may differ) re-derives it.
+function readPackageVersion(): string {
+  try {
+    const pkgPath = path.resolve(process.cwd(), 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { version?: string };
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+// Apply a derived/cached effective config to the live config object: the
+// validated users/accounts plus the resolved playback/recommendation values.
+function applyEffectiveConfig(effective: CachedEffectiveConfig): void {
+  config.users = effective.users as typeof config.users;
+  config.accounts = effective.accounts as typeof config.accounts;
+  config.watchedThreshold = effective.watchedThreshold;
+  config.recommendations = { count: effective.recommendationCount };
+}
 
 function isKidsContent(item: LibraryItem): boolean {
   const rating = item.officialRating?.toUpperCase() ?? '';
@@ -33,9 +62,19 @@ function isKidsContent(item: LibraryItem): boolean {
   return item.genres.some((genre) => ['animation', 'family', 'kids'].includes(genre.toLowerCase()));
 }
 
-function getSelectedViewers(): FamilyMember[] {
-  const activeViewerIds = app.locals.sessionViewerIds as string[] | undefined;
-  return config.viewers.filter((viewer) => activeViewerIds?.includes(viewer.id));
+// All configured viewers, resolved at startup (name -> Jellyfin viewer).
+function allViewers(): FamilyMember[] {
+  return Object.values(config.viewersByName);
+}
+
+// The account a session is logged in as, or null. Looked up live from config so
+// a session can never outlive a removed account.
+function accountForSession(req: express.Request): ConfigAccount | null {
+  const username = req.session.accountUsername;
+  if (!username) {
+    return null;
+  }
+  return config.accounts.find((account) => account.username === username) ?? null;
 }
 
 function requireAuth(
@@ -65,7 +104,7 @@ function requireViewerGroup(
 }
 
 function activeViewersForSession(req: express.Request): FamilyMember[] {
-  return config.viewers.filter((viewer) => req.session.activeViewerIds?.includes(viewer.id));
+  return allViewers().filter((viewer) => req.session.activeViewerIds?.includes(viewer.id));
 }
 
 // Deterministic, order-independent key for the active viewer group, derived from
@@ -73,6 +112,24 @@ function activeViewersForSession(req: express.Request): FamilyMember[] {
 function activeGroupKey(req: express.Request): string {
   const jellyfinUserIds = activeViewersForSession(req).map((viewer) => viewer.jellyfinUserId);
   return deriveGroupKey(jellyfinUserIds);
+}
+
+// The human-readable alias for the active group, or null when no group is
+// active. Prefers the stored alias; falls back to a derived alias (member names
+// joined " + " in the account's visible-user order) so the UI never shows the
+// raw gbx-grp-<hash> name even for groups created before aliases existed.
+function activeGroupAlias(req: express.Request, account: ConfigAccount | null): string | null {
+  const members = activeViewersForSession(req);
+  if (!account || members.length === 0) {
+    return null;
+  }
+  const groupKey = activeGroupKey(req);
+  const stored = appState.getGroupAlias(groupKey);
+  if (stored) {
+    return stored;
+  }
+  const visible = visibleViewersForAccount(account, config.viewersByName);
+  return buildGroupAlias(members.map((member) => member.id), visible) || null;
 }
 
 function ignoredItemsForSession(req: express.Request): Set<string> {
@@ -276,28 +333,45 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.get('/api/session', (req, res) => {
+  const account = req.session.isAuthenticated ? accountForSession(req) : null;
+  // Only this account's visible users, each carrying its pin_required flag for
+  // this account — never the global user list, never the configured pins.
+  const viewers = account ? visibleViewersForAccount(account, config.viewersByName) : [];
+
   res.json({
-    authenticated: Boolean(req.session.isAuthenticated),
-    portalAutoLoginEnabled: config.portalAutoLogin,
+    authenticated: Boolean(req.session.isAuthenticated && account),
+    // Auto-login is implicit: enabled when PORTAL_USERNAME/PORTAL_PASSWORD are set.
+    portalAutoLoginEnabled: Boolean(config.portalCredentials),
     appName: config.appName,
     watchedThreshold: config.watchedThreshold,
-    viewers: req.session.isAuthenticated ? config.viewers : [],
-    groups: req.session.isAuthenticated ? config.groups : [],
+    account: account ? account.username : null,
+    viewers,
     activeViewerIds: req.session.activeViewerIds ?? [],
+    // The active group's human-readable alias (never the raw gbx-grp-<hash>),
+    // or null when no group is active. Surfaced near "Change viewers" in the app.
+    activeGroupAlias: activeGroupAlias(req, account),
   });
 });
 
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body as { username?: string; password?: string };
-  const canAutoLogin = config.portalAutoLogin && !username && !password;
 
-  if (!canAutoLogin && (username !== config.household.username || password !== config.household.password)) {
-    res.status(401).json({ error: 'Invalid household credentials' });
+  // Auto-login: an empty body falls back to PORTAL_USERNAME/PORTAL_PASSWORD,
+  // which only succeeds if those env creds match an accounts[] entry.
+  const tryUsername = username ?? config.portalCredentials?.username;
+  const tryPassword = password ?? config.portalCredentials?.password;
+
+  const account = authenticateAccount(config.accounts, tryUsername, tryPassword);
+  if (!account) {
+    res.status(401).json({ error: 'Invalid account credentials' });
     return;
   }
 
   req.session.isAuthenticated = true;
-  res.json({ ok: true });
+  req.session.accountUsername = account.username;
+  // A fresh login starts with no active group (visible users differ per account).
+  req.session.activeViewerIds = [];
+  res.json({ ok: true, account: account.username });
 });
 
 app.post('/api/auth/logout', requireAuth, (req, res) => {
@@ -311,29 +385,124 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/group', requireAuth, (req, res) => {
+// Parse a { pins: { [jellyfinUserId]: pin } } map from a request body.
+function parsePins(body: unknown): Record<string, string> {
+  const raw = (body as { pins?: unknown } | undefined)?.pins;
+  if (!raw || typeof raw !== 'object') {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string') {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+// Validate that a set of selected member ids is well-formed and visible to the
+// account, then verify any required pins. Returns the resolved member viewers on
+// success, or a { status, error } the caller should send. Shared by /api/group
+// and /api/player/session so pin-gating is enforced everywhere a group is minted.
+function resolveGroupMembers(
+  account: ConfigAccount,
+  memberIds: string[],
+  pins: Record<string, string>,
+): { ok: true; members: FamilyMember[] } | { ok: false; status: number; error: string } {
+  if (!memberIds.length) {
+    return { ok: false, status: 400, error: 'Choose at least one viewer' };
+  }
+
+  // Members must be among THIS account's visible users.
+  const visible = visibleViewersForAccount(account, config.viewersByName);
+  const visibleById = new Map(visible.map((viewer) => [viewer.id, viewer]));
+  const members: FamilyMember[] = [];
+  for (const memberId of memberIds) {
+    const viewer = visibleById.get(memberId);
+    if (!viewer) {
+      return { ok: false, status: 400, error: `Unknown or not-visible viewer: ${memberId}` };
+    }
+    members.push(viewer);
+  }
+
+  const pinCheck = verifyGroupPins(account, config.users, members, pins);
+  if (!pinCheck.ok) {
+    // Never activate a group with a wrong/missing required pin.
+    return { ok: false, status: 403, error: pinCheck.error };
+  }
+
+  return { ok: true, members };
+}
+
+app.post('/api/group', requireAuth, async (req, res) => {
+  const account = accountForSession(req);
+  if (!account) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
   const memberIds = Array.isArray(req.body?.memberIds)
     ? req.body.memberIds.filter((value: unknown): value is string => typeof value === 'string')
     : [];
+  const pins = parsePins(req.body);
 
-  if (!memberIds.length) {
-    res.status(400).json({ error: 'Choose at least one viewer' });
+  const resolved = resolveGroupMembers(account, memberIds, pins);
+  if (!resolved.ok) {
+    res.status(resolved.status).json({ error: resolved.error });
     return;
   }
 
-  const knownViewerIds = new Set(config.viewers.map((viewer) => viewer.id));
-  const invalidMember = memberIds.find((memberId: string) => !knownViewerIds.has(memberId));
-  if (invalidMember) {
-    res.status(400).json({ error: `Unknown viewer: ${invalidMember}` });
+  // Persist the managed group NOW (on Continue), after pin verification. The key
+  // is deterministic + order-independent, so an existing combination is reused
+  // (never duplicated) and only a brand-new combination mints + persists a group.
+  try {
+    const memberJellyfinUserIds = resolved.members.map((member) => member.jellyfinUserId);
+    const { groupKey, exists } = resolveGroupForMembers(
+      memberJellyfinUserIds,
+      appState.getGroupPlayerUsers(),
+    );
+    if (!exists) {
+      const userId = await jellyfin.ensureGroupUser(groupKey);
+      appState.setGroupPlayerUser(groupKey, userId, memberJellyfinUserIds);
+      // Auto-generate + persist a default alias from member names in this
+      // account's visible-user order (e.g. "Alice + Bob").
+      const visible = visibleViewersForAccount(account, config.viewersByName);
+      const alias = buildGroupAlias(resolved.members.map((member) => member.id), visible);
+      appState.setGroupAlias(groupKey, alias);
+    }
+  } catch (error) {
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Could not create group' });
     return;
   }
 
-  req.session.activeViewerIds = memberIds;
-  res.json({ ok: true, activeViewerIds: memberIds });
+  req.session.activeViewerIds = resolved.members.map((member) => member.id);
+  // The active group cleared pin-gating; the player-session mint can trust it.
+  req.session.activeGroupPinVerified = true;
+  res.json({ ok: true, activeViewerIds: req.session.activeViewerIds });
+});
+
+// The managed groups VISIBLE to the logged-in account: a group is visible iff
+// ALL its members are within the account's visible users. Aliases (never the raw
+// gbx-grp-<hash> name) are backfilled from member names when not stored.
+app.get('/api/groups', requireAuth, (req, res) => {
+  const account = accountForSession(req);
+  if (!account) {
+    res.status(401).json({ error: 'Not authenticated' });
+    return;
+  }
+
+  const visible = visibleViewersForAccount(account, config.viewersByName);
+  const groups = visibleGroupsForAccount(
+    appState.getGroupPlayerUsers(),
+    visible,
+    appState.getGroupAliases(),
+  );
+  res.json({ groups });
 });
 
 app.post('/api/group/clear', requireAuth, (req, res) => {
   req.session.activeViewerIds = [];
+  req.session.activeGroupPinVerified = false;
   res.json({ ok: true, activeViewerIds: [] });
 });
 
@@ -560,6 +729,28 @@ app.delete('/api/items/:itemId/watched', requireAuth, requireViewerGroup, async 
 // mapping (never the password).
 app.post('/api/player/session', requireAuth, requireViewerGroup, async (req, res) => {
   try {
+    // Defense in depth: never mint a group player user for a group that hasn't
+    // cleared pin-gating. The group is normally verified at /api/group, but a
+    // direct mint must re-prove any required pins (accepting pins in the body).
+    const account = accountForSession(req);
+    if (!account) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+    if (!req.session.activeGroupPinVerified) {
+      const pinCheck = verifyGroupPins(
+        account,
+        config.users,
+        activeViewersForSession(req),
+        parsePins(req.body),
+      );
+      if (!pinCheck.ok) {
+        res.status(403).json({ error: pinCheck.error });
+        return;
+      }
+      req.session.activeGroupPinVerified = true;
+    }
+
     const groupKey = activeGroupKey(req);
     const userId = await jellyfin.ensureGroupUser(groupKey);
     // Stage B: persist the group player user id AND the member ids (the active
@@ -715,11 +906,36 @@ function startWatchedFanoutPoller(): void {
 
 void (async () => {
   try {
+    // Build (or reuse) the EFFECTIVE config: the read-only config.json is a source
+    // of overrides that we migrate forward, seed from the bundled example, validate
+    // (skip+warn), and cache in /data with provenance. We re-derive only when the
+    // source file changed (sourceHash) OR the running image version changed
+    // (builtForPackage) — otherwise reuse the cached effective config.
     const jellyfinUsers = await jellyfin.fetchUsers();
-    const householdIds = new Set(config.groups.flatMap((group) => group.memberIds));
-    config.viewers = jellyfinUsers.filter((user) => householdIds.has(user.id));
+    const packageVersion = readPackageVersion();
+    const sourceHash = readSourceHash();
+
+    let effective = appState.getEffectiveConfig();
+    if (effective && appState.isEffectiveConfigFresh(sourceHash, packageVersion)) {
+      console.log('[startup] reusing cached effective config (source + image unchanged).');
+    } else {
+      const built = buildEffectiveConfig({ jellyfinUsers }, packageVersion);
+      appState.setEffectiveConfig(built);
+      effective = built;
+      console.log(
+        `[startup] derived effective config (schemaVersion ${built.schemaVersion}, ` +
+        `package ${built.builtForPackage}); cached to /data.`,
+      );
+    }
+
+    applyEffectiveConfig(effective);
+
+    // Resolve configured user NAMES -> Jellyfin ids and keep the mapping in the
+    // app's own (writable) in-memory state. Unresolvable names were already
+    // dropped during the effective-config build, so this resolves cleanly.
+    config.viewersByName = resolveViewers(config.users, jellyfinUsers);
   } catch (err) {
-    console.error('[startup] Failed to load viewers from Jellyfin:', err instanceof Error ? err.message : err);
+    console.error('[startup] Failed to build config from Jellyfin:', err instanceof Error ? err.message : err);
     process.exit(1);
   }
 

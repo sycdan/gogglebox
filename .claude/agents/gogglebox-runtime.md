@@ -28,13 +28,12 @@ get their Jellyfin creds + config mounted over `/app/config.json`.)
   startup and `process.exit(1)` if Jellyfin is unreachable. It needs
   `JELLYFIN_URL` + `JELLYFIN_API_KEY` set and a reachable Jellyfin. If one of
   those is empty/missing, report the exact key and stop.
-- Portal creds do NOT block boot or running. `PORTAL_USERNAME`/`PORTAL_PASSWORD`
-  matter only for the manual login form, and only when `PORTAL_AUTO_LOGIN=false`.
-  With `PORTAL_AUTO_LOGIN=true` (the common dev case) the client auto-logs-in with
-  an empty body, so household login works with no real creds. `config.ts` rejects
-  only the literal placeholders `gogglebox`/`changeme` — any other value passes.
-  Do NOT stop just because portal creds look like placeholders; bring the stack
-  up and note them in `details` if `PORTAL_AUTO_LOGIN` is false.
+- Portal creds do NOT block boot or running. Auto-login is implicit (there is no
+  `PORTAL_AUTO_LOGIN` var): if `PORTAL_USERNAME`/`PORTAL_PASSWORD` are set and
+  match an account in `config.json`, the client auto-logs-in with an empty body;
+  otherwise the manual login form shows. Either way the stack boots. Do NOT stop
+  just because portal creds are unset or look like placeholders; bring the stack
+  up and note them in `details` if auto-login is not configured.
 - URL: single entrypoint `http://localhost:8080` (proxy) — `/` client, `/api`
   server, `/player` Jellyfin. No direct `:3000`/`:5173` host ports.
 - If Jellyfin is unreachable from the container, note it and suggest a

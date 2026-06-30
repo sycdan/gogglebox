@@ -1,10 +1,12 @@
 // Viewer-selection helpers. The proof run may land on the "Pick the group"
 // screen; these advance into the main app. Two variants:
 //   pickFirstViewerAndContinue  — simplest (player-focus): first viewer card.
-//   pickEveryoneGroupAndContinue — prefer the "Everyone" preset chip so the
+//   pickEveryoneGroupAndContinue — select EVERY visible viewer card so the
 //     combined data set is as large as possible (continue-watching,
-//     recommendations, ignore-shows, search). `label` is the flow name so the
-//     emitted log lines match the original per-flow prefixes verbatim.
+//     recommendations, ignore-shows, search). Config v2 has no static group
+//     presets, so "everyone" means selecting all viewer cards. `label` is the
+//     flow name so the emitted log lines match the original per-flow prefixes
+//     verbatim.
 
 // player-focus variant: pick the first viewer card and Continue.
 export async function pickFirstViewerAndContinue(page) {
@@ -23,17 +25,14 @@ export async function pickFirstViewerAndContinue(page) {
 export async function pickEveryoneGroupAndContinue(page, label) {
   const pickHeading = page.getByRole('heading', { name: /pick the group/i });
   if (await pickHeading.count().then((n) => n > 0)) {
-    const presetChips = page.locator('.preset-row .chip');
-    const everyone = presetChips.filter({ hasText: /^Everyone$/ }).first();
-    if (await everyone.count().then((n) => n > 0)) {
-      console.log(`[proof] ${label}: selecting "Everyone" preset`);
-      await everyone.click();
-    } else if (await presetChips.count().then((n) => n > 0)) {
-      console.log(`[proof] ${label}: "Everyone" preset not found; using first preset chip`);
-      await presetChips.first().click();
-    } else {
-      console.warn(`[proof] ${label}: no .preset-row .chip presets found; selecting first viewer card`);
-      await page.locator('button.viewer-card').first().click();
+    // Config v2: no preset chips — select EVERY visible viewer card to form the
+    // largest group. The proof account's visible users are non-pin-gated in the
+    // sandbox, so no PIN prompt blocks Continue.
+    const cards = page.locator('button.viewer-card');
+    const count = await cards.count();
+    console.log(`[proof] ${label}: selecting all ${count} viewer card(s)`);
+    for (let index = 0; index < count; index += 1) {
+      await cards.nth(index).click();
     }
     const cont = page.getByRole('button', { name: /^Continue$/ });
     await cont.first().click();

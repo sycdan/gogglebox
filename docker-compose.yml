@@ -132,7 +132,7 @@ services:
       - PROOF_FLOW=${PROOF_FLOW:-app}
     # Layered env, same pattern as `server`: .env is the shared base; the sbx/uat
     # overlays append .env.<env> after it (later file wins) for the per-env
-    # override keys — the portal login the proof script uses AND the Jellyfin
+    # override keys — the account login the proof script uses AND the Jellyfin
     # admin creds flows seed with. These MUST live in env_file, not `environment:`
     # — an `environment:` interpolation from the shared .env would override the
     # overlay's env_file, pinning proofs to a stale key/URL (e.g. after a sandbox

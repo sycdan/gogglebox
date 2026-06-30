@@ -13,7 +13,6 @@ services:
       - WATCHED_THRESHOLD
       - PORTAL_USERNAME
       - PORTAL_PASSWORD
-      - PORTAL_AUTO_LOGIN
       - JELLYFIN_DEBUG
     volumes:
       - ./config.json:/app/config.json:ro

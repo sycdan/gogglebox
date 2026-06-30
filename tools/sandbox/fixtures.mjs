@@ -15,10 +15,10 @@
 //   - Reproduces real-Jellyfin quirks: notably a show whose episode PremiereDate
 //     (air) order diverges from its SxxExx (IndexNumber) order — see PROD_DIVERGENT.
 
-// Household users created in the sandbox. These map to config.sbx.json
-// groups (emitted by the provisioner) so the server's activeViewersForSession /
-// fetchUsers see exactly this "Everyone" group. Names are fixed; GUIDs are minted
-// by Jellyfin at creation and captured by the provisioner.
+// Household users created in the sandbox. These map by NAME to config.sbx.json's
+// Config v2 users[] / accounts[].visible_users[] (emitted by the provisioner) so
+// the server resolves them via fetchUsers at startup. Names are fixed; GUIDs are
+// minted by Jellyfin at creation (diagnostic only — v2 config holds no UUIDs).
 export const SANDBOX_USERS = ['Alice', 'Bob', 'Carol', 'Dave'];
 
 // The library's display name and its in-container path (bind-mounted media root).

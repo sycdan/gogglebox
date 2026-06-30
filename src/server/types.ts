@@ -7,13 +7,33 @@ export interface FamilyMember {
   avatarUrl?: string | null;
 }
 
-export interface GroupPreset {
-  id: string;
-  name: string;
-  memberIds: string[];
+// Config v2: a configured user, referenced by its (unique) Jellyfin name. The
+// optional pin gates adding this user to a group from any account that marks
+// them pin_required.
+export interface ConfigUser {
+  jellyfin_name: string;
+  pin?: string;
 }
 
-export interface HouseholdSettings {
+// Config v2: a user an account may see, and whether forming a group with that
+// user from this account requires the user's pin.
+export interface VisibleUser {
+  jellyfin_name: string;
+  pin_required?: boolean;
+}
+
+// Config v2: a login account (a household). Authenticates with username/password
+// and sees only its own visible_users.
+export interface ConfigAccount {
+  username: string;
+  password: string;
+  visible_users: VisibleUser[];
+}
+
+// Optional auto-login credentials sourced from PORTAL_USERNAME/PORTAL_PASSWORD.
+// When set AND matching an accounts[] entry, that account is logged in
+// automatically; otherwise the login screen is shown.
+export interface PortalCredentials {
   username: string;
   password: string;
 }
@@ -23,15 +43,18 @@ export interface AppConfig {
   port: number;
   sessionSecret: string;
   watchedThreshold: number;
-  portalAutoLogin: boolean;
+  // Auto-login credentials (PORTAL_USERNAME/PORTAL_PASSWORD), or null when unset.
+  portalCredentials: PortalCredentials | null;
   jellyfinUrl: string;
   jellyfinApiKey: string;
-  household: HouseholdSettings;
   recommendations: {
     count: number;
   };
-  viewers: FamilyMember[];
-  groups: GroupPreset[];
+  users: ConfigUser[];
+  accounts: ConfigAccount[];
+  // Resolved at startup: configured Jellyfin name -> Jellyfin user (id/avatar).
+  // Empty until the startup resolution runs (see resolveViewers / server.ts).
+  viewersByName: Record<string, FamilyMember>;
 }
 
 export interface LibraryItem {

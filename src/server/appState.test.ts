@@ -51,6 +51,28 @@ test('unignoreItem removes the item and prunes empty groups', () => {
   assert.equal(raw.ignoredItems?.['group-1'], undefined);
 });
 
+test('group aliases persist and read back, ignoring empty/blank aliases', () => {
+  const filePath = tempStatePath();
+  const state = new AppState(filePath);
+
+  assert.equal(state.getGroupAlias('group-1'), undefined);
+
+  state.setGroupAlias('group-1', 'Alice + Bob');
+  assert.equal(state.getGroupAlias('group-1'), 'Alice + Bob');
+
+  // An empty/blank alias is a no-op (never overwrites with garbage).
+  state.setGroupAlias('group-1', '   ');
+  assert.equal(state.getGroupAlias('group-1'), 'Alice + Bob');
+
+  state.setGroupAlias('group-2', 'Carol');
+  assert.deepEqual(state.getGroupAliases(), { 'group-1': 'Alice + Bob', 'group-2': 'Carol' });
+
+  // Aliases coexist with other state (e.g. group player users) without clobbering.
+  state.setGroupPlayerUser('group-1', 'jf-1', ['m-1', 'm-2']);
+  assert.equal(state.getGroupAlias('group-1'), 'Alice + Bob');
+  assert.deepEqual(state.getGroupPlayerUserId('group-1'), 'jf-1');
+});
+
 test('reads survive a corrupt state file by starting fresh', () => {
   const filePath = tempStatePath();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -81,4 +103,51 @@ test('reads a legacy ignoredShows-only file and migrates to ignoredItems on writ
   assert.equal(raw.ignoredShows, undefined);
   assert.deepEqual(raw.ignoredItems?.['group-1']?.slice().sort(), ['legacy-a', 'legacy-b', 'new-c']);
   assert.deepEqual(state.getIgnoredItems('group-1').sort(), ['legacy-a', 'legacy-b', 'new-c']);
+});
+
+function cachedConfig(overrides: Partial<{ sourceHash: string; builtForPackage: string }> = {}): {
+  schemaVersion: number;
+  builtForPackage: string;
+  sourceHash: string;
+  users: unknown[];
+  accounts: unknown[];
+  watchedThreshold: number;
+  recommendationCount: number;
+} {
+  return {
+    schemaVersion: 1,
+    builtForPackage: '2026.6.29',
+    sourceHash: 'hash-a',
+    users: [{ jellyfin_name: 'Alice' }],
+    accounts: [{ username: 'h', password: 'p', visible_users: [{ jellyfin_name: 'Alice' }] }],
+    watchedThreshold: 0.9,
+    recommendationCount: 8,
+    ...overrides,
+  };
+}
+
+test('effective config round-trips and is fresh for the same hash + package', () => {
+  const state = new AppState(tempStatePath());
+  state.setEffectiveConfig(cachedConfig());
+
+  assert.equal(state.getEffectiveConfig()?.sourceHash, 'hash-a');
+  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.6.29'), true);
+});
+
+test('effective config is stale when the source hash changed (user edited config.json)', () => {
+  const state = new AppState(tempStatePath());
+  state.setEffectiveConfig(cachedConfig());
+  assert.equal(state.isEffectiveConfigFresh('hash-b', '2026.6.29'), false);
+});
+
+test('effective config is stale when the package version changed (new/rolled-back image)', () => {
+  const state = new AppState(tempStatePath());
+  state.setEffectiveConfig(cachedConfig());
+  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.7.1'), false);
+});
+
+test('effective config is not fresh when nothing has been cached yet', () => {
+  const state = new AppState(tempStatePath());
+  assert.equal(state.getEffectiveConfig(), undefined);
+  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.6.29'), false);
 });

@@ -3,7 +3,25 @@
 // own finally block.
 import { chromium } from 'playwright';
 
-export async function startSession({ url, username, password, autoLogin, flowName, shoot, fail }) {
+// Read the running app's OWN auto-login decision from GET /api/session
+// (portalAutoLoginEnabled). The app derives this from whether PORTAL creds are
+// set (server.ts: Boolean(config.portalCredentials)), so the harness drives off
+// real app state instead of a separate PORTAL_AUTO_LOGIN env var. Best-effort: a
+// failed read falls back to false (drive the manual login form), always safe.
+async function readAutoLoginEnabled(page) {
+  try {
+    const session = await page.evaluate(async () => {
+      const res = await fetch('/api/session', { credentials: 'same-origin' });
+      if (!res.ok) return null;
+      return res.json();
+    });
+    return Boolean(session?.portalAutoLoginEnabled);
+  } catch {
+    return false;
+  }
+}
+
+export async function startSession({ url, username, password, flowName, shoot, fail }) {
   const browser = await chromium.launch({
     // New headless ("--headless=new") is far more likely to honour the
     // Fullscreen API than the legacy headless shell. We also allow auto-grant
@@ -37,6 +55,12 @@ export async function startSession({ url, username, password, autoLogin, flowNam
         'Add the hostname to server.allowedHosts in vite.config.ts and restart the client service.',
     );
   }
+
+  // Determine auto-login from the running app, not an env var: if the app reports
+  // portalAutoLoginEnabled the client logs itself in (we just wait for the
+  // authenticated state below); otherwise we fill the manual login form.
+  const autoLogin = await readAutoLoginEnabled(page);
+  console.log(`[proof] app auto-login enabled = ${autoLogin}`);
 
   const loginForm = page.locator('form.stack');
   const needsLogin = await loginForm.count().then((n) => n > 0);

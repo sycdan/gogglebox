@@ -9,6 +9,21 @@ export interface GroupPlayerUser {
   memberIds: string[];
 }
 
+// The cached "effective config" derived from the read-only config.json: the
+// migrated + merged + validated users/accounts plus provenance for cache
+// invalidation. We re-derive (and overwrite this) when sourceHash changes (the
+// user edited config.json) OR builtForPackage != the running package version (a
+// new/rolled-back image whose migrations may differ).
+export interface CachedEffectiveConfig {
+  schemaVersion: number;
+  builtForPackage: string;
+  sourceHash: string;
+  users: unknown[];
+  accounts: unknown[];
+  watchedThreshold: number;
+  recommendationCount: number;
+}
+
 // Writable runtime state — distinct from the read-only config.json. Stores a map
 // of groupKey -> ignored item ids (shows and movies). Lives at a host-mounted
 // location so it survives redeploys.
@@ -20,6 +35,28 @@ interface AppStateFile {
   // state file may have stored a bare string (the jellyfinUserId); normalizeGroupPlayerUsers
   // upgrades that shape on read so old files keep working.
   groupPlayerUsers?: Record<string, GroupPlayerUser | string>;
+  // Human-readable alias per managed group (groupKey -> alias, e.g. "Alice + Bob").
+  // IDs/keys only, no secrets. Shown wherever a group surfaces so the UI never
+  // renders the raw gbx-grp-<hash> name. A group with no stored alias falls back
+  // to a derived alias on read (see groups.ts), so this is best-effort.
+  groupAliases?: Record<string, string>;
+  // The cached effective config + provenance (see CachedEffectiveConfig). Re-
+  // derived on startup when the source hash or package version changed.
+  effectiveConfig?: CachedEffectiveConfig;
+}
+
+// Normalize the groupAliases map: drop non-string / empty entries so callers
+// always get a clean groupKey -> alias record.
+function normalizeGroupAliases(
+  raw: Record<string, unknown> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [groupKey, value] of Object.entries(raw ?? {})) {
+    if (typeof value === 'string' && value.trim()) {
+      out[groupKey] = value;
+    }
+  }
+  return out;
 }
 
 // Normalize the groupPlayerUsers map to the rich {jellyfinUserId, memberIds}
@@ -138,5 +175,57 @@ export class AppState {
   getGroupPlayerUsers(): Record<string, GroupPlayerUser> {
     const state = readState(this.filePath);
     return normalizeGroupPlayerUsers(state.groupPlayerUsers);
+  }
+
+  // The stored human-readable alias for a managed group, or undefined when none
+  // has been persisted (callers derive a fallback from member names on read).
+  getGroupAlias(groupKey: string): string | undefined {
+    const state = readState(this.filePath);
+    return normalizeGroupAliases(state.groupAliases)[groupKey];
+  }
+
+  // All persisted group aliases, normalized (groupKey -> alias). IDs/keys only.
+  getGroupAliases(): Record<string, string> {
+    const state = readState(this.filePath);
+    return normalizeGroupAliases(state.groupAliases);
+  }
+
+  // Persist a human-readable alias for a managed group. No-op for an empty alias.
+  setGroupAlias(groupKey: string, alias: string): void {
+    const trimmed = alias.trim();
+    if (!trimmed) {
+      return;
+    }
+    const state = readState(this.filePath);
+    const groupAliases: Record<string, string> = {
+      ...normalizeGroupAliases(state.groupAliases),
+      [groupKey]: trimmed,
+    };
+    writeState(this.filePath, state, { groupAliases });
+  }
+
+  // The cached effective config, or undefined when none has been derived yet.
+  getEffectiveConfig(): CachedEffectiveConfig | undefined {
+    const state = readState(this.filePath);
+    return state.effectiveConfig;
+  }
+
+  // Whether the cached effective config can be reused: present AND derived from
+  // the same source (sourceHash) by the same image (builtForPackage). A mismatch
+  // (user edited config.json, or a new/rolled-back image) means re-derive.
+  isEffectiveConfigFresh(sourceHash: string, packageVersion: string): boolean {
+    const cached = this.getEffectiveConfig();
+    return Boolean(
+      cached &&
+      cached.sourceHash === sourceHash &&
+      cached.builtForPackage === packageVersion,
+    );
+  }
+
+  // Persist the derived effective config + provenance (write-then-rename via
+  // writeState; other state fields are preserved).
+  setEffectiveConfig(effectiveConfig: CachedEffectiveConfig): void {
+    const state = readState(this.filePath);
+    writeState(this.filePath, state, { effectiveConfig });
   }
 }

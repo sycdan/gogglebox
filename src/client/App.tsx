@@ -17,12 +17,8 @@ interface Viewer {
   jellyfinUserId: string;
   name: string;
   avatarUrl?: string | null;
-}
-
-interface GroupPreset {
-  id: string;
-  name: string;
-  memberIds: string[];
+  // Config v2: this account must supply this user's pin to add them to a group.
+  pinRequired?: boolean;
 }
 
 interface LibraryItem {
@@ -93,9 +89,21 @@ interface SessionResponse {
   portalAutoLoginEnabled: boolean;
   appName: string;
   watchedThreshold: number;
+  // The logged-in account's username, or null when not authenticated.
+  account: string | null;
   viewers: Viewer[];
-  groups: GroupPreset[];
   activeViewerIds: string[];
+  // The active group's human-readable alias (never gbx-grp-<hash>), or null.
+  activeGroupAlias: string | null;
+}
+
+// A managed group visible to the logged-in account, surfaced as a selectable
+// "Saved group" on the picker. Identified by groupKey; shown by alias.
+interface SavedGroup {
+  groupKey: string;
+  alias: string;
+  memberIds: string[];
+  memberNames: string[];
 }
 
 async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
@@ -212,6 +220,10 @@ function RailPager({
 export function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [selectedViewerIds, setSelectedViewerIds] = useState<string[]>([]);
+  // Managed groups visible to this account, shown as "Saved groups" on the picker.
+  const [savedGroups, setSavedGroups] = useState<SavedGroup[]>([]);
+  // Pins typed for selected pin-required viewers, keyed by viewer id.
+  const [pins, setPins] = useState<Record<string, string>>({});
   const [kind, setKind] = useState<LibraryKind>('show');
   const [genre, setGenre] = useState('');
   const [kidsOnly, setKidsOnly] = useState(false);
@@ -249,6 +261,16 @@ export function App() {
     const nextSession = await apiRequest<SessionResponse>('/api/session');
     setSession(nextSession);
     setSelectedViewerIds(nextSession.activeViewerIds);
+  }
+
+  async function loadSavedGroups() {
+    try {
+      const response = await apiRequest<{ groups: SavedGroup[] }>('/api/groups');
+      setSavedGroups(response.groups);
+    } catch {
+      // A failed groups load shouldn't block the picker — just show none.
+      setSavedGroups([]);
+    }
   }
 
   async function attemptAutoLogin() {
@@ -395,6 +417,16 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.activeViewerIds.join(',')]);
 
+  // Refresh the picker's "Saved groups" whenever we land on the picker (logged
+  // in, no active group). Re-runs after activating/clearing a group so a newly
+  // created group shows up on the next visit.
+  useEffect(() => {
+    if (session?.authenticated && session.activeViewerIds.length === 0) {
+      void loadSavedGroups();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.authenticated, session?.activeViewerIds.join(',')]);
+
   useEffect(() => {
     if (!session?.authenticated) {
       return;
@@ -495,6 +527,16 @@ export function App() {
     })();
   }, [session, busy]);
 
+  // Selected viewers (in this account's visible set) that require a PIN, so the
+  // group builder can prompt for each one's PIN before forming the group.
+  const pinRequiredSelected = useMemo(
+    () =>
+      (session?.viewers ?? []).filter(
+        (viewer) => viewer.pinRequired && selectedViewerIds.includes(viewer.id),
+      ),
+    [session?.viewers, selectedViewerIds],
+  );
+
   const availableGenres = useMemo(() => {
     const uniqueGenres = new Set<string>();
     [...recommendations, ...searchResults].forEach((item) =>
@@ -507,6 +549,16 @@ export function App() {
     setSelectedViewerIds((current) =>
       current.includes(viewerId) ? current.filter((id) => id !== viewerId) : [...current, viewerId],
     );
+  }
+
+  // Select exactly a saved group's members. Any member that's pin_required for
+  // this account surfaces a PIN prompt (via pinRequiredSelected); Continue then
+  // activates the group, reusing the existing managed group (same key).
+  function selectSavedGroup(group: SavedGroup) {
+    const visibleIds = new Set((session?.viewers ?? []).map((viewer) => viewer.id));
+    setSelectedViewerIds(group.memberIds.filter((id) => visibleIds.has(id)));
+    setPins({});
+    setError(null);
   }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -527,13 +579,13 @@ export function App() {
     }
   }
 
-  async function saveGroup(memberIds: string[]) {
+  async function saveGroup(memberIds: string[], pins: Record<string, string> = {}) {
     try {
       setBusy(true);
       setError(null);
       await apiRequest('/api/group', {
         method: 'POST',
-        body: JSON.stringify({ memberIds }),
+        body: JSON.stringify({ memberIds, pins }),
       });
       await loadSession();
     } catch (nextError) {
@@ -550,6 +602,7 @@ export function App() {
       await apiRequest('/api/group/clear', {
         method: 'POST',
       });
+      setPins({});
       await loadSession();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Could not clear viewer group');
@@ -564,6 +617,7 @@ export function App() {
       await apiRequest('/api/auth/logout', { method: 'POST' });
       setSession(null);
       setSelectedViewerIds([]);
+      setPins({});
       await loadSession();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Could not sign out');
@@ -1101,10 +1155,10 @@ export function App() {
         <div className="panel auth-panel">
           <p className="eyebrow">LAN household portal</p>
           <h1>{session.appName}</h1>
-          <p className="lead">One login for the house, then choose who is watching together.</p>
+          <p className="lead">Log in to your account, then choose who is watching together.</p>
           <form className="stack" onSubmit={handleLogin}>
             <label>
-              <span>Household username</span>
+              <span>Account username</span>
               <input
                 value={credentials.username}
                 onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))}
@@ -1149,22 +1203,59 @@ export function App() {
                 >
                   <ViewerAvatar viewer={viewer} />
                   <strong>{viewer.name}</strong>
+                  {viewer.pinRequired ? <span className="badge">PIN</span> : null}
                 </button>
               );
             })}
           </div>
-          {session.groups.length > 0 ? (
-            <div className="preset-row">
-              {session.groups.map((preset) => (
-                <button key={preset.id} className="chip" onClick={() => setSelectedViewerIds(preset.memberIds)} type="button">
-                  {preset.name}
-                </button>
+          {savedGroups.length > 0 ? (
+            <div className="stack saved-groups">
+              <p className="eyebrow">Saved groups</p>
+              <div className="viewer-grid">
+                {savedGroups.map((group) => {
+                  const selected =
+                    group.memberIds.length === selectedViewerIds.length &&
+                    group.memberIds.every((id) => selectedViewerIds.includes(id));
+                  return (
+                    <button
+                      key={group.groupKey}
+                      className={`viewer-card saved-group-card${selected ? ' selected' : ''}`}
+                      onClick={() => selectSavedGroup(group)}
+                      type="button"
+                    >
+                      <strong>{group.alias}</strong>
+                      <span className="muted">{group.memberNames.join(', ')}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+          {pinRequiredSelected.length > 0 ? (
+            <div className="stack pin-prompts">
+              <p className="muted">These viewers need their PIN to join the group:</p>
+              {pinRequiredSelected.map((viewer) => (
+                <label key={`pin-${viewer.id}`}>
+                  <span>{viewer.name}’s PIN</span>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={pins[viewer.id] ?? ''}
+                    onChange={(event) =>
+                      setPins((current) => ({ ...current, [viewer.id]: event.target.value }))
+                    }
+                  />
+                </label>
               ))}
             </div>
           ) : null}
           <div className="row spread">
-            <p className="muted">Multi-select is stored for this session only.</p>
-            <button disabled={busy || selectedViewerIds.length === 0} onClick={() => void saveGroup(selectedViewerIds)} type="button">
+            <button
+              disabled={busy || selectedViewerIds.length === 0}
+              onClick={() => void saveGroup(selectedViewerIds, pins)}
+              type="button"
+            >
               Continue
             </button>
           </div>
@@ -1179,6 +1270,9 @@ export function App() {
       <header className="hero">
         <span className="brand">{session.appName}</span>
         <div className="hero-actions">
+          {session.activeGroupAlias ? (
+            <span className="muted group-alias">{session.activeGroupAlias}</span>
+          ) : null}
           <button className="ghost compact" onClick={() => setIgnoredOpen(true)} type="button">
             Ignored{ignoredItems.length > 0 ? ` (${ignoredItems.length})` : ''}
           </button>
