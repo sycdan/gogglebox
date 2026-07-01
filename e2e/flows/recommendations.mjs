@@ -35,7 +35,7 @@ export async function run(page, ctx) {
   // Reads the recommendation card titles within the Group-picks section.
   async function pickTitles() {
     return picksSection
-      .locator('.media-grid.compact .media-card h3')
+      .locator('.media-grid .media-card h3')
       .allInnerTexts()
       .then((arr) => arr.map((t) => t.trim()).filter(Boolean))
       .catch(() => []);
@@ -44,7 +44,7 @@ export async function run(page, ctx) {
   // Wait for at least one recommendation card to render in this section.
   try {
     await picksSection
-      .locator('.media-grid.compact .media-card')
+      .locator('.media-grid .media-card')
       .first()
       .waitFor({ state: 'visible', timeout: 30_000 });
   } catch (error) {

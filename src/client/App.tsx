@@ -246,6 +246,7 @@ export function App() {
   const [playerStarted, setPlayerStarted] = useState(false);
   const [playerNeedsUserStart, setPlayerNeedsUserStart] = useState(false);
   const playerFrameRef = useRef<HTMLIFrameElement | null>(null);
+  const playerModalRef = useRef<HTMLDivElement | null>(null);
   const [autoMarked, setAutoMarked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -819,6 +820,29 @@ export function App() {
       window.clearInterval(timer);
     };
   }, [playingItem, session, autoMarked]);
+
+  useEffect(() => {
+    if (!playingItem) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const raf = window.requestAnimationFrame(() => playerModalRef.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPlayingItem(null);
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [playingItem]);
 
   const clickJellyfinPlayControl = useCallback((reason: string): boolean => {
     const frame = playerFrameRef.current;
@@ -1549,7 +1573,14 @@ export function App() {
 
       {playingItem ? (
         <div className="modal-backdrop" onClick={() => setPlayingItem(null)}>
-          <div className="modal player-modal" onClick={(event) => event.stopPropagation()}>
+          <div
+            ref={playerModalRef}
+            className="modal player-modal"
+            role="dialog"
+            aria-modal="true"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="row spread">
               <div>
                 <p className="eyebrow">Now playing</p>
