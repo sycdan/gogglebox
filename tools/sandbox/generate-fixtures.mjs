@@ -125,15 +125,19 @@ async function encodeStub(filePath) {
   return true;
 }
 
-// tvshow.nfo at the series root. lockdata + empty providerids keep scans offline.
+// tvshow.nfo at the series root. Scans stay offline via the library options
+// (EnableInternetProviders: false + empty fetcher lists), NOT via <lockdata>.
+// <lockdata>true</lockdata> is deliberately OMITTED: on import Jellyfin locks the
+// item, and for EPISODES that lock lands before the nfo's <season>/<episode> are
+// applied — leaving IndexNumber/ParentIndexNumber null AND blocking every later
+// refresh, so the seeder can never find a numbered episode. Unlocked, JF reads
+// the nfo season/episode/title correctly.
 function tvshowNfo(show) {
   return `<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <tvshow>
   <title>${xmlEscape(show.title)}</title>
   <year>${show.year}</year>
-  <premiered>${show.year}-01-01</premiered>
-  <lockdata>true</lockdata>
-</tvshow>
+  <premiered>${show.year}-01-01</premiered></tvshow>
 `;
 }
 
@@ -145,9 +149,7 @@ function episodeNfo(show, season, ep) {
   <season>${season}</season>
   <episode>${ep.ep}</episode>
   <aired>${ep.premiere}</aired>
-  <premiered>${ep.premiere}</premiered>
-  <lockdata>true</lockdata>
-</episodedetails>
+  <premiered>${ep.premiere}</premiered></episodedetails>
 `;
 }
 
@@ -156,9 +158,7 @@ function movieNfo(movie) {
 <movie>
   <title>${xmlEscape(movie.title)}</title>
   <year>${movie.year}</year>
-  <premiered>${movie.year}-01-01</premiered>
-  <lockdata>true</lockdata>
-</movie>
+  <premiered>${movie.year}-01-01</premiered></movie>
 `;
 }
 
