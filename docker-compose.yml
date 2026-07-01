@@ -129,14 +129,16 @@ services:
     environment:
       - PROOF_URL=http://client:5173
       - PROOF_FLOW=${PROOF_FLOW:-app}
-      # household login used by the proof script
-      - PORTAL_USERNAME=${PORTAL_USERNAME:?set PORTAL_USERNAME in .env}
-      - PORTAL_PASSWORD=${PORTAL_PASSWORD:?set PORTAL_PASSWORD in .env}
-      - PORTAL_AUTO_LOGIN=${PORTAL_AUTO_LOGIN:-false}
-      # Jellyfin admin creds let flows seed their own fixture data (e.g. an
-      # in-progress mid-series episode) so proofs are self-contained.
-      - JELLYFIN_URL=${JELLYFIN_URL}
-      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+    # Layered env, same pattern as `server`: .env is the shared base; the sbx/uat
+    # overlays append .env.<env> after it (later file wins) for the per-env
+    # override keys — the portal login the proof script uses AND the Jellyfin
+    # admin creds flows seed with. These MUST live in env_file, not `environment:`
+    # — an `environment:` interpolation from the shared .env would override the
+    # overlay's env_file, pinning proofs to a stale key/URL (e.g. after a sandbox
+    # re-provision mints a new API key in .env.sbx).
+    env_file:
+      - path: .env
+        required: false
     profiles: ["proof"]
     depends_on:
       deps:

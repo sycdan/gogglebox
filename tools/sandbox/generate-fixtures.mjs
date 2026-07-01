@@ -2,22 +2,26 @@
 //
 // Output (under MEDIA_ROOT, default /media):
 //   <root>/shows/<Title> (<Year>)/tvshow.nfo
-//   <root>/shows/<Title> (<Year>)/Season 0N/<base>.mp4  + <base>.nfo
-//   <root>/movies/<Title> (<Year>)/<base>.mp4           + <base>.nfo
+//   <root>/shows/<Title> (<Year>)/Season 0N/<base>.webm  + <base>.nfo
+//   <root>/movies/<Title> (<Year>)/<base>.webm           + <base>.nfo
 //
-// Each .mp4 is a short, 32x32 ffmpeg encode (H264 + silent AAC + faststart) so
+// Each .webm is a short, 32x32 ffmpeg encode (VP9 video + silent Opus audio) so
 // Jellyfin probes a REAL (short) RunTimeTicks — a few KB each, single-digit MB
-// total. The format is the canonical Chromium DIRECT-PLAY container: previously
-// these were H264-in-MKV, which Chromium can't DirectPlay, so JF transcoded and
-// (wrongly) targeted VideoCodec=av1 -> 500 on /hls1/main/-1.mp4 -> the player
-// errored at t=0. An MP4 with H264 video + AAC audio + +faststart plays directly,
-// so no transcode happens and playback actually starts (feeding /Sessions for the
-// Stage B watched fan-out).
+// total. VP9 + Opus in WebM is the format the PROOF browser can actually DECODE:
+// Playwright's bundled Chromium is the open-source build, which ships WITHOUT the
+// proprietary H264/AAC decoders. Earlier fixtures were H264 (first in MKV, then in
+// MP4) on the theory that H264/AAC "DirectPlays"; but since the headless browser
+// can't decode H264 at all, jellyfin-web disabled direct play and asked JF to
+// transcode to VideoCodec=av1 (the best codec open-Chromium CAN decode) — which
+// the sandbox JF's ffmpeg can't encode, so the HLS segment 500'd and the player
+// errored at t=0. VP9 + Opus is royalty-free and natively decodable by that same
+// Chromium, so jellyfin-web DirectPlays it: no transcode, playback actually starts
+// (feeding /Sessions for the Stage B watched fan-out).
 //
 // IMPORTANT: changing the extension changes the ON-DISK paths, which changes the
 // Jellyfin ITEM GUIDs. The sandbox must be RE-GENERATED with FORCE=1 and
-// RE-SCANNED / RE-PROVISIONED for the new items to appear (old .mkv items become
-// stale). User GUIDs are unaffected. (Runtime does the re-gen + re-provision.)
+// RE-SCANNED / RE-PROVISIONED for the new items to appear (old .mp4/.mkv items
+// become stale). User GUIDs are unaffected. (Runtime does the re-gen + re-provision.)
 //
 //   FORCE=1 node tools/sandbox/generate-fixtures.mjs
 
@@ -62,20 +66,23 @@ const xmlEscape = (s) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-// Remove a stale same-base .mkv next to the .mp4 we now write. Earlier versions
-// emitted H264-in-MKV; if those linger in the media volume a rescan catalogs the
-// stale (non-DirectPlay) item alongside the new MP4. Always runs (even on the
-// idempotent no-encode path) so existing volumes get cleaned. Returns true if a
-// stale file was removed.
-let staleMkvRemoved = 0;
-async function removeStaleMkv(mp4Path) {
-  const mkvPath = mp4Path.replace(/\.mp4$/i, '.mkv');
-  if (mkvPath !== mp4Path && (await exists(mkvPath))) {
-    await rm(mkvPath, { force: true });
-    staleMkvRemoved += 1;
-    return true;
+// Remove stale same-base .mp4/.mkv next to the .webm we now write. Earlier
+// versions emitted H264-in-MKV, then H264-in-MP4; if those linger in the media
+// volume a rescan catalogs the stale (non-DirectPlay) item alongside the new
+// WebM. Always runs (even on the idempotent no-encode path) so existing volumes
+// get cleaned. Returns true if any stale file was removed.
+let staleSourcesRemoved = 0;
+async function removeStaleSources(webmPath) {
+  let removed = false;
+  for (const ext of ['.mp4', '.mkv']) {
+    const stalePath = webmPath.replace(/\.webm$/i, ext);
+    if (stalePath !== webmPath && (await exists(stalePath))) {
+      await rm(stalePath, { force: true });
+      staleSourcesRemoved += 1;
+      removed = true;
+    }
   }
-  return false;
+  return removed;
 }
 
 const VIDEO_SECONDS = Number(process.env.SANDBOX_VIDEO_SECONDS ?? 12);
@@ -85,13 +92,15 @@ if (!Number.isFinite(VIDEO_SECONDS) || VIDEO_SECONDS <= 0) {
 const VIDEO_SECONDS_TEXT = String(VIDEO_SECONDS);
 
 // Encode a tiny REAL video so Jellyfin probes a short, non-zero RunTimeTicks.
-// Default 12 seconds, 32x32, H264 video + a silent AAC audio track, +faststart -> the
-// canonical Chromium DIRECT-PLAY MP4 so JF does NOT transcode (no av1/HLS 500).
-// testsrc gives a deterministic frame; anullsrc supplies the silent audio track;
-// -shortest + -t cap the length to the configured short duration.
+// Default 12 seconds, 32x32, VP9 video + a silent Opus audio track in WebM -> the
+// format Playwright's open-source Chromium can DECODE, so JF DirectPlays it (no
+// av1/HLS 500). testsrc gives a deterministic frame; anullsrc supplies the silent
+// audio track; -shortest + -t cap the length to the configured short duration.
+// libvpx-vp9 wants -b:v 0 alongside -crf for constant-quality VBR; -deadline
+// realtime + -cpu-used 8 keep the trivial 32x32 encode fast.
 async function encodeStub(filePath) {
-  // Clean up any stale .mkv for this base regardless of whether we re-encode.
-  await removeStaleMkv(filePath);
+  // Clean up any stale .mp4/.mkv for this base regardless of whether we re-encode.
+  await removeStaleSources(filePath);
   if (!FORCE && (await exists(filePath))) {
     return false;
   }
@@ -102,13 +111,15 @@ async function encodeStub(filePath) {
     '-i', `testsrc=duration=${VIDEO_SECONDS_TEXT}:size=32x32:rate=24`,
     '-f', 'lavfi',
     '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000',
-    '-c:v', 'libx264',
-    '-preset', 'ultrafast',
+    '-c:v', 'libvpx-vp9',
+    '-crf', '30',
+    '-b:v', '0',
+    '-deadline', 'realtime',
+    '-cpu-used', '8',
     '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac',
+    '-c:a', 'libopus',
     '-shortest',
     '-t', VIDEO_SECONDS_TEXT,
-    '-movflags', '+faststart',
     filePath,
   ]);
   return true;
@@ -172,7 +183,7 @@ async function main() {
       const seasonDir = path.join(dir, seasonFolder(s.season));
       for (const ep of s.episodes) {
         const base = episodeBaseName(show, s.season, ep);
-        const video = path.join(seasonDir, `${base}.mp4`);
+        const video = path.join(seasonDir, `${base}.webm`);
         const nfo = path.join(seasonDir, `${base}.nfo`);
         if (await encodeStub(video)) encoded += 1;
         if (await writeIfNeeded(nfo, episodeNfo(show, s.season, ep))) nfos += 1;
@@ -183,7 +194,7 @@ async function main() {
   for (const movie of MOVIES) {
     const dir = path.join(MOVIES_ROOT, movieFolder(movie));
     const base = movieBaseName(movie);
-    const video = path.join(dir, `${base}.mp4`);
+    const video = path.join(dir, `${base}.webm`);
     const nfo = path.join(dir, `${base}.nfo`);
     if (await encodeStub(video)) encoded += 1;
     if (await writeIfNeeded(nfo, movieNfo(movie))) nfos += 1;
@@ -192,8 +203,8 @@ async function main() {
   console.log(`[generate] media root: ${MEDIA_ROOT}`);
   console.log(`[generate] video duration: ${VIDEO_SECONDS_TEXT}s`);
   console.log(`[generate] encoded ${encoded} stub video(s), wrote ${nfos} .nfo file(s)${FORCE ? ' (forced)' : ' (idempotent)'}.`);
-  if (staleMkvRemoved > 0) {
-    console.log(`[generate] removed ${staleMkvRemoved} stale .mkv file(s) (superseded by DirectPlay .mp4).`);
+  if (staleSourcesRemoved > 0) {
+    console.log(`[generate] removed ${staleSourcesRemoved} stale .mp4/.mkv file(s) (superseded by DirectPlay .webm).`);
   }
 }
 

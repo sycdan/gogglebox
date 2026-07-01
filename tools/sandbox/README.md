@@ -16,7 +16,7 @@ only the **mutable** per-user played-state is reset between tests.
 
 | Committed (in git) | Generated (gitignored) |
 | --- | --- |
-| `fixtures.mjs` — the library/users spec | `tools/sandbox/media/` and the `sandbox_media` volume (tiny .mp4 stubs + .nfo) |
+| `fixtures.mjs` — the library/users spec | `tools/sandbox/media/` and the `sandbox_media` volume (tiny .webm stubs + .nfo) |
 | `generate-fixtures.mjs`, `provision.mjs`, `reset.mjs` | `sandbox_config` / `sandbox_cache` volumes (Jellyfin state) |
 | `Dockerfile` (Node + ffmpeg tooling image) | `.env.sbx` (overrides-only: minted API key + URL + admin creds) |
 | this `README.md` | `config.sbx.json` (groups with the minted user GUIDs) |

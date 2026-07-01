@@ -1,7 +1,7 @@
 // Single source of truth for the deterministic sandbox Jellyfin library.
 //
 // This spec is consumed by THREE scripts so they never drift:
-//   - generate-fixtures.mjs : writes tiny .mp4 stubs (H264+AAC, DirectPlay) + .nfo sidecars to disk
+//   - generate-fixtures.mjs : writes tiny .webm stubs (VP9+Opus, DirectPlay) + .nfo sidecars to disk
 //   - provision.mjs         : creates users, adds the library, waits for scan
 //   - reset.mjs             : clears every user's played-state between flows
 //
@@ -155,8 +155,8 @@ export const MOVIES = [
 // FIXED on-disk layout. Jellyfin derives item GUIDs from these paths, so do not
 // reorganise them casually — a path change re-mints the GUIDs.
 //
-//   <root>/shows/<Title> (<Year>)/Season 0N/<Title> SxxEyy ....mp4  (+ .nfo)
-//   <root>/movies/<Title> (<Year>)/<Title> (<Year>).mp4             (+ .nfo)
+//   <root>/shows/<Title> (<Year>)/Season 0N/<Title> SxxEyy ....webm  (+ .nfo)
+//   <root>/movies/<Title> (<Year>)/<Title> (<Year>).webm             (+ .nfo)
 
 export const sanitize = (s) => s.replace(/[\\/:*?"<>|]/g, '').trim();
 
