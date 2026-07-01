@@ -94,6 +94,11 @@ no network aliases needed. Drive it all with `./scripts/sbx.sh`; the base stack
 # 3. Run a flow against the sandbox (writes screenshots to ./artifacts):
 PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
 
+# For a multi-flow prover pass, reuse one PROOF_RUN_ID for every proof command so
+# all screenshots stay grouped under ./artifacts/<PROOF_RUN_ID>/.
+PROOF_RUN_ID="$(date -u +%Y-%m-%dT%H-%M-%SZ)-sbx" \
+  PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
+
 # 4. Tear down when done.
 ./scripts/sbx.sh down
 ```

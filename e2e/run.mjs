@@ -7,11 +7,13 @@
 //   docker compose --profile proof run --rm -e PROOF_FLOW=my-feature proof
 //
 // Env:
-//   PROOF_URL        target client URL (default http://client:5173)
-//   PROOF_FLOW       flow name prefixing screenshot files (default "app";
-//                    falls back to the first CLI arg if unset)
-//   PORTAL_USERNAME  account login username (used when the app does not auto-login)
-//   PORTAL_PASSWORD  account login password (used when the app does not auto-login)
+//   PROOF_URL         target client URL (default http://client:5173)
+//   PROOF_FLOW        flow name prefixing screenshot files (default "app";
+//                     falls back to the first CLI arg if unset)
+//   PROOF_RUN_ID      optional batch id; groups multiple proof invocations under
+//                     ./artifacts/<PROOF_RUN_ID>/<timestamp-flow>/
+//   PORTAL_USERNAME   account login username (used when the app does not auto-login)
+//   PORTAL_PASSWORD   account login password (used when the app does not auto-login)
 //
 // Auto-login is NOT a harness env var: startSession reads the running app's
 // GET /api/session (portalAutoLoginEnabled, which the app derives from whether
@@ -55,17 +57,20 @@ const flowName = (process.env.PROOF_FLOW || process.argv[2] || 'app').replace(
   /[^a-zA-Z0-9_-]/g,
   '-',
 );
+const proofRunId = (process.env.PROOF_RUN_ID ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '-');
 
-// Keep only the newest N run dirs in artifacts/ so stale runs don't pile up.
-// Pruning runs before this run's dir is created, so the current run is safe.
-const ARTIFACT_RUNS_TO_KEEP = 3;
+// Keep only the newest N top-level artifact entries so stale runs don't pile up.
+// A top-level entry may be a single proof run dir (old/default behavior) or a
+// PROOF_RUN_ID batch dir containing several flow dirs.
+const ARTIFACT_ENTRIES_TO_KEEP = 8;
 
 const artifactsRoot = path.resolve('artifacts');
 
-// Prune artifacts/ down to the newest ARTIFACT_RUNS_TO_KEEP run dirs. Dir names
-// are sortable ISO timestamps, so a reverse name sort gives newest-first. Only
-// directories are touched; a missing artifacts dir (first run) is a no-op.
-async function pruneArtifacts() {
+// Prune artifacts/ down to the newest ARTIFACT_ENTRIES_TO_KEEP top-level dirs.
+// Dir names are sortable when callers use ISO-ish PROOF_RUN_ID values. The active
+// batch dir is always protected so later flows cannot delete earlier screenshots
+// from the same prover run.
+async function pruneArtifacts(activeTopLevel) {
   let entries;
   try {
     entries = await readdir(artifactsRoot, { withFileTypes: true });
@@ -77,7 +82,8 @@ async function pruneArtifacts() {
     .map((e) => e.name)
     .sort()
     .reverse();
-  for (const name of runDirs.slice(ARTIFACT_RUNS_TO_KEEP)) {
+  const candidates = runDirs.filter((name) => name !== activeTopLevel);
+  for (const name of candidates.slice(ARTIFACT_ENTRIES_TO_KEEP)) {
     try {
       await rm(path.join(artifactsRoot, name), { recursive: true, force: true });
       console.log(`[proof] pruned old artifact dir: ${name}`);
@@ -87,10 +93,13 @@ async function pruneArtifacts() {
   }
 }
 
-await pruneArtifacts();
-
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-const outDir = path.join(artifactsRoot, stamp);
+const topLevel = proofRunId || stamp;
+await pruneArtifacts(topLevel);
+
+const outDir = proofRunId
+  ? path.join(artifactsRoot, proofRunId, `${stamp}-${flowName}`)
+  : path.join(artifactsRoot, stamp);
 
 const ctx = createHarness(outDir);
 ctx.flowName = flowName;

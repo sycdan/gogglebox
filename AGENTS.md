@@ -109,8 +109,11 @@ optimizer).
 ### Visual proof
 The Playwright suite entry is `e2e/run.mjs`. It logs in, then runs one module per
 flow under `e2e/flows/`, with shared harness/session/viewer helpers under
-`e2e/lib/`. It writes PNGs to `./artifacts/<timestamp>/`. The prover Reads those
-PNGs to confirm the UI.
+`e2e/lib/`. It writes PNGs to `./artifacts/<timestamp>/` for a single flow. When
+running several flows as one prover pass, set the same `PROOF_RUN_ID` on every
+invocation so screenshots are grouped under
+`./artifacts/<PROOF_RUN_ID>/<timestamp-flow>/`. The prover Reads those PNGs to
+confirm the UI.
 
 The `player-handoff` flow (Stage A browser auto-login) MUST run against the
 same-origin proxy so the localStorage origin matches `/player`. Override the
