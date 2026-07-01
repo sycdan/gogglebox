@@ -53,19 +53,24 @@ wrapper scripts avoid typing `-f -f`:
 - **sbx** — `./scripts/sbx.sh …` layers `docker-compose.sbx.yml`: a seeded,
   offline sandbox Jellyfin (`.env.sbx` + `config.sbx.json`, both generated). See
   `tools/sandbox/README.md`. e.g.
-  `./scripts/sbx.sh up -d server client`,
+  `./scripts/sbx.sh up -d`,
   `PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof`.
 - **uat** — `./scripts/uat.sh …` layers `docker-compose.uat.yml`: the developer's
   **real** Jellyfin (`.env.uat` + `config.uat.json`). Use this to test a feature
-  against real data before pushing. e.g. `./scripts/uat.sh up -d server client`,
+  against real data before pushing. e.g. `./scripts/uat.sh up -d`,
   `./scripts/uat.sh run --rm proof`.
 
-URLs (either stack): the shipped front door is the same-origin proxy at
-`http://localhost:8080` — `/` → client, `/api` → server, `/player` → Jellyfin
-(base path `/player`). Serving everything from ONE origin lets the gbx client
-seed Jellyfin-web's localStorage so the `/player` tab auto-logs-in as the
-per-group JF user. The internal direct ports still exist for debugging: client
-`http://localhost:5173`, API `http://localhost:3000`.
+Bare `up -d` (no service names) brings up the whole running stack — server +
+client + proxy (+ the sandbox Jellyfin under sbx) — and skips the one-shot
+`tools`-profile services (`sandbox-generate`/`provision`/`reset`, run those
+explicitly with `run --rm`).
+
+URLs (either stack): the proxy is the **single entrypoint** — the same-origin
+front door at `http://localhost:8080` (`/` → client, `/api` → server, `/player` →
+Jellyfin, base path `/player`). Serving everything from ONE origin lets the gbx
+client seed Jellyfin-web's localStorage so the `/player` tab auto-logs-in as the
+per-group JF user. `server` and `client` bind **no host ports** — reach them only
+through the proxy.
 
 ### Layered env (`.env` shared + `.env.<env>` overrides)
 Compose `env_file:` injects **container runtime** env, and the run stacks load an

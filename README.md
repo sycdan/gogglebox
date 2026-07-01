@@ -201,8 +201,11 @@ definitions plus `check`/`test` only. Running the actual app (`server`/`client`/
 `./scripts/sbx.sh` (seeded offline sandbox) or `./scripts/uat.sh` (your real
 Jellyfin). See the next section.
 
-Client: `http://localhost:5173` - API: `http://localhost:3000`. The `proof`
-service drives the app with Playwright and writes screenshots to `./artifacts/`.
+The **proxy is the single entrypoint**: the whole app is served from one origin,
+`http://localhost:8080` (Caddy routes `/api` → server, `/player` → Jellyfin,
+`/*` → client). `server` and `client` bind no host ports — reach them only through
+the proxy. The `proof` service drives the app with Playwright and writes
+screenshots to `./artifacts/`.
 
 ### Two run stacks: sbx and uat
 
@@ -235,12 +238,12 @@ PORTAL_USERNAME=...
 PORTAL_PASSWORD=...
 EOF
 cp deploy/config.example.json config.uat.json # set real Jellyfin user ids
-./scripts/uat.sh up -d server client
+./scripts/uat.sh up -d                        # server + client + proxy (single door :8080)
 PROOF_FLOW=continue-watching ./scripts/uat.sh run --rm proof
 
 # sbx (seeded offline sandbox - see tools/sandbox/README.md to provision):
 ./scripts/sbx.sh run --rm sandbox-reset
-./scripts/sbx.sh up -d server client
+./scripts/sbx.sh up -d                        # jellyfin + server + client + proxy
 PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
 ```
 

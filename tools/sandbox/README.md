@@ -66,9 +66,12 @@ no network aliases needed. Drive it all with `./scripts/sbx.sh`; the base stack
 # 1. Reset every user to a clean played-state slate.
 ./scripts/sbx.sh run --rm sandbox-reset
 
-# 2. Bring up the sandbox-pointed server + client. (Use up -d, NOT `run`, so the
-#    services are reachable by name for the proxy + proof.)
-./scripts/sbx.sh up -d server client
+# 2. Bring up the stack: jellyfin + server + client + proxy. (Use up -d, NOT
+#    `run`, so the services are reachable by name for the proxy + proof. Bare
+#    `up -d` skips the one-shot sandbox-generate/provision/reset `tools`-profile
+#    services.) The proxy (:8080) is the single entrypoint; server/client bind no
+#    host ports.
+./scripts/sbx.sh up -d
 
 # 3. Run a flow against the sandbox (writes screenshots to ./artifacts):
 PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof

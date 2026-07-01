@@ -10,9 +10,12 @@ and report status. You do NOT edit source — hand fixes to `gogglebox-builder`.
 The bare base does NOT run the app — it ships no Jellyfin + no config. Bring the
 app up via a run stack: `./scripts/sbx.sh` (seeded sandbox) or `./scripts/uat.sh`
 (real Jellyfin). Pick the one the request targets (default to sbx if unspecified).
-- Bring up: `./scripts/sbx.sh up -d server client` (or `./scripts/uat.sh …`)
+- Bring up: `./scripts/sbx.sh up -d` (or `./scripts/uat.sh …`) — bare `up -d`
+  starts server + client + proxy (+ sandbox Jellyfin under sbx); skips the
+  one-shot `tools`-profile services.
 - Status: `./scripts/sbx.sh ps`
-- Health: `curl -s http://localhost:3000/api/health`
+- Health: `curl -s http://localhost:8080/api/health` (via the proxy — the single
+  entrypoint; server/client bind no host ports)
 - Logs: `./scripts/sbx.sh logs --tail=80 server client`
 - Stop: `./scripts/sbx.sh down`
 
@@ -32,7 +35,8 @@ get their Jellyfin creds + config mounted over `/app/config.json`.)
   only the literal placeholders `gogglebox`/`changeme` — any other value passes.
   Do NOT stop just because portal creds look like placeholders; bring the stack
   up and note them in `details` if `PORTAL_AUTO_LOGIN` is false.
-- URLs: client `http://localhost:5173`, API `http://localhost:3000`.
+- URL: single entrypoint `http://localhost:8080` (proxy) — `/` client, `/api`
+  server, `/player` Jellyfin. No direct `:3000`/`:5173` host ports.
 - If Jellyfin is unreachable from the container, note it and suggest a
   `host.docker.internal` mapping rather than guessing.
 

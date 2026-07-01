@@ -41,8 +41,8 @@ services:
         required: false
     environment:
       - PORT=3000
-    ports:
-      - "3000:3000"
+    # No host port: the proxy (:8080) is the single entrypoint. Other services
+    # reach the server as `server:3000` over the compose network.
     depends_on:
       deps:
         condition: service_completed_successfully
@@ -57,8 +57,9 @@ services:
       - VITE_PLAYER_START_MUTED=${VITE_PLAYER_START_MUTED:-true}
       # Dev-only escape hatch for debugging Jellyfin-web behind the launch cover.
       - VITE_PLAYER_HIDE_STARTING_OVERLAY=${VITE_PLAYER_HIDE_STARTING_OVERLAY:-false}
-    ports:
-      - "5173:5173"
+    # No host port: reach the client via the proxy (:8080). Vite already pins its
+    # HMR websocket to the proxy port (hmr.clientPort: 8080 in vite.config.ts), so
+    # HMR works through the front door; direct :5173 host access isn't needed.
     # Vite's dep-optimizer cache (cacheDir=/tmp/vite) lives on an ephemeral
     # tmpfs, not the persistent node_modules volume. A half-written cache from a
     # SIGKILL cannot survive a container kill and wedge the next boot.

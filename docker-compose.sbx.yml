@@ -63,12 +63,16 @@ services:
   sandbox-generate:
     <<: *sandbox-tools
     command: node tools/sandbox/generate-fixtures.mjs
+    # `tools` profile so bare `up -d` skips these one-shots; run them explicitly
+    # with `./scripts/sbx.sh run --rm sandbox-generate` (run activates the profile).
+    profiles: ["tools"]
 
   # One-shot: run the Jellyfin first-run wizard, create users, add libraries
   # (online metadata disabled), scan, mint the api key, emit env+config.
   sandbox-provision:
     <<: *sandbox-tools
     command: node tools/sandbox/provision.mjs
+    profiles: ["tools"]
     depends_on:
       - jellyfin-sandbox
 
@@ -87,6 +91,7 @@ services:
         required: false
       - path: .env.sbx
         required: true
+    profiles: ["tools"]
     depends_on:
       - jellyfin-sandbox
 
