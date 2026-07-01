@@ -26,13 +26,8 @@ import { makeJellyfin, TICKS_PER_MINUTE } from './jellyfin.mjs';
 import { householdUsers } from './household.mjs';
 import { resolveJellyfinBase } from '../../tools/sandbox/baseUrl.mjs';
 
-// Build a seed client bound to the base the sandbox Jellyfin ACTUALLY serves its
-// API under. The proof service receives JELLYFIN_URL via the compose
-// `${JELLYFIN_URL}` interpolation, which comes from the shared bare `.env` and
-// overrides the `/player` value `.env.sbx` supplies — so the seed client, unlike
-// the server, cannot assume the configured URL carries the live base path. We
-// discover it (bare root vs <root>/player) exactly like the server, so seeding
-// is env-agnostic and works whether or not JF has BaseUrl=/player yet.
+// Build a seed client bound to the normalized sandbox Jellyfin base. Sandbox
+// volumes are disposable, so this expects the bare-origin shape provision emits.
 async function connect({ url, apiKey }, log = console.log) {
   const base = await resolveJellyfinBase(url, { token: apiKey });
   if (base !== (url ?? '').trim().replace(/\/$/, '')) {

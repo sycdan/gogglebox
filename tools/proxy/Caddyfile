@@ -8,12 +8,10 @@
 #
 # Routes:
 #   /api/*    -> gbx server  (Express :3000)
-#   /player/* -> Jellyfin    (base path /player; {$JELLYFIN_PROXY_UPSTREAM})
+#   /player/* -> Jellyfin    (strip /player, then proxy to {$JELLYFIN_URL})
 #   /*        -> gbx client  (Vite dev :5173, with HMR websockets)
 #
-# The Jellyfin upstream differs per env, so it's an env var. The bare base sets
-# a harmless default; the sbx/uat overlays set JELLYFIN_PROXY_UPSTREAM to their
-# own Jellyfin host on the proxy service.
+# `JELLYFIN_URL` is the normal Jellyfin origin, without a /player base path.
 
 {
 	# No HTTPS/ACME for the LAN dev front door.
@@ -27,10 +25,10 @@
 		reverse_proxy server:3000
 	}
 
-	# Jellyfin, mounted under its configured BaseUrl (/player). Jellyfin prefixes
-	# ALL routes (web UI + REST) with /player, so we pass the path through as-is.
-	handle /player/* {
-		reverse_proxy {$JELLYFIN_PROXY_UPSTREAM:jellyfin-unconfigured:8096}
+	# Jellyfin, mounted by Gogglebox at /player. Jellyfin itself stays on its
+	# normal origin/base path; the proxy strips /player before forwarding.
+	handle_path /player/* {
+		reverse_proxy {$JELLYFIN_URL:http://jellyfin-unconfigured:8096}
 	}
 
 	# Everything else -> the Vite dev client. reverse_proxy transparently

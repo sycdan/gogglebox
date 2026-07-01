@@ -151,14 +151,14 @@ test('buildPlaybackUrl returns an origin-relative web player path with autoplay'
   assert.equal(hashParams.has('startTimeTicks'), false);
 });
 
-test('buildPlaybackUrl preserves the /player base path origin-relative', () => {
-  const client = new JellyfinClient('http://jellyfin-sandbox:8096/player', 'abc123');
+test('buildPlaybackUrl preserves a configured Jellyfin base path origin-relative', () => {
+  const client = new JellyfinClient('http://jellyfin.example.test/jf', 'abc123');
   const raw = client.buildPlaybackUrl('item1');
 
-  assert.equal(raw.startsWith('/player/web/index.html#/details?'), true);
+  assert.equal(raw.startsWith('/jf/web/index.html#/details?'), true);
 
   const url = new URL(raw, 'http://localhost:8080');
-  assert.equal(url.pathname, '/player/web/index.html');
+  assert.equal(url.pathname, '/jf/web/index.html');
 });
 
 test('buildPlaybackUrl includes start ticks when provided', () => {
@@ -189,11 +189,11 @@ test('request preserves a configured base path on API calls', async () => {
     const noPathUrl = new URL(calls[0]);
     assert.equal(noPathUrl.pathname, '/Items');
 
-    // /player base path: the base path MUST be preserved on the REST call.
-    const withPath = new JellyfinClient('http://host:8096/player', 'abc123');
+    // Configured base path: the base path MUST be preserved on the REST call.
+    const withPath = new JellyfinClient('http://host:8096/jf', 'abc123');
     await withPath.listItems('movie');
     const withPathUrl = new URL(calls[1]);
-    assert.equal(withPathUrl.pathname, '/player/Items');
+    assert.equal(withPathUrl.pathname, '/jf/Items');
   } finally {
     globalThis.fetch = originalFetch;
   }

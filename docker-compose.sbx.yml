@@ -48,9 +48,9 @@ services:
     # ports:
     #   - "8097:8096"
     environment:
-      # BaseUrl is /player (set during provisioning); the published URL reflects
-      # that base so client-discovered addresses stay under /player.
-      - JELLYFIN_PublishedServerUrl=http://jellyfin-sandbox:8096/player
+      # Jellyfin itself stays on its normal origin; Gogglebox's proxy mounts it
+      # under /player for the browser.
+      - JELLYFIN_PublishedServerUrl=http://jellyfin-sandbox:8096
     volumes:
       # Provisioned state (users, libraries, api key) persists across restarts.
       - sandbox_config:/config
@@ -127,10 +127,10 @@ services:
         condition: service_started
 
   # Point the front-door proxy at the sandbox Jellyfin and gate it on that
-  # service. The base proxy routes /player/* to {$JELLYFIN_PROXY_UPSTREAM}.
+  # service. The base proxy strips /player and forwards to JELLYFIN_URL.
   proxy:
     environment:
-      - JELLYFIN_PROXY_UPSTREAM=jellyfin-sandbox:8096
+      - JELLYFIN_URL=http://jellyfin-sandbox:8096
     depends_on:
       - server
       - client

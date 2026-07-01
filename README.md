@@ -121,7 +121,7 @@ Required values:
 | Var | Purpose |
 | --- | --- |
 | `GOGGLEBOX_PORT` | Host port for the app front door |
-| `JELLYFIN_URL` | Jellyfin URL used by Gogglebox server/API calls |
+| `JELLYFIN_URL` | Normal Jellyfin origin used by Gogglebox server/API calls and the `/player` proxy; do not include `/player` |
 | `JELLYFIN_API_KEY` | Jellyfin API key |
 | `SESSION_SECRET` | Long random string for session cookies |
 
@@ -152,7 +152,6 @@ Optional values:
 | `WATCHED_THRESHOLD` | `0.9` | Fraction watched before an item counts as watched |
 | `PORTAL_USERNAME` / `PORTAL_PASSWORD` | unset | Optional auto-login: when set AND matching an `accounts[]` entry, that account is logged in automatically (skipping the login screen); otherwise leave unset and log in via the UI |
 | `JELLYFIN_DEBUG` | `false` | Log outbound Jellyfin requests with timing |
-| `JELLYFIN_PROXY_UPSTREAM` | `JELLYFIN_URL` | Override the `/player/*` proxy origin; only needed when the proxy must reach Jellyfin at a different origin than the portal |
 
 ### 4. Start Gogglebox
 
@@ -238,9 +237,10 @@ Jellyfin). See the next section.
 
 The **proxy is the single entrypoint**: the whole app is served from one origin,
 `http://localhost:8080` (Caddy routes `/api` → server, `/player` → Jellyfin,
-`/*` → client). `server` and `client` bind no host ports — reach them only through
-the proxy. The `proof` service drives the app with Playwright and writes
-screenshots to `./artifacts/`.
+`/*` → client). `/player` is a Gogglebox proxy mount; Caddy strips it before
+forwarding to the normal Jellyfin origin from `JELLYFIN_URL`. `server` and
+`client` bind no host ports — reach them only through the proxy. The `proof`
+service drives the app with Playwright and writes screenshots to `./artifacts/`.
 
 ### Two run stacks: sbx and uat
 
@@ -259,9 +259,11 @@ thin overlays re-point `server`/`proof` (and mount their own config over
 every stack uses (`SESSION_SECRET`, `WATCHED_THRESHOLD`, `JELLYFIN_DEBUG`, the
 Vite/proof URLs). Each run stack appends an
 **overrides-only** `.env.<env>` on top; compose loads the env files in order, so
-later wins. The override file carries just the four connection/identity vars:
-`JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, `PORTAL_PASSWORD`.
-`.env.sbx` is **generated** by sandbox provisioning; `.env.uat` you create by hand.
+later wins. The override file carries environment-specific connection/identity
+values such as `JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, and
+`PORTAL_PASSWORD`. `JELLYFIN_URL` is the normal Jellyfin origin, with no
+`/player` path. `.env.sbx` is **generated** by sandbox provisioning; `.env.uat`
+you create by hand.
 
 ```bash
 # uat (real Jellyfin, e.g. to test a feature before pushing):

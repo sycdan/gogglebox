@@ -83,10 +83,9 @@ services:
   # 8080 and routes /api -> server, /player -> Jellyfin, /* -> client. Serving
   # everything from one origin (http://localhost:8080) is what lets the client
   # seed Jellyfin-web's localStorage for /player (auto-login as the per-group JF
-  # user). The Jellyfin upstream differs per env: the base sets a harmless
-  # default and the sbx/uat overlays override JELLYFIN_PROXY_UPSTREAM +
-  # depends_on. (The bare base has no Jellyfin, so /player is non-functional
-  # here — only the sbx/uat run stacks wire a real upstream.)
+  # user). The proxy forwards /player to JELLYFIN_URL after stripping the
+  # /player prefix. The bare base has no Jellyfin, so /player is non-functional
+  # here — only the sbx/uat run stacks wire a real upstream.
   proxy:
     image: caddy:2-alpine
     ports:

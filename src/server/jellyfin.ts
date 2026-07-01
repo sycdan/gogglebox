@@ -99,12 +99,12 @@ export interface PlayerSessionToken {
 
 export class JellyfinClient {
   // Base URL normalized to ALWAYS end in a trailing slash. Without this, a
-  // configured base path (e.g. http://host:8096/player) is silently dropped:
-  // `new URL('/Users', 'http://host:8096/player')` resolves to
+  // configured base path (e.g. http://host:8096/jf) is silently dropped:
+  // `new URL('/Users', 'http://host:8096/jf')` resolves to
   // 'http://host:8096/Users' because the leading-slash pathname is absolute.
   // With a trailing slash + relative (no leading slash) pathnames, the base
-  // path is preserved: `new URL('Users', 'http://host:8096/player/')` ->
-  // 'http://host:8096/player/Users'. A no-path base behaves identically to
+  // path is preserved: `new URL('Users', 'http://host:8096/jf/')` ->
+  // 'http://host:8096/jf/Users'. A no-path base behaves identically to
   // before.
   private readonly baseUrl: string;
 
@@ -606,18 +606,17 @@ export class JellyfinClient {
     }));
   }
 
-  // The Jellyfin base path (e.g. "/player"), derived from the configured base
+  // The Jellyfin base path (e.g. "/jf"), derived from the configured base
   // URL's pathname, WITHOUT a trailing slash. Empty string when no base path.
   private get basePath(): string {
     const pathname = new URL(this.baseUrl).pathname;
     return pathname === '/' ? '' : pathname.replace(/\/$/, '');
   }
 
-  // Build the player URL as an ORIGIN-RELATIVE path (e.g.
-  // "/player/web/index.html#/details?...") so the client opens it on the CURRENT
-  // browser origin (the same-origin proxy), NOT the internal Jellyfin host. The
-  // base path is taken from the configured Jellyfin URL so this stays correct
-  // whether the base is "/player" or empty.
+  // Build the player URL as an ORIGIN-RELATIVE path so the client opens it on
+  // the CURRENT browser origin (the same-origin proxy), NOT the internal
+  // Jellyfin host. In normal Gogglebox deployments this returns /web/... and the
+  // server route below mounts it under /player.
   buildPlaybackUrl(itemId: string, startPositionTicks?: number): string {
     const params = new URLSearchParams({
       id: itemId,

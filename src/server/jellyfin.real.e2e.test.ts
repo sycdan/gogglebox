@@ -15,9 +15,8 @@ const jellyfinApiKey = process.env.JELLYFIN_API_KEY?.trim();
 // (which sets RUN_REAL_E2E=1 and is pointed at a properly-configured .env with a
 // reachable Jellyfin at the correct base path). The file ALSO matches the
 // default `npm test` glob (`src/server/*.test.ts`), which runs in the base
-// container that has NO Jellyfin — and even when a sandbox happens to be up, the
-// base .env JELLYFIN_URL may lack the /player base path, so a reachability probe
-// alone is misleading (it would run real assertions against the wrong base URL).
+// container that has NO Jellyfin. A reachability probe alone is misleading: it
+// would run real assertions whenever any local Jellyfin happened to be reachable.
 // Gating on the explicit RUN_REAL_E2E flag is deterministic and keeps the
 // documented "base test needs no Jellyfin" contract true.
 const runRealE2e = process.env.RUN_REAL_E2E === '1' || process.env.RUN_REAL_E2E === 'true';

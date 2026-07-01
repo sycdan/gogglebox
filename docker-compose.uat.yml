@@ -37,18 +37,13 @@ services:
       - ./data:/data
 
   # Point the front-door proxy at the REAL Jellyfin. Unlike sbx there is no
-  # in-compose Jellyfin service, so set JELLYFIN_PROXY_UPSTREAM to the real
-  # host:port (the same host as JELLYFIN_URL in .env.uat, WITHOUT the /player
-  # base path — Caddy forwards the request path including /player as-is).
-  # TODO(uat): this overlay isn't proven yet; verify the real JF is reachable
-  # from the proxy container and its BaseUrl is set to /player before relying on
-  # /player auto-login. Set JELLYFIN_PROXY_UPSTREAM in .env.uat (or shell env).
+  # in-compose Jellyfin service. The same JELLYFIN_URL used by the server is also
+  # injected into Caddy; it must be the bare Jellyfin origin, with no /player
+  # path. Caddy strips /player before forwarding.
   proxy:
     env_file:
       - path: .env.uat
         required: true
-    volumes:
-      - ./tools/proxy/Caddyfile.uat:/etc/caddy/Caddyfile:ro
 
   proof:
     env_file:

@@ -18,10 +18,8 @@ export function makeJellyfin(rawUrl, apiKey) {
   if (!trimmed || !apiKey) {
     throw new Error('JELLYFIN_URL / JELLYFIN_API_KEY not set in the proof environment');
   }
-  // Normalize to a trailing slash so a configured BASE PATH (e.g. .../player) is
-  // PRESERVED when joining. `new URL('/Users', '.../player')` drops to .../Users
-  // (bare), which 302-redirects once JF BaseUrl=/player is set; joining a relative
-  // pathname against a trailing-slash base keeps the base path.
+  // Normalize to a trailing slash so any configured Jellyfin base path is
+  // preserved when joining relative API paths.
   const baseUrl = `${trimmed}/`;
 
   async function request(pathname, { method = 'GET', query = {}, body } = {}) {

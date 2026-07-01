@@ -38,7 +38,7 @@ only the **mutable** per-user played-state is reset between tests.
 After step 3 you have, at the project root:
 
 - `.env.sbx` — the **overrides-only** env file layered on top of the shared
-  `.env` (later file wins). It carries only the four per-env override keys:
+  `.env` (later file wins). It carries only per-env override keys:
   `JELLYFIN_URL=http://jellyfin-sandbox:8096`, the minted `JELLYFIN_API_KEY`, and
   the admin `PORTAL_USERNAME`/`PORTAL_PASSWORD`. (Auto-login is implicit: with
   those PORTAL creds set and matching the `gogglebox-admin` account, the app logs
@@ -53,6 +53,16 @@ After step 3 you have, at the project root:
 
   The server resolves these names → Jellyfin ids at startup (`fetchUsers`); no
   UUIDs, `groups[]`, or `household` are written.
+
+Sandbox volumes are disposable. If provisioning or proof ever looks wedged from
+old Jellyfin state, reset from scratch instead of migrating it:
+
+```bash
+./scripts/sbx.sh down -v
+./scripts/sbx.sh up -d jellyfin-sandbox
+./scripts/sbx.sh run --rm sandbox-generate
+./scripts/sbx.sh run --rm sandbox-provision
+```
 
 Re-running any step is **idempotent**: generate skips existing files (`FORCE=1`
 to re-encode), provision skips existing users/libraries and reuses the existing
