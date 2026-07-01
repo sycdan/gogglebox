@@ -24,6 +24,22 @@
 
 import { makeJellyfin, TICKS_PER_MINUTE } from './jellyfin.mjs';
 import { householdUsers } from './household.mjs';
+import { resolveJellyfinBase } from '../../tools/sandbox/baseUrl.mjs';
+
+// Build a seed client bound to the base the sandbox Jellyfin ACTUALLY serves its
+// API under. The proof service receives JELLYFIN_URL via the compose
+// `${JELLYFIN_URL}` interpolation, which comes from the shared bare `.env` and
+// overrides the `/player` value `.env.sbx` supplies — so the seed client, unlike
+// the server, cannot assume the configured URL carries the live base path. We
+// discover it (bare root vs <root>/player) exactly like the server, so seeding
+// is env-agnostic and works whether or not JF has BaseUrl=/player yet.
+async function connect({ url, apiKey }, log = console.log) {
+  const base = await resolveJellyfinBase(url, { token: apiKey });
+  if (base !== (url ?? '').trim().replace(/\/$/, '')) {
+    log(`[seed] jellyfin base resolved to ${base} (from ${url})`);
+  }
+  return makeJellyfin(base, apiKey);
+}
 
 const sxxexx = (e) =>
   `S${String(e.seasonNumber ?? 0).padStart(2, '0')}E${String(e.episodeNumber ?? 0).padStart(2, '0')}`;
@@ -146,7 +162,7 @@ async function seedSeriesFixture(jf, { users, watchedUserIds = [], excludeSeries
 // Seed the show-advance fixture: a mid-series episode in-progress for every user,
 // NONE pre-watched. Returns the seeded episode details (incl. expected next).
 export async function seedInProgressEpisode({ url, apiKey }, log = console.log) {
-  const jf = makeJellyfin(url, apiKey);
+  const jf = await connect({ url, apiKey }, log);
 
   const users = await householdUsers(jf, {}, log);
   if (users.length === 0) throw new Error('[seed] no household viewers resolved');
@@ -162,7 +178,7 @@ export async function seedInProgressEpisode({ url, apiKey }, log = console.log) 
 // before a viewer's episode is marked played, their episode is in-progress.
 // Returns the per-viewer episode codes plus the expected anchor (earliest).
 export async function seedStaggeredShow({ url, apiKey }, { excludeSeriesIds = [] } = {}, log = console.log) {
-  const jf = makeJellyfin(url, apiKey);
+  const jf = await connect({ url, apiKey }, log);
 
   const users = await householdUsers(jf, {}, log);
   if (users.length < 3) {
@@ -235,7 +251,7 @@ export async function seedStaggeredShow({ url, apiKey }, { excludeSeriesIds = []
 // (pass its seriesId in `excludeSeriesIds`). The flow then clicks the remaining
 // pills one at a time to prove the refetch path stays at 2/3 then advances at 3/3.
 export async function seedInteractiveShow({ url, apiKey }, { excludeSeriesIds = [] } = {}, log = console.log) {
-  const jf = makeJellyfin(url, apiKey);
+  const jf = await connect({ url, apiKey }, log);
 
   const users = await householdUsers(jf, {}, log);
   if (users.length < 3) {
@@ -269,7 +285,7 @@ export async function seedInteractiveShow({ url, apiKey }, { excludeSeriesIds = 
 //   - markPlayed for exactly ONE user -> that viewer's pill lights; the others
 //     stay unlit and keep the card present.
 export async function seedPartialCard({ url, apiKey }, { excludeMovieIds = [] } = {}, log = console.log) {
-  const jf = makeJellyfin(url, apiKey);
+  const jf = await connect({ url, apiKey }, log);
 
   const users = await householdUsers(jf, {}, log);
   if (users.length < 2) {
@@ -316,7 +332,7 @@ export async function seedPartialCard({ url, apiKey }, { excludeMovieIds = [] } 
 // (pass its id in excludeMovieIds) so the two movie fixtures don't collide - this
 // guarantees a second in-progress movie exists even on a small library.
 export async function seedRemovableMovie({ url, apiKey }, { excludeMovieIds = [] } = {}, log = console.log) {
-  const jf = makeJellyfin(url, apiKey);
+  const jf = await connect({ url, apiKey }, log);
 
   const users = await householdUsers(jf, {}, log);
   if (users.length === 0) {
@@ -360,7 +376,7 @@ export async function seedRemovableMovie({ url, apiKey }, { excludeMovieIds = []
 //     and setPlaybackPosition accordingly. All stay unwatched so the card stays.
 // Returns the per-viewer fractions + the expected (lowest) resume fraction.
 export async function seedMultiViewerMovie({ url, apiKey }, { excludeMovieIds = [] } = {}, log = console.log) {
-  const jf = makeJellyfin(url, apiKey);
+  const jf = await connect({ url, apiKey }, log);
 
   const users = await householdUsers(jf, {}, log);
   if (users.length < 2) {
@@ -432,7 +448,7 @@ export async function seedMultiViewerMovie({ url, apiKey }, { excludeMovieIds = 
 // Each viewer: reset whole series, specials played, mark earlier regular eps
 // played up to their episode, set their episode in-progress at the given fraction.
 export async function seedCrossEpisodeShow({ url, apiKey }, { excludeSeriesIds = [] } = {}, log = console.log) {
-  const jf = makeJellyfin(url, apiKey);
+  const jf = await connect({ url, apiKey }, log);
 
   const users = await householdUsers(jf, {}, log);
   if (users.length < 3) {
