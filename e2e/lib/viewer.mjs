@@ -13,7 +13,7 @@ export async function pickFirstViewerAndContinue(page) {
   const pickHeading = page.getByRole('heading', { name: /pick the group/i });
   if (await pickHeading.count().then((n) => n > 0)) {
     console.log('[proof] player-focus: selecting a viewer group');
-    await page.locator('button.viewer-card').first().click();
+    await page.locator('button.viewer-card:not(.saved-group-card)').first().click();
     const cont = page.getByRole('button', { name: /^Continue$/ });
     await cont.click();
     await page.waitForLoadState('networkidle');
@@ -28,7 +28,7 @@ export async function pickEveryoneGroupAndContinue(page, label) {
     // Config v2: no preset chips — select EVERY visible viewer card to form the
     // largest group. The proof account's visible users are non-pin-gated in the
     // sandbox, so no PIN prompt blocks Continue.
-    const cards = page.locator('button.viewer-card');
+    const cards = page.locator('button.viewer-card:not(.saved-group-card)');
     const count = await cards.count();
     console.log(`[proof] ${label}: selecting all ${count} viewer card(s)`);
     for (let index = 0; index < count; index += 1) {

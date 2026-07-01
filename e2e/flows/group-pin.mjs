@@ -174,7 +174,7 @@ export async function run(page, ctx) {
     fail('group-pin: "Pick the group" screen did not appear after visitor login', error);
   }
 
-  const cards = page.locator('button.viewer-card');
+  const cards = page.locator('button.viewer-card:not(.saved-group-card)');
   const names = (await cards.locator('strong').allTextContents()).map((s) => s.trim());
   console.log('[proof] group-pin: visible viewer cards =', JSON.stringify(names));
   await shoot(page, 'group-pin-picker');
