@@ -8,6 +8,7 @@
 
 - Custom PIN requirement per household: two parents with PINs, one kid; when everyone is watching, accept PIN from either parent.
 
+- Add DB (maybe prop graph).
 
 ## ✅ Done
 
