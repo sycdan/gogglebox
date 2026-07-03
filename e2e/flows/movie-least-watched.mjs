@@ -1,6 +1,7 @@
 import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
 import { seedMultiViewerMovie, seedStaggeredShow } from '../lib/seed-inprogress.mjs';
 import { makeJellyfin } from '../lib/jellyfin.mjs';
+import { collectAllRailCards, goToFirstRailPage, goToRailPage } from '../lib/rail.mjs';
 
 // movie-least-watched flow: proves "same-movie collisions resume the viewer
 // with the least real progress".
@@ -29,14 +30,32 @@ async function cardPercent(card) {
   return m ? Number(m[1]) : null;
 }
 
-async function findCardByExactTitle(page, title) {
+// Finds a card by exact <h3> title, walking the WHOLE rail (not just the
+// first-rendered page — see collectAllRailCards in e2e/lib/rail.mjs) since the
+// rail may share this movie's page with other seeded cards (e.g. the show
+// fan-out fixture below) and push it past page 1. Returns { found, pageIndex }
+// so the caller can page back to it before interacting; `found` is false (no
+// live Locator) if no page had a matching title.
+async function findCardPageByExactTitle(page, title) {
+  await goToFirstRailPage(page, rail(page));
+  const matches = await collectAllRailCards(page, rail(page), async (card, pageIndex) => {
+    const h3 = (await card.locator('h3').first().innerText().catch(() => '')).trim();
+    return { h3, pageIndex };
+  });
+  const hit = matches.find((m) => m.h3 === title);
+  return hit ? { found: true, pageIndex: hit.pageIndex } : { found: false, pageIndex: -1 };
+}
+
+// Re-locate a live card Locator by exact <h3> title on the CURRENT rail page
+// only (caller must already be on the right page, e.g. via goToRailPage).
+async function resolveCardOnCurrentPageByTitle(page, title) {
   const n = await cards(page).count();
   for (let i = 0; i < n; i += 1) {
     const card = cards(page).nth(i);
     const h3 = (await card.locator('h3').first().innerText().catch(() => '')).trim();
     if (h3 === title) return card;
   }
-  return cards(page).filter({ hasText: '__no_such_title__' });
+  return null;
 }
 
 export async function run(page, ctx) {
@@ -89,11 +108,17 @@ export async function run(page, ctx) {
 
   await shoot(page, flowName + '-01-rail');
 
-  // Locate the movie card by its name (h3 exact).
-  const movieCard = await findCardByExactTitle(page, movieSeed.name);
-  if (await movieCard.count().then((c) => c === 0)) {
+  // Locate the movie card by its name (h3 exact), walking the whole rail.
+  const movieLocation = await findCardPageByExactTitle(page, movieSeed.name);
+  if (!movieLocation.found) {
     await shoot(page, flowName + '-02-no-movie-card');
     fail('movie-least-watched: movie card "' + movieSeed.name + '" not found on the rail.');
+  }
+  await goToRailPage(page, rail(page), movieLocation.pageIndex);
+  const movieCard = await resolveCardOnCurrentPageByTitle(page, movieSeed.name);
+  if (!movieCard) {
+    await shoot(page, flowName + '-02-no-movie-card');
+    fail('movie-least-watched: movie card "' + movieSeed.name + '" disappeared after paging back to it.');
   }
 
   await movieCard.scrollIntoViewIfNeeded().catch(() => {});
@@ -123,28 +148,36 @@ export async function run(page, ctx) {
 
   // Shows fan-out check: viewers staggered across DIFFERENT episodes of one
   // series must now produce ONE CARD PER DISTINCT EPISODE (no single anchored
-  // card), each showing that candidate's own SxxExx.
+  // card), each showing that candidate's own SxxExx. The rail pages 3 cards at
+  // a time (RAIL_PAGE_SIZE in src/client/App.tsx), so with 4 staggered viewers
+  // sharing one series name, checking only the first-rendered page can
+  // under-count a card that landed on a later page — walk the WHOLE rail via
+  // the "›" arrow (collectAllRailCards) instead of reading a single page.
   if (showSeed) {
     const expectedCodes = [...new Set((showSeed.perViewer ?? []).map((p) => p.code))];
-    const n = await cards(page).count();
+    await goToFirstRailPage(page, rail(page));
+    const wantSeries = showSeed.seriesName.toLowerCase();
     const foundCodes = [];
-    for (let i = 0; i < n; i += 1) {
-      const meta = (await cards(page).nth(i).locator('.meta').first().innerText().catch(() => '')).toLowerCase();
-      if (meta.includes(showSeed.seriesName.toLowerCase())) {
+    await collectAllRailCards(page, rail(page), async (card) => {
+      const meta = (await card.locator('.meta').first().innerText().catch(() => '')).toLowerCase();
+      if (meta.includes(wantSeries)) {
         const code = (meta.match(/S\d{2}E\d{2}/i) || [])[0] ?? null;
         if (code) foundCodes.push(code.toUpperCase());
       }
-    }
+      return null;
+    });
     console.log(
       '[proof] movie-least-watched: show "' + showSeed.seriesName + '" fan-out check — expected episode codes ' +
-      JSON.stringify(expectedCodes) + ', found on rail ' + JSON.stringify(foundCodes),
+      JSON.stringify(expectedCodes) + ', found on rail (all pages) ' + JSON.stringify(foundCodes),
     );
     const missing = expectedCodes.filter((c) => !foundCodes.includes(c));
     if (missing.length === 0 && foundCodes.length >= expectedCodes.length) {
       console.log('[proof] movie-least-watched: PASS - every staggered viewer\'s episode has its OWN rail card (fan-out), independent of the movie rule.');
     } else {
-      console.error('[proof] movie-least-watched: NOTE - expected fan-out cards ' + JSON.stringify(expectedCodes) + ' but rail only shows ' + JSON.stringify(foundCodes) + ' (missing ' + JSON.stringify(missing) + ').');
+      await shootView(page, flowName + '-03-show-fanout-missing');
+      fail('movie-least-watched: FAIL - expected fan-out cards ' + JSON.stringify(expectedCodes) + ' but rail (all pages) only shows ' + JSON.stringify(foundCodes) + ' (missing ' + JSON.stringify(missing) + ').');
     }
+    await goToFirstRailPage(page, rail(page));
     await shootView(page, flowName + '-03-show-fanout');
   } else {
     console.warn('[proof] movie-least-watched: no show seed; skipping show fan-out check.');

@@ -8,6 +8,8 @@
 
 - Custom PIN requirement per household: two parents with PINs, one kid; when everyone is watching, accept PIN from either parent.
 
+- Access tokens & residents. New user config schema: household[account_key] = account_config; access_tokens[token] = account_key; token is shared with account requester, managed by deployer, and must be unique -- only thing needed to get into the portal. Account config list `residents` (jf users)
+ 
 - Add DB (maybe prop graph).
 
 - Recommendation service.

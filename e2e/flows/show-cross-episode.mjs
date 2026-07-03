@@ -1,6 +1,7 @@
 import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
 import { seedStaggeredShow } from '../lib/seed-inprogress.mjs';
 import { makeJellyfin } from '../lib/jellyfin.mjs';
+import { collectAllRailCards, goToFirstRailPage, goToRailPage } from '../lib/rail.mjs';
 
 // show-cross-episode flow: proves the Ancient-Aliens-style FAN-OUT model.
 // Continue-watching no longer collapses a series to one anchored card: every
@@ -22,21 +23,40 @@ const rail = (page) => page.locator('.section-block').first();
 const cards = (page) => rail(page).locator('.media-card');
 
 // All rail cards whose `.meta` line contains the series name, with their SxxExx
-// code and a handle to the card itself. Show cards put the EPISODE name in
-// <h3> and "SeriesName • SxxExx" in `.meta`.
+// code and WHICH PAGE of the rail they're on (the rail pages 3-at-a-time —
+// RAIL_PAGE_SIZE in src/client/App.tsx — so more than a page's worth of cards
+// for one series requires paging through "›" to see them all; reading only the
+// initially-rendered page would under-count). No live Locator is kept here
+// since it goes stale the moment the rail pages again; re-resolve by code via
+// goToRailPage + findSeriesCards(page, seriesName) once back on the right page.
 async function findSeriesCards(page, seriesName) {
+  const want = seriesName.toLowerCase();
+  // Always scan from page 1: the rail may already be paged forward (e.g. right
+  // after resolveCardOnPage left it on a later page), and a full scan must not
+  // silently skip earlier pages.
+  await goToFirstRailPage(page, rail(page));
+  const all = await collectAllRailCards(page, rail(page), async (card, pageIndex) => {
+    const meta = (await card.locator('.meta').first().innerText().catch(() => '')).trim();
+    const code = (meta.match(/S\d{2}E\d{2}/i) || [])[0]?.toUpperCase() ?? null;
+    return { meta, code, pageIndex };
+  });
+  return all.filter((c) => c.meta.toLowerCase().includes(want));
+}
+
+// Re-locate a live card Locator by its SxxExx code, after paging the rail back
+// to the page it was found on.
+async function resolveCardOnPage(page, seriesName, pageIndex, code) {
+  await goToRailPage(page, rail(page), pageIndex);
   const n = await cards(page).count();
   const want = seriesName.toLowerCase();
-  const found = [];
   for (let i = 0; i < n; i += 1) {
     const card = cards(page).nth(i);
     const meta = (await card.locator('.meta').first().innerText().catch(() => '')).trim();
-    if (meta.toLowerCase().includes(want)) {
-      const code = (meta.match(/S\d{2}E\d{2}/i) || [])[0]?.toUpperCase() ?? null;
-      found.push({ card, meta, code });
-    }
+    if (!meta.toLowerCase().includes(want)) continue;
+    const cardCode = (meta.match(/S\d{2}E\d{2}/i) || [])[0]?.toUpperCase() ?? null;
+    if (cardCode === code) return card;
   }
-  return found;
+  return null;
 }
 
 export async function run(page, ctx) {
@@ -98,7 +118,8 @@ export async function run(page, ctx) {
   }
 
   if (seriesCards[0]) {
-    await seriesCards[0].card.scrollIntoViewIfNeeded().catch(() => {});
+    const firstCard = await resolveCardOnPage(page, seed.seriesName, seriesCards[0].pageIndex, seriesCards[0].code);
+    await firstCard?.scrollIntoViewIfNeeded().catch(() => {});
     await shootView(page, flowName + '-02-fanout-cards');
   }
 
@@ -112,16 +133,22 @@ export async function run(page, ctx) {
   }
   console.log('[proof] show-cross-episode: ignoring episode ' + target.code + ', expecting ' + keep.code + ' to remain untouched.');
 
-  const ignoreBtn = target.card.locator('.ignore-flyout button', { hasText: /^Ignore$/ }).first();
+  const targetCard = await resolveCardOnPage(page, seed.seriesName, target.pageIndex, target.code);
+  if (!targetCard) {
+    fail('show-cross-episode: could not re-locate target card ' + target.code + ' on rail page ' + (target.pageIndex + 1) + '.');
+  }
+
+  const ignoreBtn = targetCard.locator('.ignore-flyout button', { hasText: /^Ignore$/ }).first();
   await ignoreBtn.scrollIntoViewIfNeeded().catch(() => {});
   await ignoreBtn.click();
-  const episodeChoice = target.card.locator('.ignore-flyout-menu button', { hasText: /^Ignore this episode$/ }).first();
+  const episodeChoice = targetCard.locator('.ignore-flyout-menu button', { hasText: /^Ignore this episode$/ }).first();
   try {
     await episodeChoice.waitFor({ state: 'visible', timeout: 5000 });
   } catch (error) {
     await shoot(page, flowName + '-03-no-flyout');
     fail('show-cross-episode: "Ignore this episode" flyout choice did not appear on the target card.', error);
   }
+  await shootView(page, flowName + '-03-ignore-flyout-open');
   await episodeChoice.click();
 
   // Poll until the target episode's card is gone.
@@ -162,5 +189,51 @@ export async function run(page, ctx) {
   }
 
   console.log('[proof] show-cross-episode: PASS - ignoring one episode-card removed ONLY that card; the other stayed, and no replacement episode appeared.');
+
+  // ── Cleanup: un-ignore the target episode ────────────────────────────────
+  // The ignore entry is persisted server-side (src/server/appState.ts state.json)
+  // and is NOT cleared by the Jellyfin played-state reset at the top of this
+  // flow (that only resets Jellyfin, not Gogglebox's own ignore list). Leaving
+  // it ignored would permanently hide this episode from every FUTURE run of
+  // this flow (it would look like a fan-out regression: "only 3 cards" forever
+  // after the first run), so restore it via the hero "Ignored" modal's
+  // Unignore control before finishing, exactly like ignore-shows.mjs does.
+  const heroOpen = page.getByRole('button', { name: /^Ignored/ }).first();
+  try {
+    await heroOpen.waitFor({ state: 'visible', timeout: 10000 });
+    await heroOpen.click();
+  } catch (error) {
+    fail('show-cross-episode: hero "Ignored" button not found for cleanup unignore.', error);
+  }
+
+  const ignoredModal = page
+    .locator('.modal')
+    .filter({ has: page.locator('h2', { hasText: /^Ignored$/ }) })
+    .first();
+  try {
+    await ignoredModal.waitFor({ state: 'visible', timeout: 10000 });
+  } catch (error) {
+    fail('show-cross-episode: "Ignored" modal did not appear for cleanup unignore.', error);
+  }
+
+  const ignoredRow = ignoredModal
+    .locator('.episode-card')
+    .filter({ has: page.locator('button', { hasText: /^Unignore$/ }) })
+    .first();
+  try {
+    await ignoredRow.waitFor({ state: 'visible', timeout: 10000 });
+    await ignoredRow.locator('button', { hasText: /^Unignore$/ }).first().click();
+  } catch (error) {
+    fail('show-cross-episode: could not find/click Unignore for cleanup — the ignored episode would poison subsequent runs.', error);
+  }
+  await page.waitForLoadState('networkidle').catch(() => {});
+
+  const closeBtn = ignoredModal.getByRole('button', { name: /^Close$/ }).first();
+  if (await closeBtn.count().then((n) => n > 0)) {
+    await closeBtn.click().catch(() => {});
+  }
+  await page.waitForTimeout(300);
+  console.log('[proof] show-cross-episode: cleanup - un-ignored ' + target.code + ' so subsequent runs start clean.');
+
   console.log('[proof] show-cross-episode: ALL PASS - fan-out + scoped episode-ignore both verified.');
 }
