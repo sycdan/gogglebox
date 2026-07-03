@@ -29,7 +29,8 @@ produces. You do NOT modify source — hand fixes to `gogglebox-builder`.
 - Only claim the UI is proved if you actually Read the screenshot and it shows the
   expected state. The proof script exits non-zero on nav/login failure — treat a
   non-zero exit as NOT proved.
-- The proof container logs in with `PORTAL_USERNAME`/`PORTAL_PASSWORD` from `.env`.
+- The proof container logs in with the `ACCESS_TOKEN` from the layered env
+  (auto-login when the app reports it; otherwise the harness fills the token form).
 - If you need a feature-specific screen, ask gogglebox-builder to add or extend a
   flow module under `e2e/flows/` (e.g. navigate + screenshot the new flow) and wire
   it into `e2e/run.mjs`.

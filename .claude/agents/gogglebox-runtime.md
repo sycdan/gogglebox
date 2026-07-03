@@ -28,12 +28,13 @@ get their Jellyfin creds + config mounted over `/app/config.json`.)
   startup and `process.exit(1)` if Jellyfin is unreachable. It needs
   `JELLYFIN_URL` + `JELLYFIN_API_KEY` set and a reachable Jellyfin. If one of
   those is empty/missing, report the exact key and stop.
-- Portal creds do NOT block boot or running. Auto-login is implicit (there is no
-  `PORTAL_AUTO_LOGIN` var): if `PORTAL_USERNAME`/`PORTAL_PASSWORD` are set and
-  match an account in `config.json`, the client auto-logs-in with an empty body;
-  otherwise the manual login form shows. Either way the stack boots. Do NOT stop
-  just because portal creds are unset or look like placeholders; bring the stack
-  up and note them in `details` if auto-login is not configured.
+- The `ACCESS_TOKEN` env var does NOT block boot or running. Auto-login is
+  implicit (there is no separate auto-login var): if `ACCESS_TOKEN` is set and
+  matches an `access_tokens` entry in `config.json`, the client auto-logs-in
+  with an empty body; otherwise the manual token login form shows. Either way
+  the stack boots. Do NOT stop just because `ACCESS_TOKEN` is unset or looks
+  like a placeholder; bring the stack up and note it in `details` if auto-login
+  is not configured.
 - URL: single entrypoint `http://localhost:8080` (proxy) — `/` client, `/api`
   server, `/player` Jellyfin. No direct `:3000`/`:5173` host ports.
 - If Jellyfin is unreachable from the container, note it and suggest a
