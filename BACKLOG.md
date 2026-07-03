@@ -4,15 +4,33 @@
 
 ## 🛠️ To build
 
-- Intra-show search. Click on a show title anywhere, and it pops up a modal with an episode list with buttons for seasons, search episode keywords across seasons; show every watcher's seen state for each episode in the list.
+### Auth refactor
 
-- Custom PIN requirement per household: two parents with PINs, one kid; when everyone is watching, accept PIN from either parent.
+New user config schema: accounts[account_key] = account_config; access_tokens[token] = account_key; token is shared with account holder, managed by deployer, and must be unique -- only thing needed to get into the portal.
 
-- Access tokens & residents. New user config schema: household[account_key] = account_config; access_tokens[token] = account_key; token is shared with account requester, managed by deployer, and must be unique -- only thing needed to get into the portal. Account config list `residents` (jf users)
- 
-- Add DB (maybe prop graph).
+Account config lists:
 
-- Recommendation service.
+- `primary_users`: list of jf users, selected by default when portal loads (may be deselected)
+- `secondary_users`: unselected by default, listed after primaries; may be blank, in which case all non-primaries are included
+- `tertiary_users`: can optionally be added to groups, but requires PIN entry for each; must click "add guest" to add to groups; may be blank, in which case all jf users are included
+
+display should be primaries with avatars, secondaries with avatars, + button (same size as avatar) -- clicking this pops modal to select guest, enter pin -- can't confirm modal until all pins entered for all selected guests. Can wrap to multiple lines if necessary. groups stay below.
+
+adding continuing with a group that contains non-primary users will pop a confirmation modal warning that watch progress will be affected for all users in the group.
+
+Local storage should remember access token until log out is clicked, skipping portal login.
+
+### Intra-show search
+
+Click on a show title anywhere, and it pops up a modal with an episode list with buttons for seasons, search episode keywords across seasons; show every watcher's seen state for each episode in the list.
+
+### DbB
+
+Add DB (maybe prop graph).
+
+### Recommendation service
+
+To shape.
 
 ## ✅ Done
 
