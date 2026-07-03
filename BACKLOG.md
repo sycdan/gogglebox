@@ -6,6 +6,8 @@
 
 - Intra-show search. Click on a show title anywhere, and it pops up a modal with an episode list with buttons for seasons, search episode keywords across seasons; show every watcher's seen state for each episode in the list.
 
+- Custom PIN requirement per household: two parents with PINs, one kid; when everyone is watching, accept PIN from either parent.
+
 
 ## ✅ Done
 
