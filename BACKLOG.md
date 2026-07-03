@@ -10,6 +10,8 @@
 
 - Add DB (maybe prop graph).
 
+- Recommendation service.
+
 ## ✅ Done
 
 - **Refactor user management and auth** — `users[]` keyed by Jellyfin name +
