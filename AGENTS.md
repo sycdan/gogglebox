@@ -30,11 +30,14 @@ Subagents cannot spawn subagents, so the orchestrator sequences the chain.
 
 ## Efforts are the canonical backlog
 
-`./efforts` is the canonical source for all work to be done. Before delegating
-implementation, verification, runtime, or proof work, the orchestrator must match
-the request to an existing effort spec under `./efforts`. If no matching effort
-exists, switch to `gogglebox-planner` first. The planner's only job is to
-populate `./efforts`, and its write access is limited to that directory.
+`./efforts` on `main` is the canonical source for all work to be done. Effort
+specs modified on feature or topic branches are branch-local planning/proposed
+updates; they are not canonical until merged or updated on `main`. Before
+delegating implementation, verification, runtime, or proof work, the
+orchestrator must match the request to an existing effort spec under
+`./efforts`. If no matching effort exists, switch to `gogglebox-planner` first.
+The planner's only job is to populate `./efforts`, and its write access is
+limited to that directory.
 
 Efforts may be broken down into nested subefforts, for example
 `auth-refactor/account-access-tokens` or `auth-refactor/account-user-tiers`.

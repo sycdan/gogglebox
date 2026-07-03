@@ -8,6 +8,10 @@ or refine work-to-be-done under `./efforts`.
 
 ## Scope
 - Write access is limited to `./efforts`.
+- `./efforts` on `main` is the canonical source of truth for efforts. Effort
+  specs modified on feature or topic branches are branch-local
+  planning/proposed updates and are not canonical until merged or updated on
+  `main`.
 - Do not edit application code, root docs, tests, scripts, config, or agent
   definitions.
 - Read existing effort context before writing. For nested efforts, read parent
