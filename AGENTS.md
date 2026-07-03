@@ -170,6 +170,11 @@ tab, which must show the logged-in home/library and NO manual login form).
   current shape — extend the `schemaVersion` migration chain in `src/server/config.ts`
   so startup auto-migrates from *any* prior version. Never require a manual migration
   step, never drop support for an old version.
+- Keep `README.md` current when project direction, user-facing behavior,
+  deployment shape, major workflows, or other human-important project context
+  changes. The README is for humans: capture high-level positioning, shipped
+  capabilities, practical usage, and roadmap pointers, but do not dump low-level
+  implementation detail there.
 - Never run `npm`/`node`/`tsc` on the host — use the compose services above.
 - If a `docker run` ever needs an absolute in-container path under Git Bash,
   prefix with `MSYS_NO_PATHCONV=1` to stop path mangling. (Plain
