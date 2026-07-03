@@ -2,9 +2,10 @@
 # pre-push gate: refuse to push unless the tree is clean, the package version is
 # bumped when an image input changed (for pushes to main), the typecheck + unit
 # tests pass, and the production image builds. Pushes whose only changes are
-# root-level Markdown docs (*.md) skip the typecheck/test/build gates. Publishing
-# is handled by CI (GitHub Actions -> GHCR), so this hook does not push. The push
-# only proceeds if every required step is green.
+# root-level Markdown docs (*.md) or effort planning metadata (efforts/**) skip
+# the typecheck/test/build gates. Publishing is handled by CI
+# (GitHub Actions -> GHCR), so this hook does not push. The push only proceeds if
+# every required step is green.
 #
 # Everything runs in Docker (the host has only docker + git, per CLAUDE.md).
 # There is no eslint in this repo, so "lint" == the typecheck (`npm run check`).
@@ -38,12 +39,13 @@ image_inputs_changed() {
 	return 1
 }
 
-only_root_markdown_changed() {
+only_docs_or_efforts_changed() {
 	local f saw_change=0
 	while IFS= read -r f; do
 		[[ -z "$f" ]] && continue
 		saw_change=1
 		case "$f" in
+			efforts/*) ;;
 			*/*) return 1 ;;
 			*.md) ;;
 			*) return 1 ;;
@@ -89,10 +91,10 @@ else
 	echo "[pre-push]       skipped (not pushing main)"
 fi
 
-if only_root_markdown_changed; then
-	echo "[pre-push] 3/5 typecheck (lint)... skipped (only root-level Markdown docs changed)"
-	echo "[pre-push] 4/5 unit tests... skipped (only root-level Markdown docs changed)"
-	echo "[pre-push] 5/5 production image builds... skipped (only root-level Markdown docs changed)"
+if only_docs_or_efforts_changed; then
+	echo "[pre-push] 3/5 typecheck (lint)... skipped (only root-level Markdown docs or efforts changed)"
+	echo "[pre-push] 4/5 unit tests... skipped (only root-level Markdown docs or efforts changed)"
+	echo "[pre-push] 5/5 production image builds... skipped (only root-level Markdown docs or efforts changed)"
 	echo "[pre-push] all required gates green - proceeding with push."
 	exit 0
 fi
