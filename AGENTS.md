@@ -28,6 +28,39 @@ three are read-only on source.
 
 Subagents cannot spawn subagents, so the orchestrator sequences the chain.
 
+## Efforts are the canonical backlog
+
+`./efforts` is the canonical source for all work to be done. Before delegating
+implementation, verification, runtime, or proof work, the orchestrator must match
+the request to an existing effort spec under `./efforts`. If no matching effort
+exists, switch to `gogglebox-planner` first. The planner's only job is to
+populate `./efforts`, and its write access is limited to that directory.
+
+Efforts may be broken down into nested subefforts, for example
+`auth-refactor/account-access-tokens` or `auth-refactor/account-user-tiers`.
+Each effort directory contains a PascalCase markdown spec named for the effort,
+such as `AuthRefactor.md`, with Overview, Goals when applicable, Nongoals when
+applicable, and ordered Acceptance Criteria.
+
+The acceptance criteria are the controlling checklist for an effort. Each effort
+must have at least one acceptance criterion. Criteria must be checked
+sequentially, and each criterion must include exactly one unique generated GUID
+proof link in this exact style: `[proof](./.proofs/<guid>.md)`. Proof files live
+in the effort's hidden `.proofs/` metadata directory, because any non-hidden
+directory inside an effort is treated as a subeffort. An acceptance criterion may
+require that a subeffort is done; when it does, start the checklist item with
+the proof link and link the subeffort slug in the sentence, for example:
+`1. [ ] [proof](./.proofs/<guid>.md) that [account-access-tokens](./account-access-tokens/AccountAccessTokens.md) is done`.
+Acceptance criteria do not have to be subeffort dependencies; any provable
+criterion is valid. Proof is required for each criterion and may copy evidence
+from root `./artifacts` into the effort's `.proofs/` directory. Only an approver
+who has loaded the whole effort context, including parent effort specs for
+nested efforts, may mark acceptance criteria checked. When asked whether an
+effort is done, the approver checks each criterion, reads any linked proof,
+marks criteria checked only when the proof is sufficient, confirms all visible
+child subefforts are done, and then either confirms the effort is done or
+lists what remains to be proven.
+
 ## Run everything in Docker (host stays minimal)
 
 The host needs only Docker + git. All app execution goes through Compose. The
