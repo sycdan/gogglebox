@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { getProgressPropagationTargets, mergeContinueWatching, pickGroupAnchorIndex } from './continueWatching';
+import { continueKeyFor, getProgressPropagationTargets, mergeContinueWatching, pickGroupAnchorIndex } from './continueWatching';
 
 // Build one viewer's per-episode played state: episodes 0..n-1, played === true
 // for index < watchedThrough (i.e. the viewer has finished that many episodes and
@@ -408,6 +408,118 @@ test('mergeContinueWatching show selection is NOT affected by the least-watched 
     assert.equal(items[0].id, 'episode-bear-s01e02'); // earliest episode, NOT least-progress
     assert.equal(items[0].sourceViewerId, 'a');
   }
+});
+
+// Shared show base for the continue-from override tests: an out-of-order show
+// (Ancient Aliens style) where episode order doesn't matter to the group.
+const anthologyBase = {
+  type: 'show' as const,
+  overview: '',
+  year: 2010,
+  runtimeMinutes: 45,
+  rating: null,
+  genres: ['Documentary'],
+  officialRating: null,
+  imageUrl: null,
+  backdropUrl: null,
+  playable: true,
+  seriesId: 'series-ancient-aliens',
+  seriesName: 'Ancient Aliens',
+};
+// A has seen eps 1-20 -> NextUp ep 21. B has seen up to ep 9 -> NextUp ep 10.
+// C has seen nothing -> no candidate at all.
+const viewerAOnEp21 = {
+  ...anthologyBase,
+  id: 'episode-aa-s01e21',
+  name: 'Episode 21',
+  playbackPositionTicks: 0,
+  progressPercent: 0,
+  seasonNumber: 1,
+  episodeNumber: 21,
+  sourceViewerId: 'a',
+  sourceViewerName: 'A',
+};
+const viewerBOnEp10 = {
+  ...anthologyBase,
+  id: 'episode-aa-s01e10',
+  name: 'Episode 10',
+  playbackPositionTicks: 0,
+  progressPercent: 0,
+  seasonNumber: 1,
+  episodeNumber: 10,
+  sourceViewerId: 'b',
+  sourceViewerName: 'B',
+};
+
+test('mergeContinueWatching continue-from override follows the chosen viewer, not the earliest episode', () => {
+  const items = mergeContinueWatching(
+    [viewerAOnEp21, viewerBOnEp10],
+    { [continueKeyFor('show', 'series-ancient-aliens')]: 'b' },
+  );
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, 'episode-aa-s01e10'); // B's own next episode wins
+  assert.equal(items[0].sourceViewerId, 'b');
+  assert.equal(items[0].continueFromViewerId, 'b');
+});
+
+test('mergeContinueWatching override naming a viewer with no candidate falls back to the default pick', () => {
+  // Viewer 'c' has watched nothing, so she contributed no candidate: the card
+  // must fall back to the default earliest-episode pick, unmarked as overridden.
+  const items = mergeContinueWatching(
+    [viewerAOnEp21, viewerBOnEp10],
+    { [continueKeyFor('show', 'series-ancient-aliens')]: 'c' },
+  );
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].id, 'episode-aa-s01e10'); // earliest episode among candidates
+  assert.equal(items[0].continueFromViewerId, null);
+});
+
+test('mergeContinueWatching attaches every viewer\'s own resume point as viewerNext options', () => {
+  const items = mergeContinueWatching([viewerAOnEp21, viewerBOnEp10]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].continueFromViewerId, null);
+  assert.deepEqual(
+    items[0].viewerNext?.map((option) => ({ viewerId: option.viewerId, itemId: option.itemId })),
+    [
+      { viewerId: 'a', itemId: 'episode-aa-s01e21' },
+      { viewerId: 'b', itemId: 'episode-aa-s01e10' },
+    ],
+  );
+});
+
+test('mergeContinueWatching movie override resumes from the chosen viewer instead of the least-watched', () => {
+  const base = {
+    name: 'Heat',
+    type: 'movie' as const,
+    overview: '',
+    year: 1995,
+    runtimeMinutes: 170,
+    rating: null,
+    genres: ['Crime'],
+    officialRating: null,
+    imageUrl: null,
+    backdropUrl: null,
+    playable: true,
+    seriesId: null,
+    seriesName: null,
+    seasonNumber: null,
+    episodeNumber: null,
+  };
+  const items = mergeContinueWatching(
+    [
+      { ...base, id: 'movie-heat', playbackPositionTicks: 900_000_000, progressPercent: 0.9, sourceViewerId: 'a', sourceViewerName: 'A' },
+      { ...base, id: 'movie-heat', playbackPositionTicks: 120_000_000, progressPercent: 0.12, sourceViewerId: 'b', sourceViewerName: 'B' },
+    ],
+    { [continueKeyFor('movie', 'movie-heat')]: 'a' },
+  );
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0].sourceViewerId, 'a');
+  assert.equal(items[0].progressPercent, 0.9);
+  assert.equal(items[0].continueFromViewerId, 'a');
 });
 
 test('getProgressPropagationTargets updates everyone except the source viewer', () => {

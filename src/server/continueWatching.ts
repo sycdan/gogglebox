@@ -1,16 +1,23 @@
-import { ContinueWatchingItem } from './types';
+import { ContinueWatchingItem, ViewerNextOption } from './types';
 
 export interface ContinueWatchingCandidate extends Omit<ContinueWatchingItem, 'sourceViewerId' | 'sourceViewerName'> {
   sourceViewerId: string;
   sourceViewerName: string;
 }
 
+// The stable identity of a continue-watching card: a show is keyed by its
+// series (all episodes collapse to one card), a movie by its own id. Also the
+// key the per-group "continue from viewer" override is stored under.
+export function continueKeyFor(type: string, id: string): string {
+  return `${type}:${id}`;
+}
+
 function keyForCandidate(candidate: ContinueWatchingCandidate): string {
   if (candidate.type === 'show' && candidate.seriesId) {
-    return `show:${candidate.seriesId}`;
+    return continueKeyFor('show', candidate.seriesId);
   }
 
-  return `${candidate.type}:${candidate.id}`;
+  return continueKeyFor(candidate.type, candidate.id);
 }
 
 // Air-order position of a show episode (season-major, episode-minor). Lower =
@@ -70,44 +77,91 @@ function railSortName(candidate: ContinueWatchingCandidate): string {
   return candidate.name;
 }
 
-export function mergeContinueWatching(candidates: ContinueWatchingCandidate[]): ContinueWatchingItem[] {
-  const selected = new Map<string, ContinueWatchingCandidate>();
+// Each viewer's own single resume point within one card's candidate group, in
+// input (active-viewer) order. The Jellyfin fetch normally collapses a viewer's
+// resume/NextUp to one candidate per series already, but dedup defensively: for
+// duplicates, keep the candidate the viewer is actually on (resume over
+// placeholder / least-advanced for a movie).
+function bestPerViewer(group: ContinueWatchingCandidate[]): Map<string, ContinueWatchingCandidate> {
+  const byViewer = new Map<string, ContinueWatchingCandidate>();
+  for (const candidate of group) {
+    const current = byViewer.get(candidate.sourceViewerId);
+    byViewer.set(
+      candidate.sourceViewerId,
+      !current
+        ? candidate
+        : candidate.type === 'show'
+          ? preferEarlierShow(current, candidate)
+          : preferLeastAdvanced(current, candidate),
+    );
+  }
+  return byViewer;
+}
 
+// Merge every viewer's candidates into one card per show/movie.
+//
+// Default pick: shows anchor to the earliest not-all-watched episode, movies to
+// the least-watched viewer. `continueFrom` (continueKey -> viewerId) overrides
+// that per card: when the chosen viewer has their own candidate for the card,
+// it wins outright — the group explicitly chose to follow that viewer's
+// progress (e.g. an anthology show where nobody minds skipping the earliest
+// unseen episode). An override naming a viewer with no candidate falls back to
+// the default pick.
+export function mergeContinueWatching(
+  candidates: ContinueWatchingCandidate[],
+  continueFrom: Record<string, string> = {},
+): ContinueWatchingItem[] {
+  const byKey = new Map<string, ContinueWatchingCandidate[]>();
   for (const candidate of candidates) {
     const key = keyForCandidate(candidate);
-    const current = selected.get(key);
-    if (!current) {
-      selected.set(key, candidate);
-      continue;
-    }
-
-    if (candidate.type === 'show') {
-      // Group SHOW anchor: keep the EARLIEST not-all-watched episode (stable
-      // across single-viewer watched toggles).
-      selected.set(key, preferEarlierShow(current, candidate));
+    const group = byKey.get(key);
+    if (group) {
+      group.push(candidate);
     } else {
-      // Movies (the degenerate one-episode case): resume from the LEAST-advanced
-      // viewer so the group still has the most movie left to watch.
-      selected.set(key, preferLeastAdvanced(current, candidate));
+      byKey.set(key, [candidate]);
     }
+  }
+
+  const selected: ContinueWatchingItem[] = [];
+  for (const [key, group] of byKey) {
+    const perViewer = bestPerViewer(group);
+    const overrideViewerId = continueFrom[key];
+    const override = overrideViewerId ? perViewer.get(overrideViewerId) : undefined;
+
+    const pick = override ?? group.reduce((current, candidate) =>
+      candidate.type === 'show'
+        // Group SHOW anchor: keep the EARLIEST not-all-watched episode (stable
+        // across single-viewer watched toggles).
+        ? preferEarlierShow(current, candidate)
+        // Movies (the degenerate one-episode case): resume from the LEAST-
+        // advanced viewer so the group still has the most movie left to watch.
+        : preferLeastAdvanced(current, candidate));
+
+    selected.push({
+      ...pick,
+      continueFromViewerId: override ? overrideViewerId : null,
+      viewerNext: [...perViewer.values()].map((candidate) => ({
+        viewerId: candidate.sourceViewerId,
+        viewerName: candidate.sourceViewerName,
+        itemId: candidate.id,
+        seasonNumber: candidate.seasonNumber,
+        episodeNumber: candidate.episodeNumber,
+        progressPercent: candidate.progressPercent,
+      })),
+    });
   }
 
   // Stable rail order: alphabetical by show/movie name (case-insensitive), with a
   // stable id tie-break so same-named items keep a fixed relative order. This is
   // deterministic and independent of progress, so toggling a viewer's watched
   // state (which refetches the rail) never reshuffles the cards.
-  return [...selected.values()]
+  return selected
     .sort((left, right) => {
       const byName = railSortName(left).localeCompare(railSortName(right), undefined, { sensitivity: 'base' });
       if (byName !== 0) return byName;
       return left.id.localeCompare(right.id);
     })
-    .slice(0, 24)
-    .map((candidate) => ({
-      ...candidate,
-      sourceViewerId: candidate.sourceViewerId,
-      sourceViewerName: candidate.sourceViewerName,
-    }));
+    .slice(0, 24);
 }
 
 export function getProgressPropagationTargets(activeViewerIds: string[], sourceViewerId: string): string[] {

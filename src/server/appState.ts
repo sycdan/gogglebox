@@ -43,6 +43,10 @@ interface AppStateFile {
   // The cached effective config + provenance (see CachedEffectiveConfig). Re-
   // derived on startup when the source hash or package version changed.
   effectiveConfig?: CachedEffectiveConfig;
+  // Per group, which viewer's progress a continue-watching card follows:
+  // groupKey -> (continueKey e.g. "show:<seriesId>" / "movie:<id>" -> viewerId).
+  // Absent entry = default group pick (earliest not-all-watched / least-watched).
+  continueFrom?: Record<string, Record<string, string>>;
 }
 
 // Normalize the groupAliases map: drop non-string / empty entries so callers
@@ -148,6 +152,32 @@ export class AppState {
     }
     writeState(this.filePath, state, { ignoredItems });
     return next;
+  }
+
+  // The group's "continue from viewer" overrides: continueKey -> viewerId.
+  getContinueFrom(groupKey: string): Record<string, string> {
+    const state = readState(this.filePath);
+    return state.continueFrom?.[groupKey] ?? {};
+  }
+
+  // Persist that a group's card follows one viewer's progress. Passing a null
+  // viewerId clears the override (back to the default group pick).
+  setContinueFrom(groupKey: string, continueKey: string, viewerId: string | null): Record<string, string> {
+    const state = readState(this.filePath);
+    const continueFrom = { ...(state.continueFrom ?? {}) };
+    const group = { ...(continueFrom[groupKey] ?? {}) };
+    if (viewerId) {
+      group[continueKey] = viewerId;
+    } else {
+      delete group[continueKey];
+    }
+    if (Object.keys(group).length > 0) {
+      continueFrom[groupKey] = group;
+    } else {
+      delete continueFrom[groupKey];
+    }
+    writeState(this.filePath, state, { continueFrom });
+    return group;
   }
 
   // The persisted gbx-owned Jellyfin user id for a group, or undefined if none

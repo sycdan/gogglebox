@@ -42,12 +42,16 @@ export async function anchorShowCards(
 ): Promise<ContinueWatchingItem[]> {
   const resolved = await Promise.all(
     items.map(async (item) => {
-      if (item.type !== 'show' || !item.seriesId) {
+      if (item.type !== 'show' || !item.seriesId || item.continueFromViewerId) {
         debug(
           `SKIP card id=${item.id} name=${JSON.stringify(item.name)} type=${item.type} ` +
           `seriesId=${JSON.stringify(item.seriesId)} season=${item.seasonNumber} episode=${item.episodeNumber} ` +
-          `progress=${item.progressPercent} reason=${item.type !== 'show' ? 'not-a-show' : 'no-seriesId'}`,
+          `progress=${item.progressPercent} reason=${
+            item.type !== 'show' ? 'not-a-show' : item.seriesId ? 'continue-from-viewer' : 'no-seriesId'
+          }`,
         );
+        // A card overridden to follow ONE viewer's progress keeps that viewer's
+        // own resume/NextUp episode; the group anchor must not drag it back.
         return item;
       }
 

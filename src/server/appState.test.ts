@@ -51,6 +51,45 @@ test('unignoreItem removes the item and prunes empty groups', () => {
   assert.equal(raw.ignoredItems?.['group-1'], undefined);
 });
 
+test('continueFrom overrides persist per group and clear back to the default pick', () => {
+  const filePath = tempStatePath();
+  const state = new AppState(filePath);
+
+  assert.deepEqual(state.getContinueFrom('group-1'), {});
+
+  state.setContinueFrom('group-1', 'show:series-aa', 'viewer-b');
+  state.setContinueFrom('group-1', 'movie:heat', 'viewer-a');
+  state.setContinueFrom('group-2', 'show:series-aa', 'viewer-c');
+
+  assert.deepEqual(state.getContinueFrom('group-1'), {
+    'show:series-aa': 'viewer-b',
+    'movie:heat': 'viewer-a',
+  });
+  assert.deepEqual(state.getContinueFrom('group-2'), { 'show:series-aa': 'viewer-c' });
+
+  // Re-pointing an existing key replaces the viewer.
+  state.setContinueFrom('group-1', 'show:series-aa', 'viewer-a');
+  assert.equal(state.getContinueFrom('group-1')['show:series-aa'], 'viewer-a');
+
+  // null clears the override; an empty group is pruned from the file.
+  state.setContinueFrom('group-1', 'show:series-aa', null);
+  state.setContinueFrom('group-1', 'movie:heat', null);
+  state.setContinueFrom('group-2', 'show:series-aa', null);
+  assert.deepEqual(state.getContinueFrom('group-1'), {});
+  const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as { continueFrom?: Record<string, unknown> };
+  assert.equal(raw.continueFrom?.['group-1'], undefined);
+  assert.equal(raw.continueFrom?.['group-2'], undefined);
+});
+
+test('setContinueFrom preserves other state fields (ignored items) across writes', () => {
+  const filePath = tempStatePath();
+  const state = new AppState(filePath);
+  state.ignoreItem('group-1', 'item-a');
+  state.setContinueFrom('group-1', 'show:series-aa', 'viewer-b');
+  assert.deepEqual(state.getIgnoredItems('group-1'), ['item-a']);
+  assert.deepEqual(state.getContinueFrom('group-1'), { 'show:series-aa': 'viewer-b' });
+});
+
 test('group aliases persist and read back, ignoring empty/blank aliases', () => {
   const filePath = tempStatePath();
   const state = new AppState(filePath);

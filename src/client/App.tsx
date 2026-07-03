@@ -72,6 +72,17 @@ interface ViewerWatchedState {
   watched: boolean;
 }
 
+// One viewer's own resume point for a card — a "continue from this viewer"
+// choice offered alongside the default group pick.
+interface ViewerNextOption {
+  viewerId: string;
+  viewerName: string;
+  itemId: string;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  progressPercent: number;
+}
+
 interface ContinueWatchingItem extends LibraryItem {
   sourceViewerId: string;
   sourceViewerName: string;
@@ -82,6 +93,8 @@ interface ContinueWatchingItem extends LibraryItem {
   seasonNumber: number | null;
   episodeNumber: number | null;
   viewerWatched?: ViewerWatchedState[];
+  continueFromViewerId?: string | null;
+  viewerNext?: ViewerNextOption[];
 }
 
 interface SessionResponse {
@@ -214,6 +227,59 @@ function RailPager({
         ›
       </button>
     </div>
+  );
+}
+
+// Compact "S01E10 · 35%" summary of one viewer's resume point for the picker.
+function viewerNextSummary(option: ViewerNextOption): string {
+  const parts: string[] = [];
+  if (option.seasonNumber && option.episodeNumber) {
+    parts.push(`S${String(option.seasonNumber).padStart(2, '0')}E${String(option.episodeNumber).padStart(2, '0')}`);
+  }
+  if (option.progressPercent > 0) {
+    parts.push(`${Math.round(option.progressPercent * 100)}%`);
+  }
+  return parts.join(' · ');
+}
+
+// "Continue from" picker on a continue-watching card: default group pick vs a
+// specific viewer's own progress. Hidden when there is nothing to choose (one
+// option that already matches the displayed card and no override in place).
+function ContinueFromPicker({
+  item,
+  onChange,
+}: {
+  item: ContinueWatchingItem;
+  onChange: (viewerId: string) => void;
+}) {
+  const options = item.viewerNext ?? [];
+  const hasChoice = options.length > 1
+    || Boolean(item.continueFromViewerId)
+    || (options.length === 1 && options[0].itemId !== item.id);
+  if (!hasChoice) {
+    return null;
+  }
+
+  return (
+    <label className="continue-from">
+      <span>Continue from</span>
+      <select
+        value={item.continueFromViewerId ?? ''}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">
+          Group pick ({item.type === 'show' ? 'earliest unseen' : 'least watched'})
+        </option>
+        {options.map((option) => {
+          const summary = viewerNextSummary(option);
+          return (
+            <option key={option.viewerId} value={option.viewerId}>
+              {option.viewerName}{summary ? ` — ${summary}` : ''}
+            </option>
+          );
+        })}
+      </select>
+    </label>
   );
 }
 
@@ -673,6 +739,27 @@ export function App() {
     } catch (nextError) {
       applyWatched(viewer.watched);
       setError(nextError instanceof Error ? nextError.message : 'Could not update watch state');
+    }
+  }
+
+  // Choose which viewer's progress a continue-watching card follows (or ''
+  // to revert to the default group pick). Persisted server-side per group;
+  // the refetch re-renders the card at the chosen viewer's episode/position.
+  async function setContinueSource(item: ContinueWatchingItem, viewerId: string) {
+    try {
+      await apiRequest('/api/continue-watching/source', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: item.type,
+          id: item.type === 'show' && item.seriesId ? item.seriesId : item.id,
+          viewerId: viewerId || null,
+        }),
+      });
+      if (session) {
+        await loadContinueWatching(session);
+      }
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not change continue-from viewer');
     }
   }
 
@@ -1348,6 +1435,7 @@ export function App() {
                 <div className="progress-track" aria-hidden="true">
                   <span className="progress-fill" style={{ width: `${Math.max(2, Math.round(item.progressPercent * 100))}%` }} />
                 </div>
+                <ContinueFromPicker item={item} onChange={(viewerId) => void setContinueSource(item, viewerId)} />
               </div>
               <div className="row spread">
                 <div className="play-row">

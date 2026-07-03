@@ -16,6 +16,7 @@ import { CachedEffectiveConfig } from './appState';
 import { anchorShowCards } from './anchorShowCards';
 import {
   ContinueWatchingCandidate,
+  continueKeyFor,
   getProgressPropagationTargets,
   mergeContinueWatching,
 } from './continueWatching';
@@ -167,7 +168,10 @@ async function getWatchedUnion(viewers: FamilyMember[], kind: LibraryKind): Prom
   return watchedUnion;
 }
 
-async function getContinueWatchingItems(viewers: FamilyMember[]): Promise<ContinueWatchingItem[]> {
+async function getContinueWatchingItems(
+  viewers: FamilyMember[],
+  continueFrom: Record<string, string> = {},
+): Promise<ContinueWatchingItem[]> {
   const startedAt = Date.now();
   const candidateGroups = await Promise.all(
     viewers.map(async (viewer) => {
@@ -184,7 +188,7 @@ async function getContinueWatchingItems(viewers: FamilyMember[]): Promise<Contin
       );
     }),
   );
-  const merged = mergeContinueWatching(candidateGroups.flat());
+  const merged = mergeContinueWatching(candidateGroups.flat(), continueFrom);
 
   if (jellyfinDebugEnabled) {
     console.log(
@@ -568,7 +572,8 @@ app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, r
   try {
     const viewers = activeViewersForSession(req);
     const ignoredItems = ignoredItemsForSession(req);
-    const visible = (await getContinueWatchingItems(viewers)).filter(
+    const continueFrom = appState.getContinueFrom(activeGroupKey(req));
+    const visible = (await getContinueWatchingItems(viewers, continueFrom)).filter(
       (item) => !ignoredItems.has(ignorableId(item)),
     );
     if (jellyfinDebugEnabled) {
@@ -589,6 +594,29 @@ app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, r
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Continue watching lookup failed' });
   }
+});
+
+// Choose which viewer's progress a continue-watching card follows. Body:
+// { type: 'show'|'movie', id: seriesId (show) or item id (movie),
+//   viewerId: string | null } — null reverts to the default group pick.
+// Persisted per group, so the choice survives refetches and sessions.
+app.post('/api/continue-watching/source', requireAuth, requireViewerGroup, (req, res) => {
+  const type = req.body?.type === 'movie' ? 'movie' : req.body?.type === 'show' ? 'show' : null;
+  const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
+  const viewerId = typeof req.body?.viewerId === 'string' && req.body.viewerId ? req.body.viewerId : null;
+
+  if (!type || !id) {
+    res.status(400).json({ error: 'type (show|movie) and id are required' });
+    return;
+  }
+
+  if (viewerId && !activeViewersForSession(req).some((viewer) => viewer.id === viewerId)) {
+    res.status(400).json({ error: 'Viewer must be in the active group' });
+    return;
+  }
+
+  appState.setContinueFrom(activeGroupKey(req), continueKeyFor(type, id), viewerId);
+  res.json({ ok: true });
 });
 
 app.get('/api/ignored', requireAuth, requireViewerGroup, async (req, res) => {

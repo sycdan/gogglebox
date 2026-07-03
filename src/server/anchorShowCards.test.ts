@@ -159,6 +159,17 @@ test('MERGED_CARD mirrors the real continue-watching show card shape (guard inpu
   assert.equal(typeof MERGED_CARD.sourceViewerId, 'string');
 });
 
+test('anchorShowCards leaves a continue-from-overridden card at the chosen viewer\'s episode', async () => {
+  // The group chose to follow Carol's progress (her NextUp E04). Anchoring must
+  // NOT drag the card back to Alice's earliest-unwatched E02.
+  const client = makeClient();
+  const overridden: ContinueWatchingItem = { ...MERGED_CARD, continueFromViewerId: 'carol' };
+  const [card] = await anchorShowCards(client, [overridden], VIEWERS);
+  assert.ok(card);
+  assert.equal(card.id, 'ep04');
+  assert.equal(card.progressPercent, 0.3); // Carol's own resume progress kept
+});
+
 // Production-order divergence (sandbox "Production Order": index order E01..E04
 // but aired order E01,E04,E02,E03). The played-state walk is INDEX order, so
 // even when the merged card points at the latest SxxExx (E04, the furthest

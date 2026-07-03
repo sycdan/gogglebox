@@ -360,6 +360,30 @@ h3 {
   gap: 0.6rem;
 }
 
+.continue-from {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.continue-from span {
+  display: inline;
+  margin-bottom: 0;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  color: #d9c9b9;
+}
+
+.continue-from select {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  padding: 0.35rem 0.6rem;
+  border-radius: 10px;
+  font-size: 0.85rem;
+}
+
 .viewer-pills {
   display: flex;
   align-items: center;

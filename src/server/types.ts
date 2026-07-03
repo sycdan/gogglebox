@@ -79,6 +79,18 @@ export interface ViewerWatchedState {
   watched: boolean;
 }
 
+// One viewer's own resume point for a card (their Resume/NextUp episode for a
+// show, or their movie position). Offered to the client as a "continue from
+// this viewer" choice alongside the default group pick.
+export interface ViewerNextOption {
+  viewerId: string;
+  viewerName: string;
+  itemId: string;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  progressPercent: number;
+}
+
 export interface ContinueWatchingItem extends LibraryItem {
   sourceViewerId: string;
   sourceViewerName: string;
@@ -89,4 +101,10 @@ export interface ContinueWatchingItem extends LibraryItem {
   seasonNumber: number | null;
   episodeNumber: number | null;
   viewerWatched?: ViewerWatchedState[];
+  // When set, the group chose to continue from this viewer's own progress
+  // instead of the default group pick; group anchoring is skipped for the card.
+  continueFromViewerId?: string | null;
+  // Each active viewer's own resume point for this card (only viewers that
+  // have one), so the client can offer a "continue from" picker.
+  viewerNext?: ViewerNextOption[];
 }
