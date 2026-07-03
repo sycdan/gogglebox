@@ -5,9 +5,7 @@ import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
 // across the Movies/Shows kind toggle (the rail must NOT clear or change when
 // the user flips the library kind). The rail is the FIRST .section-block,
 // sitting above the .toolbar.
-// "continue" is negative-lookahead-guarded so the continue-FROM flow name
-// (the viewer picker proof in continue-from.mjs) dispatches only that flow.
-export const match = /continue(?!-from)|watching/i;
+export const match = /continue|watching/i;
 
 export async function run(page, ctx) {
   const { fail, shoot, flowName } = ctx;

@@ -2,17 +2,21 @@ import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
 import { seedMultiViewerMovie, seedStaggeredShow } from '../lib/seed-inprogress.mjs';
 import { makeJellyfin } from '../lib/jellyfin.mjs';
 
-// movie-least-watched flow: proves "Movies resume least-watched first".
+// movie-least-watched flow: proves "same-movie collisions resume the viewer
+// with the least real progress".
 //
 // Backend rule (src/server/continueWatching.ts mergeContinueWatching ->
-// preferLeastAdvanced): when the SAME movie is in-progress for several active-group
-// viewers at different positions, the single group continue-watching card resumes
-// from the LEAST-advanced viewer (LOWEST progressPercent). That viewer is the
-// card's sourceViewer / resume point, so the card's % badge + progress bar must
-// reflect the LOWEST viewer's position — not the most-watched.
+// pickRepresentative): when the SAME movie is in-progress for several
+// active-group viewers at different positions, they all collide on the same
+// movie id (movies have no episode granularity), and the single group card
+// resumes from the viewer with the LEAST real progress (ties: prefer an
+// actual resume position over a NextUp placeholder, then lower %). That
+// viewer becomes the card's sourceViewer / resume point, so nobody's
+// progress gets skipped past or spoiled ahead.
 //
-// Shows are unaffected: a same-series show card still anchors to the EARLIEST
-// not-all-watched episode (preferEarlierShow), proven alongside.
+// Shows are unaffected in kind but different in shape: a series with viewers on
+// DIFFERENT episodes no longer collapses to one anchored card — every distinct
+// episode candidate now gets its OWN rail card (fan-out). Proven alongside.
 export const match = /movie-least-watched|least-watched|resume-least/i;
 
 const rail = (page) => page.locator('.section-block').first();
@@ -33,20 +37,6 @@ async function findCardByExactTitle(page, title) {
     if (h3 === title) return card;
   }
   return cards(page).filter({ hasText: '__no_such_title__' });
-}
-
-// Find the rail card whose `.meta` line CONTAINS `needle` (case-insensitive).
-// Show cards put the EPISODE name in <h3> and the SERIES name in `.meta`
-// ("Series Name • SxxExx"), so a show is located by its series name here, not h3.
-async function findCardByMeta(page, needle) {
-  const n = await cards(page).count();
-  const want = needle.toLowerCase();
-  for (let i = 0; i < n; i += 1) {
-    const card = cards(page).nth(i);
-    const meta = (await card.locator('.meta').first().innerText().catch(() => '')).toLowerCase();
-    if (meta.includes(want)) return card;
-  }
-  return cards(page).filter({ hasText: '__no_such_meta__' });
 }
 
 export async function run(page, ctx) {
@@ -124,34 +114,40 @@ export async function run(page, ctx) {
   const matchesMost = shownPercent !== null && Math.abs(shownPercent - expectMost) <= TOL;
 
   if (matchesLeast && !matchesMost) {
-    console.log('[proof] movie-least-watched: PASS - movie card resumes from the LEAST-watched viewer (' + shownPercent + '% ~= ' + expectLeast + '%).');
+    console.log('[proof] movie-least-watched: PASS - movie card resumes from the viewer with the LEAST real progress (' + shownPercent + '% ~= ' + expectLeast + '%).');
   } else if (matchesMost) {
     fail('movie-least-watched: FAIL - movie card shows the MOST-watched viewer (' + shownPercent + '% ~= ' + expectMost + '%). Expected least-watched ' + expectLeast + '%.');
   } else {
-    fail('movie-least-watched: FAIL - movie card % (' + shownPercent + '%) matches neither least (' + expectLeast + '%) nor most (' + expectMost + '%).');
+    fail('movie-least-watched: FAIL - movie card % (' + shownPercent + '%) matches neither most (' + expectMost + '%) nor least (' + expectLeast + '%).');
   }
 
-  // Shows-unaffected check: find the show card by its .meta (series name lives in
-  // .meta, NOT h3 which holds the episode name) and confirm its SxxExx is the
-  // expected ANCHOR (earliest not-all-watched episode).
+  // Shows fan-out check: viewers staggered across DIFFERENT episodes of one
+  // series must now produce ONE CARD PER DISTINCT EPISODE (no single anchored
+  // card), each showing that candidate's own SxxExx.
   if (showSeed) {
-    const showCard = await findCardByMeta(page, showSeed.seriesName);
-    if (await showCard.count().then((c) => c > 0)) {
-      await showCard.scrollIntoViewIfNeeded().catch(() => {});
-      await shootView(page, flowName + '-03-show-card');
-      const meta = (await showCard.locator('.meta').first().innerText().catch(() => '')).trim();
-      const code = (meta.match(/S\d{2}E\d{2}/) || [])[0] ?? null;
-      console.log('[proof] movie-least-watched: show "' + showSeed.seriesName + '" card meta="' + meta + '" -> code ' + code + ' (expected anchor ' + showSeed.anchor.code + ').');
-      if (code === showSeed.anchor.code) {
-        console.log('[proof] movie-least-watched: PASS - show card unaffected; anchored to earliest not-all-watched episode ' + code + '.');
-      } else {
-        console.error('[proof] movie-least-watched: NOTE - show card code ' + code + ' != expected anchor ' + showSeed.anchor.code + ' (shows-unaffected check).');
+    const expectedCodes = [...new Set((showSeed.perViewer ?? []).map((p) => p.code))];
+    const n = await cards(page).count();
+    const foundCodes = [];
+    for (let i = 0; i < n; i += 1) {
+      const meta = (await cards(page).nth(i).locator('.meta').first().innerText().catch(() => '')).toLowerCase();
+      if (meta.includes(showSeed.seriesName.toLowerCase())) {
+        const code = (meta.match(/S\d{2}E\d{2}/i) || [])[0] ?? null;
+        if (code) foundCodes.push(code.toUpperCase());
       }
-    } else {
-      console.warn('[proof] movie-least-watched: show card "' + showSeed.seriesName + '" not found for the unaffected-check.');
     }
+    console.log(
+      '[proof] movie-least-watched: show "' + showSeed.seriesName + '" fan-out check — expected episode codes ' +
+      JSON.stringify(expectedCodes) + ', found on rail ' + JSON.stringify(foundCodes),
+    );
+    const missing = expectedCodes.filter((c) => !foundCodes.includes(c));
+    if (missing.length === 0 && foundCodes.length >= expectedCodes.length) {
+      console.log('[proof] movie-least-watched: PASS - every staggered viewer\'s episode has its OWN rail card (fan-out), independent of the movie rule.');
+    } else {
+      console.error('[proof] movie-least-watched: NOTE - expected fan-out cards ' + JSON.stringify(expectedCodes) + ' but rail only shows ' + JSON.stringify(foundCodes) + ' (missing ' + JSON.stringify(missing) + ').');
+    }
+    await shootView(page, flowName + '-03-show-fanout');
   } else {
-    console.warn('[proof] movie-least-watched: no show seed; skipping shows-unaffected check.');
+    console.warn('[proof] movie-least-watched: no show seed; skipping show fan-out check.');
   }
 
   console.log('[proof] movie-least-watched: done.');

@@ -1,81 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { continueKeyFor, getProgressPropagationTargets, mergeContinueWatching, pickGroupAnchorIndex } from './continueWatching';
-
-// Build one viewer's per-episode played state: episodes 0..n-1, played === true
-// for index < watchedThrough (i.e. the viewer has finished that many episodes and
-// is currently on episode `watchedThrough`).
-function viewerPlayedThrough(episodeCount: number, watchedThrough: number) {
-  return Array.from({ length: episodeCount }, (_, index) => ({
-    id: `ep-${index}`,
-    played: index < watchedThrough,
-  }));
-}
-
-test('pickGroupAnchorIndex anchors to earliest episode not all active viewers watched (real staggered case)', () => {
-  // 7-episode series. Three ACTIVE viewers have FINISHED different numbers of
-  // episodes and are now on later ones: Alice finished 1 (on ep1), Bob finished
-  // 3 (on ep3), Carol finished 5 (on ep5). The earliest episode someone still
-  // hasn't watched is ep1 (Alice's) -> anchor index 1, NOT ep3 or ep5.
-  const perViewer = [
-    viewerPlayedThrough(7, 1), // Alice on ep1
-    viewerPlayedThrough(7, 3), // Bob on ep3
-    viewerPlayedThrough(7, 5), // Carol on ep5
-  ];
-  assert.equal(pickGroupAnchorIndex(perViewer), 1);
-});
-
-test('pickGroupAnchorIndex: marking the lagging viewer watched on the anchor keeps it stable until all pass it', () => {
-  // Anchor is ep1 (Alice lagging). Alice watches ep1 -> she is now on ep2. The
-  // anchor must move only to the next earliest-not-all-watched, which is ep2
-  // (still Alice; Bob/Carol already past it). It does NOT jump to ep3/ep5.
-  const after = [
-    viewerPlayedThrough(7, 2), // Alice now finished ep1, on ep2
-    viewerPlayedThrough(7, 3), // Bob on ep3
-    viewerPlayedThrough(7, 5), // Carol on ep5
-  ];
-  assert.equal(pickGroupAnchorIndex(after), 2);
-});
-
-test('pickGroupAnchorIndex is stable when a viewer AHEAD of the anchor toggles', () => {
-  // Anchor is ep1 (Alice). Carol (ahead, on ep5) un-watches ep4 -> his next
-  // unwatched moves to ep4, but the GROUP anchor is still ep1 because Alice still
-  // hasn't watched it. Toggling an ahead viewer must NOT move the displayed
-  // episode.
-  const base = pickGroupAnchorIndex([
-    viewerPlayedThrough(7, 1),
-    viewerPlayedThrough(7, 3),
-    viewerPlayedThrough(7, 5),
-  ]);
-  const carol = viewerPlayedThrough(7, 5);
-  carol[4].played = false; // Carol un-watches ep4 (he is ahead of the ep1 anchor)
-  const afterToggle = pickGroupAnchorIndex([
-    viewerPlayedThrough(7, 1),
-    viewerPlayedThrough(7, 3),
-    carol,
-  ]);
-  assert.equal(base, 1);
-  assert.equal(afterToggle, 1);
-});
-
-test('pickGroupAnchorIndex returns -1 when every active viewer has watched every episode', () => {
-  const perViewer = [
-    viewerPlayedThrough(5, 5),
-    viewerPlayedThrough(5, 5),
-    viewerPlayedThrough(5, 5),
-  ];
-  assert.equal(pickGroupAnchorIndex(perViewer), -1);
-});
-
-test('pickGroupAnchorIndex anchors at index 0 when one viewer has watched nothing', () => {
-  const perViewer = [
-    viewerPlayedThrough(5, 0), // a brand-new viewer
-    viewerPlayedThrough(5, 4),
-    viewerPlayedThrough(5, 5),
-  ];
-  assert.equal(pickGroupAnchorIndex(perViewer), 0);
-});
+import { getProgressPropagationTargets, isIgnored, mergeContinueWatching } from './continueWatching';
 
 test('mergeContinueWatching keeps a show resume item when only one viewer has progress', () => {
   const items = mergeContinueWatching([
@@ -108,10 +34,12 @@ test('mergeContinueWatching keeps a show resume item when only one viewer has pr
   assert.equal(items[0].sourceViewerId, 'n');
 });
 
-test('mergeContinueWatching anchors a show to the EARLIEST not-all-watched episode across viewers', () => {
-  // Two viewers at different points in the same series. The group card must
-  // anchor to the EARLIEST episode (the one someone still needs), NOT the
-  // furthest-along viewer, so the displayed episode is a stable group anchor.
+test('mergeContinueWatching fans out DIFFERENT episodes of the same series into SEPARATE cards', () => {
+  // The Ancient-Aliens-style scenario: two viewers on different episodes of one
+  // series. The old model collapsed this to ONE anchored card; the new model
+  // must produce TWO cards, one per distinct episode candidate, so the group
+  // isn't forced through the earliest unwatched episode when both are fine
+  // resuming their own episode.
   const items = mergeContinueWatching([
     {
       id: 'episode-schitt-s02e06',
@@ -159,14 +87,12 @@ test('mergeContinueWatching anchors a show to the EARLIEST not-all-watched episo
     },
   ]);
 
-  assert.equal(items.length, 1);
-  assert.equal(items[0].id, 'episode-schitt-s02e06');
-  assert.equal(items[0].sourceViewerId, 'd');
-  assert.equal(items[0].seasonNumber, 2);
-  assert.equal(items[0].episodeNumber, 6);
+  assert.equal(items.length, 2);
+  const ids = items.map((item) => item.id).sort();
+  assert.deepEqual(ids, ['episode-schitt-s02e06', 'episode-schitt-s03e01']);
 });
 
-test('mergeContinueWatching show anchor is order-independent (no jump from candidate ordering)', () => {
+test('mergeContinueWatching fan-out is order-independent (each distinct episode still gets its own card)', () => {
   const earlier = {
     id: 'episode-ac-s01e03',
     name: 'In a Lonely Place',
@@ -201,14 +127,11 @@ test('mergeContinueWatching show anchor is order-independent (no jump from candi
     sourceViewerName: 'B',
   };
 
-  const forward = mergeContinueWatching([earlier, later]);
-  const reverse = mergeContinueWatching([later, earlier]);
+  const forward = mergeContinueWatching([earlier, later]).map((item) => item.id).sort();
+  const reverse = mergeContinueWatching([later, earlier]).map((item) => item.id).sort();
 
-  assert.equal(forward.length, 1);
-  assert.equal(reverse.length, 1);
-  // The earliest episode wins regardless of input order.
-  assert.equal(forward[0].id, 'episode-ac-s01e03');
-  assert.equal(reverse[0].id, 'episode-ac-s01e03');
+  assert.deepEqual(forward, ['episode-ac-s01e03', 'episode-ac-s01e05']);
+  assert.deepEqual(reverse, ['episode-ac-s01e03', 'episode-ac-s01e05']);
 });
 
 test('mergeContinueWatching orders the rail alphabetically by name with a stable id tie-break, deterministically', () => {
@@ -300,9 +223,12 @@ test('mergeContinueWatching orders the rail alphabetically by name with a stable
 });
 
 test('mergeContinueWatching resumes a shared movie from the LEAST-watched viewer', () => {
-  // Same movie in progress for three viewers at different points. The card must
-  // resume from the LEAST-advanced viewer (lowest progressPercent), so the group
-  // still has the most movie left to watch, and that viewer becomes the source.
+  // Same movie in progress for three viewers at different points. A movie
+  // id-group collapses to one card (movies have no episode granularity), and
+  // pickRepresentative's tie-break (prefer real progress over a placeholder,
+  // then LEAST progress wins) means the least-advanced viewer's position
+  // becomes the card's resume point and source, so nobody's progress gets
+  // skipped past or spoiled ahead.
   const base = {
     name: 'Heat',
     type: 'movie' as const,
@@ -352,17 +278,17 @@ test('mergeContinueWatching resumes a shared movie from the LEAST-watched viewer
   ]) {
     const items = mergeContinueWatching(order);
     assert.equal(items.length, 1);
-    assert.equal(items[0].sourceViewerId, 'b'); // least-watched viewer wins
-    assert.equal(items[0].progressPercent, 0.12); // resume from the lowest progress
+    assert.equal(items[0].sourceViewerId, 'b'); // least real progress wins
+    assert.equal(items[0].progressPercent, 0.12);
     assert.equal(items[0].playbackPositionTicks, 120_000_000);
   }
 });
 
-test('mergeContinueWatching show selection is NOT affected by the least-watched movie rule', () => {
-  // Same series, two viewers. The earlier-episode viewer is the MORE-watched one;
-  // the later-episode viewer is the LESS-watched one. The show must still anchor
-  // to the EARLIEST episode (air order), proving the least-progress movie rule
-  // does not bleed into show ordering.
+test('mergeContinueWatching keeps shows and movies fanned out/collapsed independently (no cross-bleed)', () => {
+  // Same series, two viewers on DIFFERENT episodes: two cards (fan-out).
+  // A same movie id from two viewers still collapses to one card resuming the
+  // least-advanced viewer's position — proving movie collapsing is unaffected
+  // by the show fan-out change.
   const base = {
     type: 'show' as const,
     overview: '',
@@ -382,7 +308,7 @@ test('mergeContinueWatching show selection is NOT affected by the least-watched 
     id: 'episode-bear-s01e02',
     name: 'Hands',
     playbackPositionTicks: 900_000_000,
-    progressPercent: 0.9, // more-watched, but earliest episode
+    progressPercent: 0.9,
     seasonNumber: 1,
     episodeNumber: 2,
     sourceViewerId: 'a',
@@ -393,7 +319,7 @@ test('mergeContinueWatching show selection is NOT affected by the least-watched 
     id: 'episode-bear-s02e01',
     name: 'Beef',
     playbackPositionTicks: 100_000_000,
-    progressPercent: 0.05, // least-watched, but later episode
+    progressPercent: 0.05,
     seasonNumber: 2,
     episodeNumber: 1,
     sourceViewerId: 'b',
@@ -404,13 +330,13 @@ test('mergeContinueWatching show selection is NOT affected by the least-watched 
   const reverse = mergeContinueWatching([laterLowProgress, earlierHighProgress]);
 
   for (const items of [forward, reverse]) {
-    assert.equal(items.length, 1);
-    assert.equal(items[0].id, 'episode-bear-s01e02'); // earliest episode, NOT least-progress
-    assert.equal(items[0].sourceViewerId, 'a');
+    assert.equal(items.length, 2);
+    const ids = items.map((item) => item.id).sort();
+    assert.deepEqual(ids, ['episode-bear-s01e02', 'episode-bear-s02e01']);
   }
 });
 
-// Shared show base for the continue-from override tests: an out-of-order show
+// Shared show base for the ignore-scope tests: an out-of-order show
 // (Ancient Aliens style) where episode order doesn't matter to the group.
 const anthologyBase = {
   type: 'show' as const,
@@ -427,7 +353,6 @@ const anthologyBase = {
   seriesName: 'Ancient Aliens',
 };
 // A has seen eps 1-20 -> NextUp ep 21. B has seen up to ep 9 -> NextUp ep 10.
-// C has seen nothing -> no candidate at all.
 const viewerAOnEp21 = {
   ...anthologyBase,
   id: 'episode-aa-s01e21',
@@ -451,75 +376,73 @@ const viewerBOnEp10 = {
   sourceViewerName: 'B',
 };
 
-test('mergeContinueWatching continue-from override follows the chosen viewer, not the earliest episode', () => {
-  const items = mergeContinueWatching(
-    [viewerAOnEp21, viewerBOnEp10],
-    { [continueKeyFor('show', 'series-ancient-aliens')]: 'b' },
-  );
-
-  assert.equal(items.length, 1);
-  assert.equal(items[0].id, 'episode-aa-s01e10'); // B's own next episode wins
-  assert.equal(items[0].sourceViewerId, 'b');
-  assert.equal(items[0].continueFromViewerId, 'b');
-});
-
-test('mergeContinueWatching override naming a viewer with no candidate falls back to the default pick', () => {
-  // Viewer 'c' has watched nothing, so she contributed no candidate: the card
-  // must fall back to the default earliest-episode pick, unmarked as overridden.
-  const items = mergeContinueWatching(
-    [viewerAOnEp21, viewerBOnEp10],
-    { [continueKeyFor('show', 'series-ancient-aliens')]: 'c' },
-  );
-
-  assert.equal(items.length, 1);
-  assert.equal(items[0].id, 'episode-aa-s01e10'); // earliest episode among candidates
-  assert.equal(items[0].continueFromViewerId, null);
-});
-
-test('mergeContinueWatching attaches every viewer\'s own resume point as viewerNext options', () => {
+test('mergeContinueWatching produces one card per viewer candidate for an anthology show (no forced earliest-episode)', () => {
   const items = mergeContinueWatching([viewerAOnEp21, viewerBOnEp10]);
 
-  assert.equal(items.length, 1);
-  assert.equal(items[0].continueFromViewerId, null);
-  assert.deepEqual(
-    items[0].viewerNext?.map((option) => ({ viewerId: option.viewerId, itemId: option.itemId })),
-    [
-      { viewerId: 'a', itemId: 'episode-aa-s01e21' },
-      { viewerId: 'b', itemId: 'episode-aa-s01e10' },
-    ],
-  );
+  assert.equal(items.length, 2);
+  const ids = items.map((item) => item.id).sort();
+  assert.deepEqual(ids, ['episode-aa-s01e10', 'episode-aa-s01e21']);
 });
 
-test('mergeContinueWatching movie override resumes from the chosen viewer instead of the least-watched', () => {
-  const base = {
-    name: 'Heat',
-    type: 'movie' as const,
-    overview: '',
-    year: 1995,
-    runtimeMinutes: 170,
-    rating: null,
-    genres: ['Crime'],
-    officialRating: null,
-    imageUrl: null,
-    backdropUrl: null,
-    playable: true,
-    seriesId: null,
-    seriesName: null,
-    seasonNumber: null,
-    episodeNumber: null,
-  };
-  const items = mergeContinueWatching(
-    [
-      { ...base, id: 'movie-heat', playbackPositionTicks: 900_000_000, progressPercent: 0.9, sourceViewerId: 'a', sourceViewerName: 'A' },
-      { ...base, id: 'movie-heat', playbackPositionTicks: 120_000_000, progressPercent: 0.12, sourceViewerId: 'b', sourceViewerName: 'B' },
-    ],
-    { [continueKeyFor('movie', 'movie-heat')]: 'a' },
-  );
+test('isIgnored: ignoring one episode-scoped candidate hides only that card, NOT the other episode of the same series', () => {
+  // The exact scenario from the brief: ignore ep1 (viewer B's ep10 in this
+  // fixture) at episode scope. The OTHER episode-candidate for the same series
+  // must remain visible, and no "replacement" episode should appear (there is
+  // none to replace it with — fan-out already produced independent cards).
+  const items = mergeContinueWatching([viewerAOnEp21, viewerBOnEp10]);
+  assert.equal(items.length, 2);
 
-  assert.equal(items.length, 1);
-  assert.equal(items[0].sourceViewerId, 'a');
-  assert.equal(items[0].progressPercent, 0.9);
-  assert.equal(items[0].continueFromViewerId, 'a');
+  const entries = [
+    { key: 'episode-aa-s01e10', matchSeriesId: false, label: 'Ancient Aliens · S01E10', ignoredAt: Date.now() },
+  ];
+  const visible = items.filter((item) => !isIgnored(entries, item));
+
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0].id, 'episode-aa-s01e21');
+});
+
+test('isIgnored: whole-show scope hides every CURRENT candidate for that series', () => {
+  const items = mergeContinueWatching([viewerAOnEp21, viewerBOnEp10]);
+  const entries = [
+    { key: 'series-ancient-aliens', matchSeriesId: true, label: 'Ancient Aliens', ignoredAt: Date.now() },
+  ];
+  const visible = items.filter((item) => !isIgnored(entries, item));
+  assert.equal(visible.length, 0);
+});
+
+test('isIgnored: whole-show scope also hides a SUBSEQUENTLY produced candidate for that series', () => {
+  // Simulate: the show was ignored earlier; a fresh merge later produces a NEW
+  // episode candidate (e.g. viewer B advanced to ep11). It must still be hidden.
+  const laterCandidate = {
+    ...viewerBOnEp10,
+    id: 'episode-aa-s01e11',
+    name: 'Episode 11',
+    episodeNumber: 11,
+  };
+  const items = mergeContinueWatching([viewerAOnEp21, laterCandidate]);
+  const entries = [
+    { key: 'series-ancient-aliens', matchSeriesId: true, label: 'Ancient Aliens', ignoredAt: Date.now() },
+  ];
+  const visible = items.filter((item) => !isIgnored(entries, item));
+  assert.equal(visible.length, 0);
+});
+
+test('isIgnored: unignoring (removing the entry) un-hides the card', () => {
+  const items = mergeContinueWatching([viewerBOnEp10]);
+  const ignored = [
+    { key: 'episode-aa-s01e10', matchSeriesId: false, label: 'Ancient Aliens · S01E10', ignoredAt: Date.now() },
+  ];
+  assert.equal(items.filter((item) => !isIgnored(ignored, item)).length, 0);
+
+  const unignored: typeof ignored = [];
+  assert.equal(items.filter((item) => !isIgnored(unignored, item)).length, 1);
+});
+
+test('isIgnored: movie scope hides only the exact movie id, unaffected by matchSeriesId', () => {
+  const movieItem = { type: 'movie', id: 'movie-heat', seriesId: null };
+  const entries = [{ key: 'movie-heat', matchSeriesId: false, label: 'Heat', ignoredAt: Date.now() }];
+  assert.equal(isIgnored(entries, movieItem), true);
+  assert.equal(isIgnored(entries, { type: 'movie', id: 'movie-other', seriesId: null }), false);
 });
 
 test('getProgressPropagationTargets updates everyone except the source viewer', () => {
@@ -529,11 +452,11 @@ test('getProgressPropagationTargets updates everyone except the source viewer', 
   assert.deepEqual(targets, ['d', 'j']);
 });
 
-test('mergeContinueWatching prefers resumable show progress over next-up placeholder for same series', () => {
+test('mergeContinueWatching prefers resumable show progress over next-up placeholder for the SAME exact episode', () => {
   const items = mergeContinueWatching([
     {
-      id: 'episode-schitt-s03e06',
-      name: 'Motel Review',
+      id: 'episode-schitt-s03e05',
+      name: 'Rooms by the Hour',
       type: 'show',
       overview: '',
       year: 2018,
@@ -549,7 +472,7 @@ test('mergeContinueWatching prefers resumable show progress over next-up placeho
       seriesId: 'series-schitts-creek',
       seriesName: "Schitt's Creek",
       seasonNumber: 3,
-      episodeNumber: 6,
+      episodeNumber: 5,
       sourceViewerId: 'n',
       sourceViewerName: 'N',
     },
@@ -572,11 +495,13 @@ test('mergeContinueWatching prefers resumable show progress over next-up placeho
       seriesName: "Schitt's Creek",
       seasonNumber: 3,
       episodeNumber: 5,
-      sourceViewerId: 'n',
-      sourceViewerName: 'N',
+      sourceViewerId: 'd',
+      sourceViewerName: 'D',
     },
   ]);
 
   assert.equal(items.length, 1);
   assert.equal(items[0].id, 'episode-schitt-s03e05');
+  assert.equal(items[0].sourceViewerId, 'd');
+  assert.equal(items[0].progressPercent, 0.29);
 });

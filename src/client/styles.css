@@ -360,28 +360,29 @@ h3 {
   gap: 0.6rem;
 }
 
-.continue-from {
+.ignore-flyout {
+  position: relative;
+}
+
+.ignore-flyout-menu {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 5;
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.6rem;
-}
-
-.continue-from span {
-  display: inline;
-  margin-bottom: 0;
-  font-size: 0.8rem;
-  white-space: nowrap;
-  color: #d9c9b9;
-}
-
-.continue-from select {
-  flex: 1;
-  width: auto;
-  min-width: 0;
-  padding: 0.35rem 0.6rem;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem;
   border-radius: 10px;
-  font-size: 0.85rem;
+  background: #211a15;
+  border: 1px solid rgba(217, 201, 185, 0.25);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  min-width: 180px;
+}
+
+.ignore-flyout-menu button {
+  white-space: nowrap;
+  text-align: left;
 }
 
 .viewer-pills {

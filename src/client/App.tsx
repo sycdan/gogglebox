@@ -60,9 +60,13 @@ interface PlaybackProgressResponse {
   played: boolean;
 }
 
+// One ignored entry as returned by the server (see IgnoreEntry / GET
+// /api/ignored): key is the exact id that was ignored (episode/series/movie id
+// depending on scope), label is the display string captured at ignore-time.
 interface IgnoredItem {
-  id: string;
-  title: string;
+  key: string;
+  label: string;
+  ignoredAt: number;
 }
 
 interface ViewerWatchedState {
@@ -70,17 +74,6 @@ interface ViewerWatchedState {
   viewerName: string;
   avatarUrl?: string | null;
   watched: boolean;
-}
-
-// One viewer's own resume point for a card — a "continue from this viewer"
-// choice offered alongside the default group pick.
-interface ViewerNextOption {
-  viewerId: string;
-  viewerName: string;
-  itemId: string;
-  seasonNumber: number | null;
-  episodeNumber: number | null;
-  progressPercent: number;
 }
 
 interface ContinueWatchingItem extends LibraryItem {
@@ -93,8 +86,45 @@ interface ContinueWatchingItem extends LibraryItem {
   seasonNumber: number | null;
   episodeNumber: number | null;
   viewerWatched?: ViewerWatchedState[];
-  continueFromViewerId?: string | null;
-  viewerNext?: ViewerNextOption[];
+}
+
+// One scoped ignore choice sent to POST /api/ignored: `key` is the exact id to
+// match (episode id, series id, or movie id, depending on scope), matchSeriesId
+// is true only for whole-show scope, and label is the display string shown in
+// the Ignored panel.
+interface IgnorePayload {
+  key: string;
+  matchSeriesId: boolean;
+  label: string;
+}
+
+// A plain library item (recs/search rail) has no per-episode concept — it IS
+// the series (or the movie), so ignoring it is always whole-show/movie scope.
+function ignorePayloadForLibraryItem(item: LibraryItem): IgnorePayload {
+  return { key: item.id, matchSeriesId: item.type === 'show', label: item.name };
+}
+
+// The two scoped ignore choices offered on a continue-watching SHOW card: the
+// exact episode (hides only this one candidate) or the whole show (hides every
+// past/future episode candidate for this series).
+function ignorePayloadsForShowCard(item: ContinueWatchingItem): { episode: IgnorePayload; show: IgnorePayload | null } {
+  const code = episodeCode(item.seasonNumber, item.episodeNumber);
+  const seriesLabel = item.seriesName ?? item.name;
+  return {
+    episode: {
+      key: item.id,
+      matchSeriesId: false,
+      label: `${seriesLabel}${code ? ` · ${code}` : ''} ${item.name}`.trim(),
+    },
+    show: item.seriesId
+      ? { key: item.seriesId, matchSeriesId: true, label: seriesLabel }
+      : null,
+  };
+}
+
+// The single ignore choice offered on a continue-watching MOVIE card.
+function ignorePayloadForMovieCard(item: ContinueWatchingItem): IgnorePayload {
+  return { key: item.id, matchSeriesId: false, label: item.name };
 }
 
 interface SessionResponse {
@@ -230,56 +260,59 @@ function RailPager({
   );
 }
 
-// Compact "S01E10 · 35%" summary of one viewer's resume point for the picker.
-function viewerNextSummary(option: ViewerNextOption): string {
-  const parts: string[] = [];
-  if (option.seasonNumber && option.episodeNumber) {
-    parts.push(`S${String(option.seasonNumber).padStart(2, '0')}E${String(option.episodeNumber).padStart(2, '0')}`);
+// Compact "S01E10" episode code for a show card's ignore-flyout label.
+function episodeCode(seasonNumber: number | null, episodeNumber: number | null): string {
+  if (!seasonNumber || !episodeNumber) {
+    return '';
   }
-  if (option.progressPercent > 0) {
-    parts.push(`${Math.round(option.progressPercent * 100)}%`);
-  }
-  return parts.join(' · ');
+  return `S${String(seasonNumber).padStart(2, '0')}E${String(episodeNumber).padStart(2, '0')}`;
 }
 
-// "Continue from" picker on a continue-watching card: default group pick vs a
-// specific viewer's own progress. Hidden when there is nothing to choose (one
-// option that already matches the displayed card and no override in place).
-function ContinueFromPicker({
+// "Ignore" button on a continue-watching card, with a small local-state popover
+// offering scoped choices instead of a single blanket ignore. A movie card gets
+// one choice ("Ignore movie"); a show card gets two ("Ignore this episode" /
+// "Ignore this show"). Click a choice to submit and close; click elsewhere on
+// the card (or Ignore again) to toggle closed.
+function IgnoreFlyout({
   item,
-  onChange,
+  onIgnore,
 }: {
   item: ContinueWatchingItem;
-  onChange: (viewerId: string) => void;
+  onIgnore: (payload: IgnorePayload) => void;
 }) {
-  const options = item.viewerNext ?? [];
-  const hasChoice = options.length > 1
-    || Boolean(item.continueFromViewerId)
-    || (options.length === 1 && options[0].itemId !== item.id);
-  if (!hasChoice) {
-    return null;
+  const [open, setOpen] = useState(false);
+
+  function choose(payload: IgnorePayload) {
+    setOpen(false);
+    onIgnore(payload);
   }
 
+  if (item.type === 'movie') {
+    return (
+      <div className="ignore-flyout">
+        <button className="ghost" onClick={() => setOpen((current) => !current)} type="button">Ignore</button>
+        {open ? (
+          <div className="ignore-flyout-menu">
+            <button type="button" onClick={() => choose(ignorePayloadForMovieCard(item))}>Ignore movie</button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  const { episode, show } = ignorePayloadsForShowCard(item);
   return (
-    <label className="continue-from">
-      <span>Continue from</span>
-      <select
-        value={item.continueFromViewerId ?? ''}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">
-          Group pick ({item.type === 'show' ? 'earliest unseen' : 'least watched'})
-        </option>
-        {options.map((option) => {
-          const summary = viewerNextSummary(option);
-          return (
-            <option key={option.viewerId} value={option.viewerId}>
-              {option.viewerName}{summary ? ` — ${summary}` : ''}
-            </option>
-          );
-        })}
-      </select>
-    </label>
+    <div className="ignore-flyout">
+      <button className="ghost" onClick={() => setOpen((current) => !current)} type="button">Ignore</button>
+      {open ? (
+        <div className="ignore-flyout-menu">
+          <button type="button" onClick={() => choose(episode)}>Ignore this episode</button>
+          {show ? (
+            <button type="button" onClick={() => choose(show)}>Ignore this show</button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -424,17 +457,15 @@ export function App() {
     }
   }
 
-  // The id used to ignore an item: a show's series id, otherwise the item id.
-  function ignorableId(item: { type: LibraryKind; id: string; seriesId?: string | null }): string {
-    return item.type === 'show' && item.seriesId ? item.seriesId : item.id;
+  async function ignore(item: LibraryItem) {
+    await submitIgnore(ignorePayloadForLibraryItem(item));
   }
 
-  async function ignore(item: LibraryItem | ContinueWatchingItem) {
-    const itemId = ignorableId(item);
+  async function submitIgnore(payload: IgnorePayload) {
     try {
-      await apiRequest<{ itemIds: string[] }>('/api/ignored', {
+      await apiRequest<{ items: IgnoredItem[] }>('/api/ignored', {
         method: 'POST',
-        body: JSON.stringify({ itemId }),
+        body: JSON.stringify(payload),
       });
       if (session) {
         await Promise.all([
@@ -448,9 +479,9 @@ export function App() {
     }
   }
 
-  async function unignore(itemId: string) {
+  async function unignore(key: string) {
     try {
-      await apiRequest<{ itemIds: string[] }>(`/api/ignored/${itemId}`, {
+      await apiRequest<{ items: IgnoredItem[] }>(`/api/ignored/${key}`, {
         method: 'DELETE',
       });
       if (session) {
@@ -728,38 +759,18 @@ export function App() {
         method: 'POST',
         body: JSON.stringify({ viewerId: viewer.viewerId, watched: nextWatched }),
       });
-      // The server re-runs resolveWatchedCards on /api/continue-watching, so a
-      // refetch is what makes the card advance (show -> next episode) or drop
-      // (movie / last episode) live, without a reload. The optimistic flip above
-      // keeps the pill snappy; this refetch is the source of truth. loadContinueWatching
-      // sequences requests so rapid toggles resolve to the latest result.
+      // /api/continue-watching re-reads Jellyfin's own live Resume/NextUp per
+      // viewer, so a refetch is what makes the card advance (show -> next
+      // episode) or drop (movie / last episode) live, without a reload. The
+      // optimistic flip above keeps the pill snappy; this refetch is the
+      // source of truth. loadContinueWatching sequences requests so rapid
+      // toggles resolve to the latest result.
       if (session) {
         await loadContinueWatching(session);
       }
     } catch (nextError) {
       applyWatched(viewer.watched);
       setError(nextError instanceof Error ? nextError.message : 'Could not update watch state');
-    }
-  }
-
-  // Choose which viewer's progress a continue-watching card follows (or ''
-  // to revert to the default group pick). Persisted server-side per group;
-  // the refetch re-renders the card at the chosen viewer's episode/position.
-  async function setContinueSource(item: ContinueWatchingItem, viewerId: string) {
-    try {
-      await apiRequest('/api/continue-watching/source', {
-        method: 'POST',
-        body: JSON.stringify({
-          type: item.type,
-          id: item.type === 'show' && item.seriesId ? item.seriesId : item.id,
-          viewerId: viewerId || null,
-        }),
-      });
-      if (session) {
-        await loadContinueWatching(session);
-      }
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not change continue-from viewer');
     }
   }
 
@@ -1435,7 +1446,6 @@ export function App() {
                 <div className="progress-track" aria-hidden="true">
                   <span className="progress-fill" style={{ width: `${Math.max(2, Math.round(item.progressPercent * 100))}%` }} />
                 </div>
-                <ContinueFromPicker item={item} onChange={(viewerId) => void setContinueSource(item, viewerId)} />
               </div>
               <div className="row spread">
                 <div className="play-row">
@@ -1460,7 +1470,7 @@ export function App() {
                     ))}
                   </div>
                 </div>
-                <button className="ghost" onClick={() => void ignore(item)} type="button">Ignore</button>
+                <IgnoreFlyout item={item} onIgnore={(payload) => void submitIgnore(payload)} />
               </div>
             </article>
           ))}
@@ -1643,13 +1653,13 @@ export function App() {
             ) : (
               <div className="episode-list">
                 {ignoredItems.map((item) => (
-                  <article className="episode-card" key={`ignored-${item.id}`}>
+                  <article className="episode-card" key={`ignored-${item.key}`}>
                     <div>
-                      <h3>{item.title || item.id}</h3>
+                      <h3>{item.label || item.key}</h3>
                       <p className="meta">Hidden from continue-watching, recommendations and search.</p>
                     </div>
                     <div className="row">
-                      <button onClick={() => void unignore(item.id)} type="button">Unignore</button>
+                      <button onClick={() => void unignore(item.key)} type="button">Unignore</button>
                     </div>
                   </article>
                 ))}

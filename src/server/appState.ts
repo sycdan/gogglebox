@@ -1,6 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// One ignored item/scope for a group. `key` is the exact id being matched
+// (episode id, series id, or movie id, depending on scope). `matchSeriesId`
+// is true only for whole-show scope: it additionally hides every OTHER episode
+// of that series (matched via item.seriesId), not just the item at `key`
+// itself. `label` is the display string captured at ignore-time (from the
+// card that was ignored) so the client never needs a separate name lookup.
+// `ignoredAt` is Date.now() ms, used to order the ignored panel most-recent-first.
+export interface IgnoreEntry {
+  key: string;
+  matchSeriesId: boolean;
+  label: string;
+  ignoredAt: number;
+}
+
 // Stage A/B: the persisted record for a group's gbx-owned player user. Holds the
 // minted Jellyfin user id AND the member ids (the active viewers' Jellyfin user
 // ids) to fan watched-state out to. IDs ONLY — passwords are never stored.
@@ -25,11 +39,11 @@ export interface CachedEffectiveConfig {
 }
 
 // Writable runtime state — distinct from the read-only config.json. Stores a map
-// of groupKey -> ignored item ids (shows and movies). Lives at a host-mounted
-// location so it survives redeploys.
+// of groupKey -> ignored item entries (shows, single episodes, and movies).
+// Lives at a host-mounted location so it survives redeploys.
 interface AppStateFile {
-  ignoredItems?: Record<string, string[]>;
-  // Legacy key (pre-rename). Read as a fallback; never written.
+  ignoredItems?: Record<string, IgnoreEntry[] | string[]>;
+  // Legacy key (pre-rename, flat string[] shape). Read as a fallback; never written.
   ignoredShows?: Record<string, string[]>;
   // Stage A/B: map of groupKey -> the gbx-owned player user record. A Stage A
   // state file may have stored a bare string (the jellyfinUserId); normalizeGroupPlayerUsers
@@ -43,10 +57,6 @@ interface AppStateFile {
   // The cached effective config + provenance (see CachedEffectiveConfig). Re-
   // derived on startup when the source hash or package version changed.
   effectiveConfig?: CachedEffectiveConfig;
-  // Per group, which viewer's progress a continue-watching card follows:
-  // groupKey -> (continueKey e.g. "show:<seriesId>" / "movie:<id>" -> viewerId).
-  // Absent entry = default group pick (earliest not-all-watched / least-watched).
-  continueFrom?: Record<string, Record<string, string>>;
 }
 
 // Normalize the groupAliases map: drop non-string / empty entries so callers
@@ -103,10 +113,41 @@ function readState(filePath: string): AppStateFile {
   }
 }
 
+// One legacy flat id (from `ignoredItems: string[]` or the even-older
+// `ignoredShows`) becomes a whole-series-scoped entry: `matchSeriesId: true`
+// preserves old behavior exactly, because the OLD client `ignorableId` helper
+// always stored a show's SERIES id (never an episode id), so every legacy
+// show-ignore was already whole-series scope. `ignoredAt: 0` sorts legacy
+// entries last (oldest) under "most recent first", since we don't know their
+// real time.
+function migrateLegacyEntry(id: string): IgnoreEntry {
+  return { key: id, matchSeriesId: true, label: id, ignoredAt: 0 };
+}
+
+// Normalize one group's stored ignore list to the rich IgnoreEntry[] shape,
+// migrating the legacy flat string[] shape losslessly.
+function normalizeIgnoreEntries(raw: IgnoreEntry[] | string[] | undefined): IgnoreEntry[] {
+  if (!raw) {
+    return [];
+  }
+  return raw.map((entry) => (typeof entry === 'string' ? migrateLegacyEntry(entry) : entry));
+}
+
 // Prefer the new key; fall back to the legacy `ignoredShows` key so a
 // pre-rename state file keeps working with zero data loss until its first write.
-function ignoredItemsFrom(state: AppStateFile): Record<string, string[]> {
-  return state.ignoredItems ?? state.ignoredShows ?? {};
+// Normalizes every group's entries to the rich IgnoreEntry[] shape.
+function ignoredItemsFrom(state: AppStateFile): Record<string, IgnoreEntry[]> {
+  const raw = state.ignoredItems ?? state.ignoredShows ?? {};
+  const out: Record<string, IgnoreEntry[]> = {};
+  for (const [groupKey, entries] of Object.entries(raw)) {
+    out[groupKey] = normalizeIgnoreEntries(entries as IgnoreEntry[] | string[]);
+  }
+  return out;
+}
+
+// Most-recent-first: higher ignoredAt sorts first.
+function sortMostRecentFirst(entries: IgnoreEntry[]): IgnoreEntry[] {
+  return [...entries].sort((a, b) => b.ignoredAt - a.ignoredAt);
 }
 
 // Write-then-rename so a concurrent reader never observes a truncated file.
@@ -126,58 +167,42 @@ function writeState(filePath: string, state: AppStateFile, patch: Partial<AppSta
 export class AppState {
   constructor(private readonly filePath: string = STATE_PATH) {}
 
-  getIgnoredItems(groupKey: string): string[] {
+  // A group's ignore entries, most-recent-first (highest ignoredAt first;
+  // migrated legacy entries carry ignoredAt: 0 and so sort last).
+  getIgnoreEntries(groupKey: string): IgnoreEntry[] {
     const state = readState(this.filePath);
-    return ignoredItemsFrom(state)[groupKey] ?? [];
+    return sortMostRecentFirst(ignoredItemsFrom(state)[groupKey] ?? []);
   }
 
-  ignoreItem(groupKey: string, itemId: string): string[] {
+  // Upsert an ignore entry: a repeat ignore of the same `key` bumps its
+  // ignoredAt to now and refreshes label/matchSeriesId rather than duplicating.
+  // Returns the group's remaining entries, most-recent-first.
+  ignoreItem(
+    groupKey: string,
+    entry: { key: string; matchSeriesId: boolean; label: string },
+  ): IgnoreEntry[] {
     const state = readState(this.filePath);
     const ignoredItems = ignoredItemsFrom(state);
-    const current = new Set(ignoredItems[groupKey] ?? []);
-    current.add(itemId);
-    ignoredItems[groupKey] = [...current];
+    const current = (ignoredItems[groupKey] ?? []).filter((existing) => existing.key !== entry.key);
+    current.push({ ...entry, ignoredAt: Date.now() });
+    ignoredItems[groupKey] = current;
     writeState(this.filePath, state, { ignoredItems });
-    return ignoredItems[groupKey];
+    return sortMostRecentFirst(ignoredItems[groupKey]);
   }
 
-  unignoreItem(groupKey: string, itemId: string): string[] {
+  // Remove an ignore entry by key, pruning the group when it becomes empty.
+  // Returns the group's remaining entries, most-recent-first.
+  unignoreItem(groupKey: string, key: string): IgnoreEntry[] {
     const state = readState(this.filePath);
     const ignoredItems = ignoredItemsFrom(state);
-    const next = (ignoredItems[groupKey] ?? []).filter((id) => id !== itemId);
+    const next = (ignoredItems[groupKey] ?? []).filter((entry) => entry.key !== key);
     if (next.length > 0) {
       ignoredItems[groupKey] = next;
     } else {
       delete ignoredItems[groupKey];
     }
     writeState(this.filePath, state, { ignoredItems });
-    return next;
-  }
-
-  // The group's "continue from viewer" overrides: continueKey -> viewerId.
-  getContinueFrom(groupKey: string): Record<string, string> {
-    const state = readState(this.filePath);
-    return state.continueFrom?.[groupKey] ?? {};
-  }
-
-  // Persist that a group's card follows one viewer's progress. Passing a null
-  // viewerId clears the override (back to the default group pick).
-  setContinueFrom(groupKey: string, continueKey: string, viewerId: string | null): Record<string, string> {
-    const state = readState(this.filePath);
-    const continueFrom = { ...(state.continueFrom ?? {}) };
-    const group = { ...(continueFrom[groupKey] ?? {}) };
-    if (viewerId) {
-      group[continueKey] = viewerId;
-    } else {
-      delete group[continueKey];
-    }
-    if (Object.keys(group).length > 0) {
-      continueFrom[groupKey] = group;
-    } else {
-      delete continueFrom[groupKey];
-    }
-    writeState(this.filePath, state, { continueFrom });
-    return group;
+    return sortMostRecentFirst(next);
   }
 
   // The persisted gbx-owned Jellyfin user id for a group, or undefined if none

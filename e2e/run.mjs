@@ -33,7 +33,6 @@ import { createHarness } from './lib/harness.mjs';
 import { startSession } from './lib/session.mjs';
 import * as playerFocus from './flows/player-focus.mjs';
 import * as continueWatching from './flows/continue-watching.mjs';
-import * as continueFrom from './flows/continue-from.mjs';
 import * as recommendations from './flows/recommendations.mjs';
 import * as ignoreShows from './flows/ignore-shows.mjs';
 import * as search from './flows/search.mjs';
@@ -49,7 +48,7 @@ import * as groupAlias from './flows/group-alias.mjs';
 
 // Flow dispatch order — preserved from the original single-file script. Each
 // flow whose `match` matches the flowName runs; multiple may fire for one name.
-const flows = [groupAlias, groupPin, playerHandoff, playerFocus, continueWatching, continueFrom, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode, railPagination];
+const flows = [groupAlias, groupPin, playerHandoff, playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode, railPagination];
 
 const url = process.env.PROOF_URL ?? 'http://client:5173';
 const username = process.env.PORTAL_USERNAME ?? '';

@@ -514,80 +514,64 @@ export async function run(page, ctx) {
     }
   }
 
-  // Step 6 (stable group anchor - regression for the "episode jumps" bug): the
-  // staggered fixture puts 3 viewers on DIFFERENT episodes. The card must show
-  // the EARLIEST episode, and toggling a viewer who is AHEAD of the anchor must
-  // NOT change the displayed episode (it only flips that viewer's pill).
+  // Step 6 (fan-out, not a single stable anchor): the staggered fixture puts 3
+  // viewers on DIFFERENT episodes of one series. Continue-watching no longer
+  // collapses this to one anchored card — every distinct episode candidate
+  // gets its OWN rail card (see show-cross-episode.mjs for the dedicated
+  // fan-out + scoped-ignore proof). Here we just confirm toggling a pill on ONE
+  // of those episode-cards only ever affects that card (never jumps to a
+  // different episode's card, and never bleeds into the other episode-cards
+  // for the same series).
   if (!staggeredSeed?.seriesName) {
     console.warn('[proof] mark-all-watched: no staggered-show seed; skipping step 6.');
   } else {
     const seriesName = staggeredSeed.seriesName;
-    const anchorCode = staggeredSeed.anchor.code;
+    const findAll = (snap) => snap.filter((c) => isShowMeta(c.meta) && seriesOf(c.meta) === seriesName);
     cur = await snapshotRail(page);
-    const findIdx = (snap) => snap.findIndex((c) => isShowMeta(c.meta) && seriesOf(c.meta) === seriesName);
-    let idx = findIdx(cur);
-    if (idx === -1) {
+    const seriesCardsBefore = findAll(cur);
+    if (seriesCardsBefore.length === 0) {
       console.error('[proof] mark-all-watched: step 6 - staggered show ' + JSON.stringify(seriesName) + ' not on the rail.');
     } else {
-      const start = cur[idx];
+      console.log(
+        '[proof] mark-all-watched: step 6 fan-out cards for ' + JSON.stringify(seriesName) + ' = ' +
+        JSON.stringify(seriesCardsBefore.map((c) => c.meta)),
+      );
+      const start = seriesCardsBefore[0];
+      const idx = cur.findIndex((c) => c.name === start.name && c.meta === start.meta);
       let card = cards(page).nth(idx);
       await card.scrollIntoViewIfNeeded();
-      // The active household group is a SUBSET of all seeded users. Derive the
-      // expected anchor from the viewers actually shown on THIS card (pill
-      // titles carry the viewer name), then take the earliest seeded episode
-      // among that active group - that is the earliest-not-all-watched episode.
-      const titles = await card.locator('.viewer-pill').evaluateAll((els) => els.map((e) => e.getAttribute('title') || ''));
-      const activeNames = titles.map((t) => t.split('—')[0].split('-')[0].trim()).filter(Boolean);
-      const codeFor = new Map((staggeredSeed.perViewer ?? []).map((p) => [p.userName, p.code]));
-      const activeCodes = activeNames.map((n) => codeFor.get(n)).filter(Boolean).sort();
-      const expectedAnchor = activeCodes[0] ?? anchorCode; // earliest among active viewers
-      console.log('[proof] mark-all-watched: step 6 START meta=' + JSON.stringify(start.meta) + ' activeViewers=' + JSON.stringify(activeNames) + ' activeCodes=' + JSON.stringify(activeCodes) + ' expectedAnchor=' + expectedAnchor + ' watched=' + start.watchedPills + '/' + start.pillCount);
-      await card.locator('.play-row').first().screenshot({ path: ctx.outDir + '/' + flowName + '-06a-anchor-earliest.png' });
-      console.log('[proof] screenshot: ' + ctx.outDir + '/' + flowName + '-06a-anchor-earliest.png');
-      // The displayed episode must be the EARLIEST episode among the ACTIVE
-      // group, not a further-along viewer's.
-      if (start.meta.includes(expectedAnchor)) {
-        console.log('[proof] mark-all-watched: PASS anchor - card shows EARLIEST episode ' + expectedAnchor + ' across the active staggered viewers.');
-      } else {
-        console.error('[proof] mark-all-watched: step 6 FAILED - displayed episode ' + JSON.stringify(start.meta) + ' is NOT the earliest active anchor ' + expectedAnchor + ' (episode-jump bug).');
-      }
+      await card.locator('.play-row').first().screenshot({ path: ctx.outDir + '/' + flowName + '-06a-fanout-card.png' });
+      console.log('[proof] screenshot: ' + ctx.outDir + '/' + flowName + '-06a-fanout-card.png');
 
-      // Toggle an AHEAD viewer's pill (currently lit) OFF, then ON, asserting the
-      // displayed episode never jumps. Pick a lit pill (an ahead viewer who has
-      // already played the anchor episode).
+      // Toggle any pill (on/off) on this ONE episode-card, asserting the OTHER
+      // fan-out cards for the same series are unaffected (still present,
+      // unchanged meta) — proving a pill toggle never bleeds across cards.
+      const otherMetasBefore = seriesCardsBefore.filter((c) => c.meta !== start.meta).map((c) => c.meta);
       const pills = card.locator('.viewer-pill');
       const total = await pills.count();
-      let aheadPill = -1;
-      for (let i = 0; i < total; i += 1) {
-        const cls = (await pills.nth(i).getAttribute('class')) ?? '';
-        if (cls.includes('watched')) { aheadPill = i; break; }
-      }
-      if (aheadPill === -1) {
-        console.warn('[proof] mark-all-watched: step 6 - no already-watched (ahead) pill to toggle; anchor check stands alone.');
+      if (total === 0) {
+        console.warn('[proof] mark-all-watched: step 6 - fan-out card has no viewer pills; skipping toggle check.');
       } else {
-        for (const phase of ['off', 'on']) {
-          const pill = card.locator('.viewer-pill').nth(aheadPill);
+        for (const phase of ['toggle', 'revert']) {
+          const pill = card.locator('.viewer-pill').first();
           await pill.scrollIntoViewIfNeeded().catch(() => {});
           await pill.click();
           await page.waitForTimeout(800);
           await page.waitForLoadState('networkidle').catch(() => {});
           cur = await snapshotRail(page);
-          idx = findIdx(cur);
-          const now = idx === -1 ? null : cur[idx];
-          card = idx === -1 ? card : cards(page).nth(idx);
-          if (now && now.meta === start.meta) {
-            console.log('[proof] mark-all-watched: PASS stable (' + phase + ') - ahead-viewer toggle kept episode ' + JSON.stringify(now.meta) + ' (no jump).');
+          const seriesCardsAfter = findAll(cur);
+          const otherMetasAfter = seriesCardsAfter.filter((c) => c.meta !== start.meta).map((c) => c.meta);
+          const stillHasOthers = otherMetasBefore.every((m) => otherMetasAfter.includes(m));
+          if (stillHasOthers) {
+            console.log('[proof] mark-all-watched: PASS fan-out (' + phase + ') - other episode-card(s) for ' + JSON.stringify(seriesName) + ' unaffected: ' + JSON.stringify(otherMetasAfter));
           } else {
-            console.error('[proof] mark-all-watched: step 6 FAILED (' + phase + ') - episode JUMPED to ' + JSON.stringify(now?.meta ?? '(card gone)') + ' (was ' + JSON.stringify(start.meta) + ').');
+            console.error('[proof] mark-all-watched: step 6 FAILED (' + phase + ') - other episode-card(s) changed/disappeared. before=' + JSON.stringify(otherMetasBefore) + ' after=' + JSON.stringify(otherMetasAfter));
           }
+          const reIdx = cur.findIndex((c) => c.name === start.name && c.meta === start.meta);
+          card = reIdx === -1 ? card : cards(page).nth(reIdx);
         }
-        if (idx !== -1) {
-          await cards(page).nth(idx).scrollIntoViewIfNeeded();
-          await cards(page).nth(idx).locator('.play-row').first().screenshot({ path: ctx.outDir + '/' + flowName + '-06b-anchor-stable-after-toggle.png' });
-          console.log('[proof] screenshot: ' + ctx.outDir + '/' + flowName + '-06b-anchor-stable-after-toggle.png');
-        }
-        await shoot(page, flowName + '-06b-anchor-stable-full');
       }
+      await shoot(page, flowName + '-06b-fanout-after-toggle');
     }
   }
 

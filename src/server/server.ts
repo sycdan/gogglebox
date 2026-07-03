@@ -13,11 +13,10 @@ import {
 import { AppState } from './appState';
 import { buildEffectiveConfig, loadConfig, readSourceHash, resolveViewers } from './config';
 import { CachedEffectiveConfig } from './appState';
-import { anchorShowCards } from './anchorShowCards';
 import {
   ContinueWatchingCandidate,
-  continueKeyFor,
   getProgressPropagationTargets,
+  isIgnored,
   mergeContinueWatching,
 } from './continueWatching';
 import { deriveGroupKey } from './groupKey';
@@ -133,13 +132,8 @@ function activeGroupAlias(req: express.Request, account: ConfigAccount | null): 
   return buildGroupAlias(members.map((member) => member.id), visible) || null;
 }
 
-function ignoredItemsForSession(req: express.Request): Set<string> {
-  return new Set(appState.getIgnoredItems(activeGroupKey(req)));
-}
-
-// The id used to ignore an item: the series id for shows, the item id for movies.
-function ignorableId(item: { type: LibraryKind; id: string; seriesId?: string | null }): string {
-  return item.type === 'show' && item.seriesId ? item.seriesId : item.id;
+function ignoreEntriesForSession(req: express.Request) {
+  return appState.getIgnoreEntries(activeGroupKey(req));
 }
 
 function getItemId(req: express.Request): string {
@@ -168,10 +162,13 @@ async function getWatchedUnion(viewers: FamilyMember[], kind: LibraryKind): Prom
   return watchedUnion;
 }
 
-async function getContinueWatchingItems(
-  viewers: FamilyMember[],
-  continueFrom: Record<string, string> = {},
-): Promise<ContinueWatchingItem[]> {
+// Each active viewer's own Resume/NextUp candidates, fanned out (not collapsed
+// per series) so an anthology-style show can show one card per distinct
+// episode any viewer is currently on. Jellyfin's own Resume/NextUp for a
+// viewer already reflects that viewer's live played-state, so a card advances
+// simply by refetching after a watched-state change — there is no separate
+// "advance the merged card" step.
+async function getContinueWatchingItems(viewers: FamilyMember[]): Promise<ContinueWatchingItem[]> {
   const startedAt = Date.now();
   const candidateGroups = await Promise.all(
     viewers.map(async (viewer) => {
@@ -188,7 +185,7 @@ async function getContinueWatchingItems(
       );
     }),
   );
-  const merged = mergeContinueWatching(candidateGroups.flat(), continueFrom);
+  const merged = mergeContinueWatching(candidateGroups.flat());
 
   if (jellyfinDebugEnabled) {
     console.log(
@@ -219,87 +216,6 @@ async function withViewerWatchedState(
       return { ...item, viewerWatched };
     }),
   );
-}
-
-// True only when every active viewer has played the card's current item.
-function allViewersWatched(item: ContinueWatchingItem): boolean {
-  const viewerWatched = item.viewerWatched ?? [];
-  return viewerWatched.length > 0 && viewerWatched.every((viewer) => viewer.watched);
-}
-
-// Read every active viewer's played state for a single item id in one pass.
-async function viewerWatchedFor(itemId: string, viewers: FamilyMember[]): Promise<ViewerWatchedState[]> {
-  return Promise.all(
-    viewers.map(async (viewer) => ({
-      viewerId: viewer.id,
-      viewerName: viewer.name,
-      avatarUrl: viewer.avatarUrl ?? null,
-      watched: await jellyfin.getItemPlayedState(viewer.jellyfinUserId, itemId),
-    })),
-  );
-}
-
-// Resolve a single fully-watched card. Movies (or shows with no next episode)
-// drop out entirely. Shows advance to the next episode; if that episode is also
-// already watched by everyone, keep advancing until we reach one someone still
-// needs to watch (which becomes the new card) or run out of episodes (drop).
-async function advanceWatchedCard(
-  item: ContinueWatchingItem,
-  viewers: FamilyMember[],
-): Promise<ContinueWatchingItem | null> {
-  if (item.type !== 'show' || !item.seriesId) {
-    return null;
-  }
-
-  let seasonNumber = item.seasonNumber;
-  let episodeNumber = item.episodeNumber;
-
-  // Bounded by the episode count of the series (getNextEpisode returns null at
-  // the end), so this loop always terminates.
-  for (;;) {
-    const next = await jellyfin.getNextEpisode(item.seriesId, seasonNumber, episodeNumber);
-    if (!next) {
-      return null;
-    }
-
-    const viewerWatched = await viewerWatchedFor(next.id, viewers);
-    const card: ContinueWatchingItem = {
-      ...item,
-      id: next.id,
-      name: next.name,
-      overview: next.overview,
-      runtimeMinutes: next.runtimeMinutes,
-      imageUrl: next.imageUrl,
-      seriesId: next.seriesId || item.seriesId,
-      seriesName: next.seriesName || item.seriesName,
-      seasonNumber: next.seasonNumber,
-      episodeNumber: next.episodeNumber,
-      playbackPositionTicks: 0,
-      progressPercent: 0,
-      viewerWatched,
-    };
-
-    if (!allViewersWatched(card)) {
-      return card;
-    }
-
-    seasonNumber = next.seasonNumber;
-    episodeNumber = next.episodeNumber;
-  }
-}
-
-// Apply the fully-watched policy to the card list: cards everyone has watched
-// either advance to the next unwatched episode (shows) or disappear (movies and
-// end-of-series shows). Partially-watched cards pass through unchanged.
-async function resolveWatchedCards(
-  items: ContinueWatchingItem[],
-  viewers: FamilyMember[],
-): Promise<ContinueWatchingItem[]> {
-  const resolved = await Promise.all(
-    items.map(async (item) => (allViewersWatched(item) ? advanceWatchedCard(item, viewers) : item)),
-  );
-
-  return resolved.filter((item): item is ContinueWatchingItem => item !== null);
 }
 
 app.disable('x-powered-by');
@@ -529,8 +445,8 @@ app.get('/api/library', requireAuth, async (req, res) => {
     }
 
     if (req.session.activeViewerIds?.length) {
-      const ignoredItems = ignoredItemsForSession(req);
-      items = items.filter((item) => !ignoredItems.has(ignorableId(item)));
+      const ignoreEntries = ignoreEntriesForSession(req);
+      items = items.filter((item) => !isIgnored(ignoreEntries, item));
     }
 
     res.json({ items });
@@ -550,7 +466,7 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     );
     const viewers = activeViewersForSession(req);
     const watchedUnion = await getWatchedUnion(viewers, kind);
-    const ignoredItems = ignoredItemsForSession(req);
+    const ignoreEntries = ignoreEntriesForSession(req);
     let candidates = await jellyfin.listItems(kind, genre);
 
     if (kidsOnly) {
@@ -558,7 +474,7 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
     }
 
     const items = candidates
-      .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id) && !ignoredItems.has(ignorableId(item)))
+      .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id) && !isIgnored(ignoreEntries, item))
       .sort((left, right) => (right.rating ?? 0) - (left.rating ?? 0))
       .slice(0, config.recommendations.count);
 
@@ -571,88 +487,53 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
 app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, res) => {
   try {
     const viewers = activeViewersForSession(req);
-    const ignoredItems = ignoredItemsForSession(req);
-    const continueFrom = appState.getContinueFrom(activeGroupKey(req));
-    const visible = (await getContinueWatchingItems(viewers, continueFrom)).filter(
-      (item) => !ignoredItems.has(ignorableId(item)),
-    );
+    const ignoreEntries = ignoreEntriesForSession(req);
+    const merged = await getContinueWatchingItems(viewers);
+    const visible = merged.filter((item) => !isIgnored(ignoreEntries, item));
     if (jellyfinDebugEnabled) {
       for (const item of visible) {
         console.log(
-          `[anchor] merged card type=${item.type} id=${item.id} name=${JSON.stringify(item.name)} ` +
+          `[continue-watching] card type=${item.type} id=${item.id} name=${JSON.stringify(item.name)} ` +
           `seriesId=${JSON.stringify(item.seriesId)} season=${item.seasonNumber} episode=${item.episodeNumber} ` +
           `progress=${item.progressPercent} sourceViewer=${item.sourceViewerName}`,
         );
       }
     }
-    // Re-anchor SHOW cards to the group's stable earliest-not-all-watched episode
-    // BEFORE computing pills, so pills reflect the displayed (anchor) episode.
-    const anchored = await anchorShowCards(jellyfin, visible, viewers);
-    const withWatched = await withViewerWatchedState(anchored, viewers);
-    const items = await resolveWatchedCards(withWatched, viewers);
+    const items = await withViewerWatchedState(visible, viewers);
     res.json({ items });
   } catch (error) {
     res.status(502).json({ error: error instanceof Error ? error.message : 'Continue watching lookup failed' });
   }
 });
 
-// Choose which viewer's progress a continue-watching card follows. Body:
-// { type: 'show'|'movie', id: seriesId (show) or item id (movie),
-//   viewerId: string | null } — null reverts to the default group pick.
-// Persisted per group, so the choice survives refetches and sessions.
-app.post('/api/continue-watching/source', requireAuth, requireViewerGroup, (req, res) => {
-  const type = req.body?.type === 'movie' ? 'movie' : req.body?.type === 'show' ? 'show' : null;
-  const id = typeof req.body?.id === 'string' ? req.body.id.trim() : '';
-  const viewerId = typeof req.body?.viewerId === 'string' && req.body.viewerId ? req.body.viewerId : null;
-
-  if (!type || !id) {
-    res.status(400).json({ error: 'type (show|movie) and id are required' });
-    return;
-  }
-
-  if (viewerId && !activeViewersForSession(req).some((viewer) => viewer.id === viewerId)) {
-    res.status(400).json({ error: 'Viewer must be in the active group' });
-    return;
-  }
-
-  appState.setContinueFrom(activeGroupKey(req), continueKeyFor(type, id), viewerId);
-  res.json({ ok: true });
-});
-
-app.get('/api/ignored', requireAuth, requireViewerGroup, async (req, res) => {
-  const itemIds = appState.getIgnoredItems(activeGroupKey(req));
-
-  // Resolve human-readable titles so the client doesn't render raw ids. An id
-  // that no longer resolves (deleted item) or a lookup failure falls back to
-  // showing the id.
-  let names = new Map<string, string>();
-  try {
-    names = await jellyfin.fetchItemNames(itemIds);
-  } catch (error) {
-    if (jellyfinDebugEnabled) {
-      console.log(`[ignored] title lookup failed: ${error instanceof Error ? error.message : error}`);
-    }
-  }
-
-  const items = itemIds.map((id) => ({ id, title: names.get(id) ?? id }));
+app.get('/api/ignored', requireAuth, requireViewerGroup, (req, res) => {
+  const items = appState.getIgnoreEntries(activeGroupKey(req));
   res.json({ items });
 });
 
+// Ignore a card at the given scope. Body: { key, matchSeriesId, label }.
+// `key` is the exact id to match (episode id for scope 'episode', series id for
+// scope 'show', movie id for scope 'movie'); `matchSeriesId` is true only for
+// whole-show scope. `label` is the display string captured at ignore-time from
+// the card itself, so the ignored panel never needs a separate name lookup.
 app.post('/api/ignored', requireAuth, requireViewerGroup, (req, res) => {
-  const itemId = typeof req.body?.itemId === 'string' ? req.body.itemId.trim() : '';
-  if (!itemId) {
-    res.status(400).json({ error: 'itemId is required' });
+  const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+  const matchSeriesId = Boolean(req.body?.matchSeriesId);
+  const label = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
+
+  if (!key) {
+    res.status(400).json({ error: 'key is required' });
     return;
   }
 
-  const itemIds = appState.ignoreItem(activeGroupKey(req), itemId);
-  res.json({ itemIds });
+  const items = appState.ignoreItem(activeGroupKey(req), { key, matchSeriesId, label: label || key });
+  res.json({ items });
 });
 
-app.delete('/api/ignored/:itemId', requireAuth, requireViewerGroup, (req, res) => {
-  const itemId = Array.isArray(req.params.itemId) ? req.params.itemId[0] : req.params.itemId;
-  const itemIds = appState.unignoreItem(activeGroupKey(req), itemId);
-  res.json({ itemIds });
+app.delete('/api/ignored/:key', requireAuth, requireViewerGroup, (req, res) => {
+  const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
+  const items = appState.unignoreItem(activeGroupKey(req), key);
+  res.json({ items });
 });
 
 app.get('/api/shows/:seriesId/episodes', requireAuth, requireViewerGroup, async (req, res) => {
