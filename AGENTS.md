@@ -130,6 +130,10 @@ It opens a new tab at `/player/web/...` and writes `player-handoff-gbx.png`
 tab, which must show the logged-in home/library and NO manual login form).
 
 ## Conventions
+- Never break the config schema. Any older `config.json` must roll forward to the
+  current shape — extend the `schemaVersion` migration chain in `src/server/config.ts`
+  so startup auto-migrates from *any* prior version. Never require a manual migration
+  step, never drop support for an old version.
 - Never run `npm`/`node`/`tsc` on the host — use the compose services above.
 - If a `docker run` ever needs an absolute in-container path under Git Bash,
   prefix with `MSYS_NO_PATHCONV=1` to stop path mangling. (Plain
