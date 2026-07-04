@@ -48,8 +48,13 @@ applicable, and ordered Acceptance Criteria.
 The acceptance criteria are the controlling checklist for an effort. Each effort
 must have at least one acceptance criterion. Criteria must be checked
 sequentially, and each criterion must include exactly one unique generated UUIDv7
-proof link in this exact style: `[proof](./.proofs/<uuidv7>.md)`. Proof files live
-in the effort's hidden `.proofs/` metadata directory, because any non-hidden
+proof link in this exact style: `[proof](./.proofs/<uuidv7>.md)`. Planners seed
+these proof links when writing the acceptance criteria so each criterion has a
+stable identity throughout implementation and proofing; the proof file itself is
+not expected to exist until the criterion has actually been proven. A missing
+proof file is therefore normal for unchecked criteria and means the criterion is
+not yet checkable, not that the effort spec is malformed. Proof files live in
+the effort's hidden `.proofs/` metadata directory, because any non-hidden
 directory inside an effort is treated as a subeffort. An acceptance criterion may
 require that a subeffort is done; when it does, start the checklist item with
 the proof link and link the subeffort slug in the sentence, for example:
