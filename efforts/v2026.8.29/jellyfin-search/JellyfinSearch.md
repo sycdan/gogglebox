@@ -24,7 +24,7 @@ quick access to specific content, including episodes from other shows.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/bd51ef7a-c4d5-45af-911f-87604327e62f.md) that the discovery rail has a search action that filters the rail in place without leaving the home context or opening a separate results mode.
-2. [ ] [proof](./.proofs/83989d1a-1885-45c1-ac6c-f31bc2167003.md) that search queries Jellyfin through a server endpoint and returns matching movies, series, and episodes.
-3. [ ] [proof](./.proofs/faf4a421-ce65-4359-891d-04966c8622a4.md) that filtered rail results include playable inter-show episodes when the seeded sandbox contains matching episodes outside the current show context.
-4. [ ] [proof](./.proofs/6ec71891-3e87-4502-86cb-392888244222.md) that keyword search filters discovery rail results by title and available metadata, with a clear empty state when nothing matches.
+1. [ ] [proof](./.proofs/019f2aa8-491f-7d01-aa5b-55257f2e3925.md) that the discovery rail has a search action that filters the rail in place without leaving the home context or opening a separate results mode.
+2. [ ] [proof](./.proofs/019f2aa8-4921-7c9b-a64d-0d099a2dfe8c.md) that search queries Jellyfin through a server endpoint and returns matching movies, series, and episodes.
+3. [ ] [proof](./.proofs/019f2aa8-4922-74c5-903e-5db62e1e6247.md) that filtered rail results include playable inter-show episodes when the seeded sandbox contains matching episodes outside the current show context.
+4. [ ] [proof](./.proofs/019f2aa8-4924-7a69-a624-1c518786e551.md) that keyword search filters discovery rail results by title and available metadata, with a clear empty state when nothing matches.

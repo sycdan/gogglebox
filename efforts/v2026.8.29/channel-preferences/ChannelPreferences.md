@@ -20,6 +20,6 @@ recommendation channels feed the rail.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/049ae954-eb57-4ddf-ad76-c1495eaba9ac.md) that the recommendation rail has a gear action that opens channel preferences.
-2. [ ] [proof](./.proofs/2997c7bc-5373-468d-84f5-533b42c40326.md) that channel preferences list all available recommendation channels returned by the backend.
-3. [ ] [proof](./.proofs/b3e1ba45-fbfa-491a-8381-091ca5807a21.md) that enabling or disabling channels changes which channels contribute to the rail and survives a page reload.
+1. [ ] [proof](./.proofs/019f2aa8-491a-7472-b95c-ea38cdb105a0.md) that the recommendation rail has a gear action that opens channel preferences.
+2. [ ] [proof](./.proofs/019f2aa8-491b-722a-9393-2183eed11644.md) that channel preferences list all available recommendation channels returned by the backend.
+3. [ ] [proof](./.proofs/019f2aa8-491d-7f41-a32d-3085b20856c8.md) that enabling or disabling channels changes which channels contribute to the rail and survives a page reload.

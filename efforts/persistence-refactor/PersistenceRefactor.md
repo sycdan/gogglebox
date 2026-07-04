@@ -23,6 +23,6 @@ for graph-shaped relationships if that proves useful.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/fab9dc12-fe8b-42c3-aa6c-71de1c93ed12.md) that the effort defines the initial data model, including whether graph-shaped relationships are needed and why.
-2. [ ] [proof](./.proofs/195a0c79-e25d-4e6b-99c0-8528cbf0a6ec.md) that the app can initialize the chosen local database storage through Docker Compose without requiring host-level database setup.
-3. [ ] [proof](./.proofs/b846876b-f163-4447-8d1e-3ab334bf8bdd.md) that database migrations run automatically and are covered by verification that starts from an empty database and at least one prior schema version.
+1. [ ] [proof](./.proofs/019f2aa8-4925-73d1-b1b6-c5948f4ecbbd.md) that the effort defines the initial data model, including whether graph-shaped relationships are needed and why.
+2. [ ] [proof](./.proofs/019f2aa8-4927-71e7-b7b8-9b90e4e99815.md) that the app can initialize the chosen local database storage through Docker Compose without requiring host-level database setup.
+3. [ ] [proof](./.proofs/019f2aa8-4928-7da3-a974-966d8fc479bd.md) that database migrations run automatically and are covered by verification that starts from an empty database and at least one prior schema version.

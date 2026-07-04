@@ -24,7 +24,7 @@ of using a fixed item count.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/b95f5631-b7de-4b5a-9071-9ca0f5e8af38.md) that the UI presents recommendations with enough explanation for a household to understand why each item was suggested.
-2. [ ] [proof](./.proofs/0407e1d9-9731-4172-b64d-5b9899fee977.md) that continue watching appears as a recommendation channel in the rail instead of as a separate home section.
-3. [ ] [proof](./.proofs/f6560f01-dc5d-449a-baaf-1af677c4a888.md) that the rail layout reserves stable top-left, middle, and top-right action slots for reroll, search, and channel preferences.
-4. [ ] [proof](./.proofs/f6a52904-0b4d-413c-8d72-30c44d955516.md) that each rail page constrains the visible recommendation count based on responsive layout capacity rather than a hardcoded count, and that a mobile phone viewport shows one recommendation per page.
+1. [ ] [proof](./.proofs/019f2aa8-490c-726c-86e5-60da55bb52a7.md) that the UI presents recommendations with enough explanation for a household to understand why each item was suggested.
+2. [ ] [proof](./.proofs/019f2aa8-490e-7e9a-9076-a4e46383bc11.md) that continue watching appears as a recommendation channel in the rail instead of as a separate home section.
+3. [ ] [proof](./.proofs/019f2aa8-490f-76a8-b953-4e54827a0489.md) that the rail layout reserves stable top-left, middle, and top-right action slots for reroll, search, and channel preferences.
+4. [ ] [proof](./.proofs/019f2aa8-4911-727c-9df8-6a5d06fd4677.md) that each rail page constrains the visible recommendation count based on responsive layout capacity rather than a hardcoded count, and that a mobile phone viewport shows one recommendation per page.

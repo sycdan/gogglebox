@@ -47,13 +47,13 @@ applicable, and ordered Acceptance Criteria.
 
 The acceptance criteria are the controlling checklist for an effort. Each effort
 must have at least one acceptance criterion. Criteria must be checked
-sequentially, and each criterion must include exactly one unique generated GUID
-proof link in this exact style: `[proof](./.proofs/<guid>.md)`. Proof files live
+sequentially, and each criterion must include exactly one unique generated UUIDv7
+proof link in this exact style: `[proof](./.proofs/<uuidv7>.md)`. Proof files live
 in the effort's hidden `.proofs/` metadata directory, because any non-hidden
 directory inside an effort is treated as a subeffort. An acceptance criterion may
 require that a subeffort is done; when it does, start the checklist item with
 the proof link and link the subeffort slug in the sentence, for example:
-`1. [ ] [proof](./.proofs/<guid>.md) that [account-access-tokens](./account-access-tokens/AccountAccessTokens.md) is done`.
+`1. [ ] [proof](./.proofs/<uuidv7>.md) that [account-access-tokens](./account-access-tokens/AccountAccessTokens.md) is done`.
 Acceptance criteria do not have to be subeffort dependencies; any provable
 criterion is valid. Proof is required for each criterion and may copy evidence
 from root `./artifacts` into the effort's `.proofs/` directory. Only an approver
