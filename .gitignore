@@ -30,3 +30,6 @@ nul
 !.claude/
 .claude/*
 !.claude/agents/
+
+# Effort work sessions
+sessions/*
