@@ -1,3 +1,9 @@
-# Gogglebox — agent guide
+# DO THIS FIRST
 
-This content has been permanently moved to [AGENTS.md](AGENTS.md).
+## Goals
+
+- Read [AGENTS.md](AGENTS.md) immediately before making any other tools calls or responding to prompts.
+
+## Nongoals
+
+- Never call a tool until you have confirmed you have loaded AGENTS.md into your context.
