@@ -7,37 +7,103 @@ client, TypeScript throughout. Backend entry `src/server/server.ts`, client
 
 ## Orchestration protocol (read first)
 
-The main session is the **orchestrator**. It plans and delegates — it does **not**
-edit application code itself. Classify each request and delegate to a subagent:
+The main session is the **orchestrator**. It plans and delegates — it does
+**not** edit application code itself. Classify each request and delegate to a
+subagent:
 
-| Request | Delegate to |
-| --- | --- |
-| Build / change / fix a feature | `gogglebox-builder` |
-| Run / boot the stack, report URLs & logs | `gogglebox-runtime` |
-| Typecheck / unit / e2e verification | `gogglebox-verifier` |
-| Visually prove a user-visible feature | `gogglebox-prover` |
+| Request                                            | Delegate to          |
+| -------------------------------------------------- | -------------------- |
+| Build / change / fix a feature                     | `gogglebox-builder`  |
+| Run / boot the stack, report URLs & logs           | `gogglebox-runtime`  |
+| Typecheck / unit / e2e verification                | `gogglebox-verifier` |
+| Visually prove a user-visible feature              | `gogglebox-prover`   |
+| Decide whether proof satisfies acceptance criteria | `gogglebox-approver` |
+| Plan an effort / scope work                        | `gogglebox-planner`  |
 
-Typical feature flow: **builder → verifier → prover**. The builder self-heals
-against typecheck/test failures before handing off. Before any agent starts
-running tests, booting the stack, or visual proof for a feature, the orchestrator
-must first make a git checkpoint commit containing the builder's current work.
-Use a clearly provisional message such as `checkpoint: before verification` if
-the work is not final; later agents may add follow-up fix commits. Only
-`gogglebox-builder` edits files under `src/` (and other app code); the other
-three are read-only on source.
+Typical feature flow: **planner, when needed -> builder -> verifier -> runtime
+and/or prover -> approver**. Subagents cannot spawn subagents, so the
+orchestrator sequences the chain. Only `gogglebox-builder` edits files under
+`src/` (and other app code); all other agents are read-only on source.
 
-Subagents cannot spawn subagents, so the orchestrator sequences the chain.
+Before handing work to any subagent, the orchestrator must write the exact
+handoff prompt to the effort tree at `<effort-dir>/.prompts/<uuidv7>.md`. The
+prompt file must start with frontmatter containing at least:
+
+```yaml
+---
+prompt_id: <uuidv7>
+target_agent: <agent>
+effort_path: <effort-spec-path>
+output_path: <effort-dir>/.outputs/<uuidv7>.md
+base_tag: handoff/<prompt_id>
+---
+```
+
+Here `<effort-spec-path>` is the PascalCase markdown spec file, such as
+`efforts/auth-refactor/AuthRefactor.md` or
+`efforts/auth-refactor/guest-pin-rework/GuestPinRework.md`; `<effort-dir>` is
+the directory containing that spec. The prompt body must include the effort spec
+path, the relevant acceptance criteria, what phase the agent is doing, what it
+may edit or run, and the fact that the agent's final response must be written to
+the declared `output_path`. The orchestrator commits that prompt on `main`
+before sending it, using this message pattern:
+`prompt(<effort-dir>/.prompts/<uuidv7>.md): handoff to <agent>`. After that
+commit, the orchestrator creates the temporary tag named by `base_tag`, pointing
+at the prompt commit. `base_tag` must use the same UUIDv7 as `prompt_id`, e.g.
+`handoff/019...`. The committed prompt file and tag are the durable handoff
+inputs: if work resumes in a later session or on another machine, load that
+prompt and tag from git rather than relying on prior chat context. If the
+handoff crosses machines, push both `main` and the temporary tag; after the
+squash lands, delete the temporary tag locally and remotely.
+
+Subagents work in an effort branch/worktree based on `base_tag`, not directly on
+`main`. They do not _need_ to make any commits. A subagent signals that its
+phase is ready for the orchestrator by writing its final summary to the exact
+`output_path` from the prompt. The orchestrator treats the existence of that
+file in the effort branch/worktree as the handoff flag. If that file is absent,
+the phase is still in progress or blocked and the orchestrator must not advance
+the effort. The output file does not need frontmatter; the prompt's declared
+`output_path` is the request/response link. The orchestrator is the only actor
+allowed to commit or merge to `main`.
+
+When the orchestrator consumes a subagent handoff, it first verifies that
+`base_tag` exists, the effort branch/worktree descends from the commit named by
+that tag, and the declared `output_path` exists. If the worktree has uncommitted
+changes, the orchestrator stages them and makes a mechanical snapshot commit in
+the effort branch/worktree so the range can be consumed. The orchestrator then
+squashes exactly the commits in `base_tag..<effort-branch-head>` into one commit
+on `main` with this message:
+`effort(<effort-slug-chain>): handoff from <agent>`, where `<effort-slug-chain>`
+is the slash-separated effort directory under `efforts/`, such as
+`auth-refactor` or `auth-refactor/guest-pin-rework`. This keeps `main`
+phase-oriented while letting subagent branches contain any number of local
+progress commits or none at all. After the squash lands successfully on `main`,
+the orchestrator removes the temporary `base_tag`.
+
+After `gogglebox-verifier` reports successful static verification, the
+orchestrator must land the verified effort-branch state on `main` using the same
+output-file and tag-bounded squash rule before delegating runtime or visual
+proof work for that effort.
 
 ## Efforts are the canonical backlog
 
 `./efforts` on `main` is the canonical source for all work to be done. Effort
-specs modified on feature or topic branches are branch-local planning/proposed
-updates; they are not canonical until merged or updated on `main`. Before
-delegating implementation, verification, runtime, or proof work, the
-orchestrator must match the request to an existing effort spec under
-`./efforts`. If no matching effort exists, switch to `gogglebox-planner` first.
-The planner's only job is to populate `./efforts`, and its write access is
-limited to that directory.
+specs modified on other branches are planning/proposed updates; they are not
+considered real until merged or updated on `main`. Before delegating
+implementation, verification, runtime, proof, or planning work, the orchestrator
+must identify the relevant effort path under `./efforts`. **All subagent work**
+must tie back to an effort, with no exceptions.
+
+If no matching effort exists yet, the orchestrator creates the effort directory
+on `main` before delegating. It must add `.prompts/`, `.outputs/`, `.proofs/`,
+and a stub PascalCase effort spec such as `EffortName.md` containing the
+standard headings (`Overview`, `Goals`, `Nongoals`, and `Acceptance Criteria`)
+plus brief placeholder text saying the planner must populate the spec. The first
+handoff prompt goes in that effort's `.prompts/` directory and must target
+`gogglebox-planner`, instructing it to replace the stub with a complete effort
+spec and any findings needed for later phases. Commit the stub and prompt on
+`main` with the `prompt(...): handoff to gogglebox-planner` message pattern. The
+planner's write access is limited to `./efforts`.
 
 Efforts may be broken down into nested subefforts, for example
 `auth-refactor/account-access-tokens` or `auth-refactor/account-user-tiers`.
@@ -46,19 +112,27 @@ such as `AuthRefactor.md`, with Overview, Goals when applicable, Nongoals when
 applicable, and ordered Acceptance Criteria.
 
 The acceptance criteria are the controlling checklist for an effort. Each effort
-must have at least one acceptance criterion. Criteria must be checked
-sequentially, and each criterion must include exactly one unique generated UUIDv7
-proof link in this exact style: `[proof](./.proofs/<uuidv7>.md)`. Planners seed
-these proof links when writing the acceptance criteria so each criterion has a
-stable identity throughout implementation and proofing; the proof file itself is
-not expected to exist until the criterion has actually been proven. A missing
-proof file is therefore normal for unchecked criteria and means the criterion is
-not yet checkable, not that the effort spec is malformed. Proof files live in
-the effort's hidden `.proofs/` metadata directory, because any non-hidden
-directory inside an effort is treated as a subeffort. An acceptance criterion may
-require that a subeffort is done; when it does, start the checklist item with
-the proof link and link the subeffort slug in the sentence, for example:
-`1. [ ] [proof](./.proofs/<uuidv7>.md) that [account-access-tokens](./account-access-tokens/AccountAccessTokens.md) is done`.
+must have at least one acceptance criterion. Criteria should be written in the
+preferred implementation/proof order when an order matters. Criteria may be
+proven and checked independently unless a criterion explicitly depends on an
+earlier criterion or subeffort. Each criterion must include exactly one unique
+generated UUIDv7 proof link in this exact style:
+`[proof](./.proofs/<uuidv7>.md)`. Planners seed these proof links when writing
+the acceptance criteria so each criterion has a stable identity throughout
+implementation and proofing; the proof file itself is not expected to exist
+until the criterion has actually been proven. A missing proof file is therefore
+normal for unchecked criteria and means the criterion is not yet checkable, not
+that the effort spec is malformed. Prompt files live in the effort's hidden
+`.prompts/` metadata directory, subagent output summaries live in `.outputs/`,
+and proof files live in `.proofs/`, because any non-hidden directory inside an
+effort is treated as a subeffort. An acceptance criterion may require that a
+subeffort is done; when it does, start the checklist item with the proof link
+and link the subeffort slug in the sentence, for example:
+
+```markdown
+1. [ ] [proof](./.proofs/<uuidv7>.md) that [auth-refactor](./auth-refactor/AuthRefactor.md) is done
+```
+
 Acceptance criteria do not have to be subeffort dependencies; any provable
 criterion is valid. Proof is required for each criterion and may copy evidence
 from root `./artifacts` into the effort's `.proofs/` directory. Only an approver
@@ -66,19 +140,26 @@ who has loaded the whole effort context, including parent effort specs for
 nested efforts, may mark acceptance criteria checked. When asked whether an
 effort is done, the approver checks each criterion, reads any linked proof,
 marks criteria checked only when the proof is sufficient, confirms all visible
-child subefforts are done, and then either confirms the effort is done or
-lists what remains to be proven.
+child subefforts are done, and then either confirms the effort is done or lists
+what remains to be proven.
+
+`gogglebox-approver` may edit only under `efforts/`. If proof is sufficient, the
+approver updates the relevant effort spec by checking the satisfied acceptance
+criteria and writes its final summary to the declared `.outputs/<uuidv7>.md`
+file. That summary must list which criteria were checked, which remain
+unchecked, and why. Checked acceptance criteria become canonical only after the
+orchestrator consumes the approver handoff onto `main` with the standard
+tag-bounded squash rule.
 
 ## Run everything in Docker (host stays minimal)
 
 The host needs only Docker + git. All app execution goes through Compose. The
-base file `docker-compose.yml` is the compose **default** (no `-f` needed) and the
-shared base for two thin overlays. Source is bind-mounted; deps live in a named
-`node_modules` volume (never installed on the host). Use the **Bash tool (Git
-Bash)** for commands.
+base file `docker-compose.yml` is the compose **default** (no `-f` needed) and
+the shared base for environment overlays. Source is bind-mounted; deps live in a
+named `node_modules` volume, never installed on the host.
 
-The bare base only carries shared service definitions plus `check`/`test` — it is
-**not** a way to run the app. Base commands (no Jellyfin, no config):
+The bare base only carries shared service definitions plus `check`/`test` — it
+is **not** a way to run the app. Base commands (no Jellyfin, no config):
 
 ```bash
 docker compose run --rm check   # typecheck (no Jellyfin)
@@ -87,19 +168,19 @@ docker compose down             # stop
 ```
 
 ### Two run stacks (sbx / uat)
+
 To actually run the app (`server`/`client`/`proof`), use an overlay stack. Each
 re-points the base services and mounts its own config over `/app/config.json`;
 wrapper scripts avoid typing `-f -f`:
 
 - **sbx** — `./scripts/sbx.sh …` layers `docker-compose.sbx.yml`: a seeded,
   offline sandbox Jellyfin (`.env.sbx` + `config.sbx.json`, both generated). See
-  `tools/sandbox/README.md`. e.g.
-  `./scripts/sbx.sh up -d`,
+  `tools/sandbox/README.md`. e.g. `./scripts/sbx.sh up -d`,
   `PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof`.
-- **uat** — `./scripts/uat.sh …` layers `docker-compose.uat.yml`: the developer's
-  **real** Jellyfin (`.env.uat` + `config.uat.json`). Use this to test a feature
-  against real data before pushing. e.g. `./scripts/uat.sh up -d`,
-  `./scripts/uat.sh run --rm proof`.
+- **uat** — `./scripts/uat.sh …` layers `docker-compose.uat.yml`: the
+  developer's **real** Jellyfin (`.env.uat` + `config.uat.json`). Use this to
+  test a feature against real data before pushing. e.g.
+  `./scripts/uat.sh up -d`, `./scripts/uat.sh run --rm proof`.
 
 Bare `up -d` (no service names) brings up the whole running stack — server +
 client + proxy (+ the sandbox Jellyfin under sbx) — and skips the one-shot
@@ -107,27 +188,22 @@ client + proxy (+ the sandbox Jellyfin under sbx) — and skips the one-shot
 explicitly with `run --rm`).
 
 URLs (either stack): the proxy is the **single entrypoint** — the same-origin
-front door at `http://localhost:8080` (`/` → client, `/api` → server, `/player` →
-Jellyfin). `/player` is a Gogglebox proxy mount: Caddy strips it before
+front door at `http://localhost:8080` (`/` → client, `/api` → server, `/player`
+→ Jellyfin). `/player` is a Gogglebox proxy mount: Caddy strips it before
 forwarding to the normal Jellyfin origin from `JELLYFIN_URL`. Serving everything
 from ONE origin lets the gbx client seed Jellyfin-web's localStorage so the
 `/player` tab auto-logs-in as the per-group JF user. `server` and `client` bind
 **no host ports** — reach them only through the proxy.
 
 ### Layered env (`.env` shared + `.env.<env>` overrides)
+
 Compose `env_file:` injects **container runtime** env. The run stacks load an
 ordered list `[.env, .env.<env>]`, where the **later file wins**. Keep `.env`
-(copied from `.env.example`) for shared defaults such as `SESSION_SECRET`,
-`WATCHED_THRESHOLD`, `JELLYFIN_DEBUG`, and dev/proof defaults; put environment-
-specific connection and identity values in the overlay file, such as
-`JELLYFIN_URL`, `JELLYFIN_API_KEY`, `PORTAL_USERNAME`, and `PORTAL_PASSWORD`.
-`JELLYFIN_URL` should be the normal Jellyfin origin, with no `/player` path.
+(copied from `.env.example`) for shared defaults; put environment- specific
+connection and identity values in the overlay file.
 
 `.env.sbx` is generated by sandbox provisioning; `.env.uat` is hand-created for
-the developer's real Jellyfin. There is no `PORTAL_AUTO_LOGIN` var: auto-login is
-implicit when portal creds are set and match an `accounts[]` entry. The e2e
-harness reads the app's own `GET /api/session` `portalAutoLoginEnabled` to decide
-whether to fill the login form.
+the developer's real Jellyfin.
 
 This runtime `env_file:` layering is distinct from Compose `${VAR}`
 interpolation, which happens at parse time and only reads the default `.env`.
@@ -135,11 +211,13 @@ The base compose file avoids interpolating Jellyfin connection vars into the
 `proof` container, so `docker compose config` can parse without stubbed secrets.
 
 ### Jellyfin
-`server` (and `proof`) need a **reachable Jellyfin**, supplied by the run stack's
-`.env.<env>` override on top of `.env`. The server exits at startup if Jellyfin is
-unreachable. The bare base `check`/`test` commands need no Jellyfin.
+
+`server` (and `proof`) need a **reachable Jellyfin**, supplied by the run
+stack's `.env.<env>` override on top of `.env`. The server exits at startup if
+Jellyfin is unreachable. The bare base `check`/`test` commands need no Jellyfin.
 
 ### Vite cache / blank-SPA recovery
+
 The client's Vite dep-optimizer cache (`cacheDir`) is on an ephemeral tmpfs
 (`/tmp/vite`), not the persistent `node_modules` volume, so a stale/half-written
 `.vite` can't survive a kill and wedge the next boot with 504s. If the client
@@ -148,8 +226,9 @@ ever serves a blank SPA, recover with
 optimizer).
 
 ### Visual proof
-The Playwright suite entry is `e2e/run.mjs`. It logs in, then runs one module per
-flow under `e2e/flows/`, with shared harness/session/viewer helpers under
+
+The Playwright suite entry is `e2e/run.mjs`. It logs in, then runs one module
+per flow under `e2e/flows/`, with shared harness/session/viewer helpers under
 `e2e/lib/`. It writes PNGs to `./artifacts/<timestamp>/` for a single flow. When
 running several flows as one prover pass, set the same `PROOF_RUN_ID` on every
 invocation so screenshots are grouped under
@@ -160,21 +239,22 @@ The `player-handoff` flow (Stage A browser auto-login) MUST run against the
 same-origin proxy so the localStorage origin matches `/player`. Override the
 target via compose `-e` flags — a shell-level `PROOF_URL=...` prefix does NOT
 override the compose `environment:` default (which always wins), so use `-e`.
-The default `app` flow is unaffected:
+Use this invocation:
 
 ```bash
 ./scripts/sbx.sh run --rm -e PROOF_URL=http://proxy:8080 -e PROOF_FLOW=player-handoff proof
 ```
 
-It opens a new tab at `/player/web/...` and writes `player-handoff-gbx.png`
-(the gbx launch panel) + `player-handoff-jellyfin-loggedin.png` (the Jellyfin
-tab, which must show the logged-in home/library and NO manual login form).
+It opens a new tab at `/player/web/...` and writes `player-handoff-gbx.png` (the
+gbx launch panel) + `player-handoff-jellyfin-loggedin.png` (the Jellyfin tab,
+which must show the logged-in home/library and NO manual login form).
 
 ## Conventions
-- Never break the config schema. Any older `config.json` must roll forward to the
-  current shape — extend the `schemaVersion` migration chain in `src/server/config.ts`
-  so startup auto-migrates from *any* prior version. Never require a manual migration
-  step, never drop support for an old version.
+
+- Never break the config schema. Any older `config.json` must roll forward to
+  the current shape — extend the `schemaVersion` migration chain in
+  `src/server/config.ts` so startup auto-migrates from _any_ prior version.
+  Never require a manual migration step, never drop support for an old version.
 - Keep `README.md` current when project direction, user-facing behavior,
   deployment shape, major workflows, or other human-important project context
   changes. The README is for humans: capture high-level positioning, shipped
