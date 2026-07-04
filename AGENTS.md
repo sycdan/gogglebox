@@ -36,8 +36,15 @@ target_agent: <agent>
 effort_path: <effort-spec-path>
 output_path: <effort-dir>/.outputs/<uuidv7>.md
 base_tag: handoff/<prompt_id>
+session_name: <deepest-effort-slug>.<...>.<root-effort-slug>.<utcmillis>
 ---
 ```
+
+`session_name` is the effort's slug chain, **deepest subeffort first** (the
+reverse of the directory path), dot-separated, with the UTC-millis timestamp of
+worktree creation appended last. For `efforts/auth-refactor/guest-pin-rework`
+that's `guest-pin-rework.auth-refactor.<utcmillis>`; for a top-level effort with
+no parent it's just `top-level-effort.<utcmillis>`.
 
 Here `<effort-spec-path>` is the PascalCase markdown spec file, such as
 `efforts/auth-refactor/AuthRefactor.md` or
@@ -56,32 +63,52 @@ prompt and tag from git rather than relying on prior chat context. If the
 handoff crosses machines, push both `main` and the temporary tag; after the
 squash lands, delete the temporary tag locally and remotely.
 
-Subagents work in an effort branch/worktree based on `base_tag`, not directly on
-`main`. They do not _need_ to make any commits. A subagent signals that its
-phase is ready for the orchestrator by writing its final summary to the exact
-`output_path` from the prompt. The orchestrator treats the existence of that
-file in the effort branch/worktree as the handoff flag. If that file is absent,
-the phase is still in progress or blocked and the orchestrator must not advance
-the effort. The output file does not need frontmatter; the prompt's declared
+Immediately after creating `base_tag`, and before dispatching the subagent, the
+orchestrator creates that call's dedicated worktree and branch with plain git —
+no harness-specific isolation feature, since subagents may run under different
+tools/harnesses over the life of a repo and AGENTS.md must not assume one:
+
+```bash
+git worktree add ./sessions/<session_name> -b <session_name> <base_tag>
+```
+
+The handoff prompt must tell the subagent, as its first instruction, to `cd` into
+`./sessions/<session_name>` before doing anything else and to make all edits,
+commands, and commits from there. This is a prompt-level instruction, not a
+harness guarantee, so the orchestrator never trusts compliance blindly — see
+verification below.
+
+Subagents work in that dedicated `./sessions/<session_name>` worktree/branch,
+not directly on `main`. They do not _need_ to make any commits. A subagent
+signals that its phase is ready for the orchestrator by writing its final
+summary to the exact `output_path` from the prompt. If that file is absent, the
+phase is still in progress or blocked and the orchestrator must not advance the
+effort. The output file does not need frontmatter; the prompt's declared
 `output_path` is the request/response link. The orchestrator is the only actor
 allowed to commit or merge to `main`.
 
 When the orchestrator consumes a subagent handoff, it first verifies that
-`base_tag` exists, the effort branch/worktree descends from the commit named by
-that tag, and the declared `output_path` exists. If the worktree has uncommitted
-changes, the orchestrator stages them and makes a mechanical snapshot commit in
-the effort branch/worktree so the range can be consumed. The orchestrator then
-squashes exactly the commits in `base_tag..<effort-branch-head>` into one commit
-on `main` with this message:
+`base_tag` exists, the `./sessions/<session_name>` branch actually descends from
+the commit named by that tag, and the declared `output_path` exists inside that
+worktree. This is also the check that catches a subagent that ignored the
+prompt's `cd` instruction and worked somewhere else despite it — the branch
+will be missing the expected commits or the output file won't be where it's
+declared, and the orchestrator must not advance the effort in that case. If the
+worktree has uncommitted changes, the orchestrator stages them and makes a
+mechanical snapshot commit in the session branch so the range can be consumed.
+The orchestrator then squashes exactly the commits in `base_tag..<session-branch-head>`
+into one commit on `main` with this message:
 `effort(<effort-slug-chain>): handoff from <agent>`, where `<effort-slug-chain>`
 is the slash-separated effort directory under `efforts/`, such as
 `auth-refactor` or `auth-refactor/guest-pin-rework`. This keeps `main`
-phase-oriented while letting subagent branches contain any number of local
+phase-oriented while letting session branches contain any number of local
 progress commits or none at all. After the squash lands successfully on `main`,
-the orchestrator removes the temporary `base_tag`.
+the orchestrator removes the temporary `base_tag` and the session worktree and
+branch: `git worktree remove ./sessions/<session_name>` then
+`git branch -d <session_name>`.
 
 After `gogglebox-verifier` reports successful static verification, the
-orchestrator must land the verified effort-branch state on `main` using the same
+orchestrator must land the verified session-branch state on `main` using the same
 output-file and tag-bounded squash rule before delegating runtime or visual
 proof work for that effort.
 
