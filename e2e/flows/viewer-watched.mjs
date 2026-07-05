@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
 // ── viewer-watched flow ────────────────────────────────────────────────────
 // Proves the per-viewer watched-state pills on Continue-watching cards:
@@ -13,7 +13,7 @@ export const match = /viewer-watched|watched-pill|viewer-pill/i;
 export async function run(page, ctx) {
   const { fail, shoot, shootView, flowName } = ctx;
 
-  await pickEveryoneGroupAndContinue(page, flowName);
+  await pickEveryonePartyAndContinue(page, flowName);
 
   // Wait for the Continue-watching rail to render.
   try {
@@ -30,7 +30,7 @@ export async function run(page, ctx) {
     await cards.first().waitFor({ state: 'visible', timeout: 10_000 });
   } catch {
     await shoot(page, `${flowName}-00-empty-rail`);
-    fail('viewer-watched: Continue-watching rail is EMPTY — no in-progress data for this group; cannot prove pills. Seed in-progress items in Jellyfin.');
+    fail('viewer-watched: Continue-watching rail is EMPTY — no in-progress data for this party; cannot prove pills. Seed in-progress items in Jellyfin.');
   }
 
   const cardCount = await cards.count();
@@ -87,7 +87,7 @@ export async function run(page, ctx) {
       .screenshot({ path: `${ctx.outDir}/${flowName}-toystory-load-pills.png` });
     console.log(`[proof] screenshot: ${ctx.outDir}/${flowName}-toystory-load-pills.png`);
   } else {
-    console.log('[proof] viewer-watched: no "Toy Story of Terror!" card on this group — skipping its load-pill shot');
+    console.log('[proof] viewer-watched: no "Toy Story of Terror!" card on this party — skipping its load-pill shot');
   }
 
   // Per-pill evidence at initial load for BOTH the first/target card and the

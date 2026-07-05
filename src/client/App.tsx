@@ -153,21 +153,23 @@ interface SessionResponse {
   account: string | null;
   viewers: Viewer[];
   activeViewerIds: string[];
-  // The active group's human-readable alias (never gbx-grp-<hash>), or null.
-  activeGroupAlias: string | null;
+  // The active party's human-readable alias (never gbx-grp-<hash>), or null.
+  activePartyAlias: string | null;
 }
 
-// A managed group visible to the logged-in account, surfaced as a selectable
-// "Saved group" on the picker. Identified by groupKey; shown by alias.
-interface SavedGroup {
-  groupKey: string;
+// A managed party visible to the logged-in account, surfaced as a selectable
+// "Saved party" on the picker. Identified by partyKey; shown by alias. Parties
+// were formerly called "groups" — see /api/parties (and its /api/groups
+// compatibility alias) in src/server/server.ts.
+interface SavedParty {
+  partyKey: string;
   alias: string;
   memberIds: string[];
   memberNames: string[];
 }
 
 // An API failure carrying its HTTP status so callers can branch on specific
-// verdicts (e.g. the 403 pin rejection from POST /api/group).
+// verdicts (e.g. the 403 pin rejection from POST /api/party).
 class ApiError extends Error {
   readonly status: number;
 
@@ -347,10 +349,10 @@ function IgnoreFlyout({
 export function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
   const [selectedViewerIds, setSelectedViewerIds] = useState<string[]>([]);
-  // Managed groups visible to this account, shown as "Saved groups" on the picker.
-  const [savedGroups, setSavedGroups] = useState<SavedGroup[]>([]);
+  // Managed parties visible to this account, shown as "Saved parties" on the picker.
+  const [savedParties, setSavedParties] = useState<SavedParty[]>([]);
   // Pins collected for selected guests via the continue-time pin modal, keyed
-  // by jellyfinUserId — the same wire contract POST /api/group expects.
+  // by jellyfinUserId — the same wire contract POST /api/party expects.
   const [pins, setPins] = useState<Record<string, string>>({});
   // Guest modal state: open flag, the draft guest selection and per-guest draft
   // pins (keyed by viewer id; continue flow only — the plain "add guest" flow
@@ -362,7 +364,7 @@ export function App() {
   const [guestDraftPins, setGuestDraftPins] = useState<Record<string, string>>({});
   const [guestModalForContinue, setGuestModalForContinue] = useState(false);
   const [guestModalError, setGuestModalError] = useState<string | null>(null);
-  // Confirmation modal warning that a group with any non-primary member affects
+  // Confirmation modal warning that a party with any non-primary member affects
   // watch progress for ALL its users.
   const [confirmMixedOpen, setConfirmMixedOpen] = useState(false);
   const [kind, setKind] = useState<LibraryKind>('show');
@@ -405,8 +407,8 @@ export function App() {
   async function loadSession() {
     const nextSession = await apiRequest<SessionResponse>('/api/session');
     setSession(nextSession);
-    // Arriving at the picker (no active group): preselect this account's
-    // PRIMARY viewers (still deselectable). An active group keeps its own ids.
+    // Arriving at the picker (no active party): preselect this account's
+    // PRIMARY viewers (still deselectable). An active party keeps its own ids.
     setSelectedViewerIds(
       nextSession.activeViewerIds.length > 0
         ? nextSession.activeViewerIds
@@ -414,13 +416,13 @@ export function App() {
     );
   }
 
-  async function loadSavedGroups() {
+  async function loadSavedParties() {
     try {
-      const response = await apiRequest<{ groups: SavedGroup[] }>('/api/groups');
-      setSavedGroups(response.groups);
+      const response = await apiRequest<{ parties: SavedParty[] }>('/api/parties');
+      setSavedParties(response.parties);
     } catch {
-      // A failed groups load shouldn't block the picker — just show none.
-      setSavedGroups([]);
+      // A failed parties load shouldn't block the picker — just show none.
+      setSavedParties([]);
     }
   }
 
@@ -569,12 +571,12 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.activeViewerIds.join(',')]);
 
-  // Refresh the picker's "Saved groups" whenever we land on the picker (logged
-  // in, no active group). Re-runs after activating/clearing a group so a newly
-  // created group shows up on the next visit.
+  // Refresh the picker's "Saved parties" whenever we land on the picker (logged
+  // in, no active party). Re-runs after activating/clearing a party so a newly
+  // created party shows up on the next visit.
   useEffect(() => {
     if (session?.authenticated && session.activeViewerIds.length === 0) {
-      void loadSavedGroups();
+      void loadSavedParties();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.authenticated, session?.activeViewerIds.join(',')]);
@@ -723,7 +725,7 @@ export function App() {
   );
 
   // Guests offered by the modal: mid-Continue it collects pins for EXACTLY the
-  // already-selected guests that still lack one (plain-add and saved-group
+  // already-selected guests that still lack one (plain-add and saved-party
   // paths alike); otherwise it offers the not-yet-added guest candidates.
   const guestCandidates = useMemo(() => {
     if (guestModalForContinue) {
@@ -736,7 +738,7 @@ export function App() {
 
   // Plain add flow: at least one drafted guest (selection-only — pins come at
   // Continue time). Continue flow: a typed PIN per drafted guest, and the draft
-  // may only be emptied when other members remain in the submitted group.
+  // may only be emptied when other members remain in the submitted party.
   const guestConfirmDisabled = isGuestConfirmDisabled({
     forContinue: guestModalForContinue,
     selectedViewerIds,
@@ -770,12 +772,12 @@ export function App() {
     }
   }
 
-  // Select exactly a saved group's members. Any guest member's pin is collected
+  // Select exactly a saved party's members. Any guest member's pin is collected
   // at Continue time (the guest modal reopens for exactly those members) before
-  // the group POST, reusing the existing managed group (same key).
-  function selectSavedGroup(group: SavedGroup) {
+  // the party POST, reusing the existing managed party (same key).
+  function selectSavedParty(party: SavedParty) {
     const visibleIds = new Set((session?.viewers ?? []).map((viewer) => viewer.id));
-    setSelectedViewerIds(group.memberIds.filter((id) => visibleIds.has(id)));
+    setSelectedViewerIds(party.memberIds.filter((id) => visibleIds.has(id)));
     setPins({});
     setError(null);
   }
@@ -819,10 +821,10 @@ export function App() {
   // guests join the selection with NO server call — pins come at Continue time.
   // The Continue flow reconciles the draft against the submitted selection,
   // then verifies the typed pins with the server AT the confirm click
-  // (POST /api/group/verify-pins — a preflight that activates/persists
+  // (POST /api/party/verify-pins — a preflight that activates/persists
   // nothing): a wrong pin keeps the modal open with the server's message for a
   // retype here, never two modals later. Only a verified submission closes the
-  // modal and proceeds to the mixed-group warning / authoritative group POST.
+  // modal and proceeds to the mixed-party warning / authoritative party POST.
   async function confirmGuestModal() {
     const drafted = tertiaryViewers.filter((viewer) => guestDraftIds.includes(viewer.id));
     if (!guestModalForContinue) {
@@ -846,7 +848,7 @@ export function App() {
     try {
       setBusy(true);
       setGuestModalError(null);
-      await apiRequest('/api/group/verify-pins', {
+      await apiRequest('/api/party/verify-pins', {
         method: 'POST',
         body: JSON.stringify({ memberIds: nextSelectedViewerIds, pins: nextPins }),
       });
@@ -871,14 +873,14 @@ export function App() {
       setConfirmMixedOpen(true);
       return;
     }
-    void saveGroup(nextSelectedViewerIds, nextPins);
+    void saveParty(nextSelectedViewerIds, nextPins);
   }
 
   // Continue from the picker — the single pin gate. Order: (1) collect pins for
   // every selected guest still lacking one this Continue interaction (both the
-  // plain-add and saved-group paths — adding a guest never collects a pin),
-  // (2) warn when the group contains ANY non-primary member (watch progress is
-  // shared), (3) POST the group.
+  // plain-add and saved-party paths — adding a guest never collects a pin),
+  // (2) warn when the party contains ANY non-primary member (watch progress is
+  // shared), (3) POST the party.
   function handleContinue() {
     const selected = (session?.viewers ?? []).filter((viewer) => selectedViewerIds.includes(viewer.id));
     const missingPinGuests = selected.filter(
@@ -892,7 +894,7 @@ export function App() {
       setConfirmMixedOpen(true);
       return;
     }
-    void saveGroup(selectedViewerIds, pins);
+    void saveParty(selectedViewerIds, pins);
   }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -909,17 +911,17 @@ export function App() {
     }
   }
 
-  async function saveGroup(memberIds: string[], groupPins: Record<string, string> = {}) {
+  async function saveParty(memberIds: string[], partyPins: Record<string, string> = {}) {
     try {
       setBusy(true);
       setError(null);
-      await apiRequest('/api/group', {
+      await apiRequest('/api/party', {
         method: 'POST',
-        body: JSON.stringify({ memberIds, pins: groupPins }),
+        body: JSON.stringify({ memberIds, pins: partyPins }),
       });
       await loadSession();
     } catch (nextError) {
-      // A 403 is the server's pin verdict (verifyGroupPins): nothing was
+      // A 403 is the server's pin verdict (verifyPartyPins): nothing was
       // activated or persisted. Drop the collected pins and route back to the
       // continue-time pin modal with the server's message so the user can
       // retype and resubmit — never a dead banner.
@@ -932,23 +934,23 @@ export function App() {
           return;
         }
       }
-      setError(nextError instanceof Error ? nextError.message : 'Could not save viewer group');
+      setError(nextError instanceof Error ? nextError.message : 'Could not save viewer party');
     } finally {
       setBusy(false);
     }
   }
 
-  async function clearGroup() {
+  async function clearParty() {
     try {
       setBusy(true);
       setError(null);
-      await apiRequest('/api/group/clear', {
+      await apiRequest('/api/party/clear', {
         method: 'POST',
       });
       setPins({});
       await loadSession();
     } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not clear viewer group');
+      setError(nextError instanceof Error ? nextError.message : 'Could not clear viewer party');
     } finally {
       setBusy(false);
     }
@@ -1056,7 +1058,7 @@ export function App() {
       }
 
       const query = params.toString();
-      // Mint a fresh per-group Jellyfin playback session, then seed Jellyfin-web's
+      // Mint a fresh per-party Jellyfin playback session, then seed Jellyfin-web's
       // localStorage on THIS origin so the /player tab auto-logs-in, then resolve
       // the origin-relative playback path. Mint + seed happen right before open so
       // the rotated token is fresh.
@@ -1551,7 +1553,7 @@ export function App() {
           <div className="row spread">
             <div>
               <p className="eyebrow">Who is watching?</p>
-              <h1>Pick the group</h1>
+              <h1>Pick the party</h1>
             </div>
             <button className="ghost" onClick={() => void logout()}>Log out</button>
           </div>
@@ -1584,23 +1586,23 @@ export function App() {
               </button>
             ) : null}
           </div>
-          {savedGroups.length > 0 ? (
+          {savedParties.length > 0 ? (
             <div className="stack saved-groups">
-              <p className="eyebrow">Saved groups</p>
+              <p className="eyebrow">Saved parties</p>
               <div className="viewer-grid">
-                {savedGroups.map((group) => {
+                {savedParties.map((party) => {
                   const selected =
-                    group.memberIds.length === selectedViewerIds.length &&
-                    group.memberIds.every((id) => selectedViewerIds.includes(id));
+                    party.memberIds.length === selectedViewerIds.length &&
+                    party.memberIds.every((id) => selectedViewerIds.includes(id));
                   return (
                     <button
-                      key={group.groupKey}
+                      key={party.partyKey}
                       className={`viewer-card saved-group-card${selected ? ' selected' : ''}`}
-                      onClick={() => selectSavedGroup(group)}
+                      onClick={() => selectSavedParty(party)}
                       type="button"
                     >
-                      <strong>{group.alias}</strong>
-                      <span className="muted">{group.memberNames.join(', ')}</span>
+                      <strong>{party.alias}</strong>
+                      <span className="muted">{party.memberNames.join(', ')}</span>
                     </button>
                   );
                 })}
@@ -1687,8 +1689,8 @@ export function App() {
               <p className="eyebrow">Heads up</p>
               <h2>Shared watch progress</h2>
               <p className="muted">
-                This group includes viewers beyond the default household set. Continuing will
-                affect watch progress and watched states for ALL users in the group.
+                This party includes viewers beyond the default household set. Continuing will
+                affect watch progress and watched states for ALL users in the party.
               </p>
               <div className="row spread">
                 <button className="ghost" onClick={() => setConfirmMixedOpen(false)} type="button">Cancel</button>
@@ -1696,7 +1698,7 @@ export function App() {
                   disabled={busy}
                   onClick={() => {
                     setConfirmMixedOpen(false);
-                    void saveGroup(selectedViewerIds, pins);
+                    void saveParty(selectedViewerIds, pins);
                   }}
                   type="button"
                 >
@@ -1715,13 +1717,13 @@ export function App() {
       <header className="hero">
         <span className="brand">{session.appName}</span>
         <div className="hero-actions">
-          {session.activeGroupAlias ? (
-            <span className="muted group-alias">{session.activeGroupAlias}</span>
+          {session.activePartyAlias ? (
+            <span className="muted group-alias">{session.activePartyAlias}</span>
           ) : null}
           <button className="ghost compact" onClick={() => setIgnoredOpen(true)} type="button">
             Ignored{ignoredItems.length > 0 ? ` (${ignoredItems.length})` : ''}
           </button>
-          <button className="ghost compact" onClick={() => void clearGroup()} type="button">Change viewers</button>
+          <button className="ghost compact" onClick={() => void clearParty()} type="button">Change viewers</button>
           <button className="ghost compact" onClick={() => void logout()} type="button">Log out</button>
         </div>
       </header>
@@ -1742,7 +1744,7 @@ export function App() {
           />
         </div>
         {!libraryLoading && continueWatching.length === 0 ? (
-          <p className="muted">Nothing in progress for this group yet.</p>
+          <p className="muted">Nothing in progress for this party yet.</p>
         ) : null}
         <div className="media-grid">
           {continuePager.visible.map((item) => (
@@ -1835,7 +1837,7 @@ export function App() {
         <section className="panel section-block">
           <div className="row spread">
             <div>
-              <p className="eyebrow">Group picks</p>
+              <p className="eyebrow">Party picks</p>
               <h2>Because none of you have seen this</h2>
             </div>
             <div className="row">
@@ -1966,13 +1968,13 @@ export function App() {
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="row spread">
               <div>
-                <p className="eyebrow">This group</p>
+                <p className="eyebrow">This party</p>
                 <h2>Ignored</h2>
               </div>
               <button className="ghost" onClick={() => setIgnoredOpen(false)} type="button">Close</button>
             </div>
             {ignoredItems.length === 0 ? (
-              <p className="muted">Nothing is ignored for this group. Use “Ignore” on a card to hide it everywhere.</p>
+              <p className="muted">Nothing is ignored for this party. Use “Ignore” on a card to hide it everywhere.</p>
             ) : (
               <div className="episode-list">
                 {ignoredItems.map((item) => (

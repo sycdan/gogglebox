@@ -1,9 +1,9 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
-// ── recommendations (Group picks) flow ─────────────────────────────────────
-// Proves the "Show me other picks" button swaps the Group-picks grid to a
+// ── recommendations (Party picks) flow ─────────────────────────────────────
+// Proves the "Show me other picks" button swaps the Party-picks grid to a
 // fresh, DISJOINT batch of recommendations. Reads the card titles in the
-// "Group picks" section before and after, and logs whether the two batches
+// "Party picks" section before and after, and logs whether the two batches
 // overlap (expected: zero overlap).
 export const match = /recommend|picks/i;
 
@@ -12,27 +12,27 @@ export async function run(page, ctx) {
 
   console.log('[proof] recommendations: locating viewer-selection screen');
 
-  // We may be on the viewer-selection screen ("Pick the group"). Pick the
+  // We may be on the viewer-selection screen ("Pick the party"). Pick the
   // "Everyone" preset (same approach as continue-watching), then Continue.
-  await pickEveryoneGroupAndContinue(page, 'recommendations');
+  await pickEveryonePartyAndContinue(page, 'recommendations');
 
-  // Locate the "Group picks" section: the .section-block whose eyebrow text
-  // is "Group picks".
+  // Locate the "Party picks" section: the .section-block whose eyebrow text
+  // is "Party picks".
   const picksSection = page
     .locator('.section-block')
-    .filter({ has: page.locator('.eyebrow', { hasText: /^Group picks$/ }) })
+    .filter({ has: page.locator('.eyebrow', { hasText: /^Party picks$/ }) })
     .first();
 
   try {
     await picksSection.waitFor({ state: 'visible', timeout: 30_000 });
   } catch (error) {
-    await shoot(page, `${flowName}-03-no-group-picks`);
-    fail('recommendations: "Group picks" section never appeared', error);
+    await shoot(page, `${flowName}-03-no-party-picks`);
+    fail('recommendations: "Party picks" section never appeared', error);
   }
 
   await picksSection.scrollIntoViewIfNeeded();
 
-  // Reads the recommendation card titles within the Group-picks section.
+  // Reads the recommendation card titles within the Party-picks section.
   async function pickTitles() {
     return picksSection
       .locator('.media-grid .media-card h3')
@@ -51,7 +51,7 @@ export async function run(page, ctx) {
     await shoot(page, `${flowName}-03-no-picks-cards`);
     const empty = await picksSection.locator('.muted').allInnerTexts().catch(() => []);
     fail(
-      'recommendations: no .media-card rendered in the Group-picks section' +
+      'recommendations: no .media-card rendered in the Party-picks section' +
         (empty.length ? ` (section message: ${JSON.stringify(empty)})` : ' (data gap?)'),
       error,
     );
@@ -77,7 +77,7 @@ export async function run(page, ctx) {
     .first();
   if (!(await otherPicksBtn.count().then((n) => n > 0))) {
     await shootView(page, `${flowName}-02-no-button`);
-    fail('recommendations: "Show me other picks" button not found in the Group-picks section');
+    fail('recommendations: "Show me other picks" button not found in the Party-picks section');
   }
 
   const disabledBefore = await otherPicksBtn.isDisabled().catch(() => false);

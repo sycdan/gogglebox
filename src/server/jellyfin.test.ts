@@ -199,7 +199,7 @@ test('request preserves a configured base path on API calls', async () => {
   }
 });
 
-test('ensureGroupUser reuses an existing group user and creates one when missing', async () => {
+test('ensurePartyUser reuses an existing party user and creates one when missing', async () => {
   const originalFetch = globalThis.fetch;
   const calls: Array<{ url: string; method: string; body?: string }> = [];
 
@@ -214,7 +214,7 @@ test('ensureGroupUser reuses an existing group user and creates one when missing
 
   try {
     const client = new JellyfinClient('http://host:8096', 'abc123');
-    const id = await client.ensureGroupUser('group1');
+    const id = await client.ensurePartyUser('group1');
     assert.equal(id, 'existing-id');
     assert.equal(calls.length, 1);
     assert.match(calls[0].url, /\/Users$/);
@@ -245,7 +245,7 @@ test('ensureGroupUser reuses an existing group user and creates one when missing
 
   try {
     const client = new JellyfinClient('http://host:8096', 'abc123');
-    const id = await client.ensureGroupUser('group2');
+    const id = await client.ensurePartyUser('group2');
     assert.equal(id, 'new-id');
     assert.equal(calls.length, 3);
     assert.match(calls[1].url, /\/Users\/New$/);

@@ -1,5 +1,5 @@
 // Stage A: seed Jellyfin-web's localStorage so opening /player in a new tab on
-// the SAME origin auto-logs-in as the gbx-controlled, per-group Jellyfin user.
+// the SAME origin auto-logs-in as the gbx-controlled, per-party Jellyfin user.
 //
 // localStorage is per-ORIGIN. Because the front-door proxy serves both the gbx
 // client (/) and Jellyfin-web (/player) from one origin, JS at / can write the

@@ -8,12 +8,12 @@ import { continueFromPicker, selectExactViewersByName } from '../lib/viewer.mjs'
 //   (the Caddy proxy, http://proxy:8080). Because localStorage is per-ORIGIN,
 //   the gbx client can seed Jellyfin-web's credentials (jellyfin_credentials,
 //   _deviceId2, enableAutoLogin) for that origin, so opening /player in a NEW
-//   TAB auto-logs-in as the gbx-controlled per-group Jellyfin user — no manual
+//   TAB auto-logs-in as the gbx-controlled per-party Jellyfin user — no manual
 //   Jellyfin login form.
 //
 // Steps:
 //   1. (Caller runs us against http://proxy:8080 — see run command in CLAUDE.md.)
-//   2. Select the "parents" (Alice + Bob) viewer group.
+//   2. Select the "parents" (Alice + Bob) viewer party.
 //   3. Trigger the play affordance -> POST /api/player/session, seed localStorage,
 //      window.open('/player...', '_blank'). Capture the popup page.
 //   4. On the /player tab: assert LOGGED IN (Jellyfin home/library visible) and
@@ -28,9 +28,9 @@ export const match = /player-handoff|handoff|front-door|frontdoor|auto-login|aut
 // Select EXACTLY Alice + Bob (the sbx household primaries, preselected on the
 // picker). Falls back to the first two viewer cards on a differently-named
 // config. Uses the shared helpers so preselected primaries outside the wanted
-// set are deselected and any mixed-group confirmation modal is confirmed.
-async function pickParentsGroupAndContinue(page) {
-  const pickHeading = page.getByRole('heading', { name: /pick the group/i });
+// set are deselected and any mixed-party confirmation modal is confirmed.
+async function pickParentsPartyAndContinue(page) {
+  const pickHeading = page.getByRole('heading', { name: /pick the party/i });
   if (!(await pickHeading.count().then((n) => n > 0))) {
     console.log('[proof] player-handoff: already in main app (no viewer-selection screen)');
     return;
@@ -79,7 +79,7 @@ export async function run(page, ctx) {
     console.warn('[proof] player-handoff: JELLYFIN_URL/API_KEY not set; relying on existing library content');
   }
 
-  await pickParentsGroupAndContinue(page);
+  await pickParentsPartyAndContinue(page);
 
   // Reload so the freshly-seeded continue-watching rail is present.
   await page.reload({ waitUntil: 'networkidle' });
@@ -333,7 +333,7 @@ export async function run(page, ctx) {
   }
   await shoot(page, `${flowName}-jellyfin-loggedin`);
   console.log(
-    '[proof] player-handoff: PASS — /player iframe is LOGGED IN as the gbx group user ' +
+    '[proof] player-handoff: PASS — /player iframe is LOGGED IN as the gbx party user ' +
       '(authenticated view visible, no manual login form). See ' +
       `${flowName}-jellyfin-loggedin.png.`,
   );

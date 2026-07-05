@@ -166,7 +166,7 @@ export async function seedInProgressEpisode({ url, apiKey }, log = console.log) 
 }
 
 // Seed a STAGGERED show fixture: the real-world bug scenario where the 3 active
-// viewers are each on a DIFFERENT episode of the same series. The group card must
+// viewers are each on a DIFFERENT episode of the same series. The party card must
 // anchor to the EARLIEST of those episodes and NOT jump when a viewer who is
 // AHEAD of the anchor toggles their watched state. Each viewer i is placed on
 // regulars[base + i] (earlier viewers behind, later viewers ahead); everything
@@ -361,7 +361,7 @@ export async function seedRemovableMovie({ url, apiKey }, { excludeMovieIds = []
 // for >=3 household viewers at CLEARLY different positions (e.g. ~10% / ~45% /
 // ~80%), NONE watched. This exercises the "movies resume least-watched first"
 // rule (src/server/continueWatching.ts mergeContinueWatching -> preferLeastAdvanced):
-// the single group movie card must resume from the LEAST-advanced viewer (lowest
+// the single party movie card must resume from the LEAST-advanced viewer (lowest
 // progressPercent), so the card's badge/progress bar reflects the LOWEST %, and
 // sourceViewer is that least-watched viewer — NOT the most-watched.
 //
@@ -429,8 +429,8 @@ export async function seedMultiViewerMovie({ url, apiKey }, { excludeMovieIds = 
 }
 
 // Seed the CROSS-EPISODE + PARTIAL-PROGRESS show case: one series, the active
-// group's viewers on DIFFERENT episodes each with mid-episode partial progress.
-// This proves SHOWS differ from movies: the group SHOW card anchors on EPISODE
+// party's viewers on DIFFERENT episodes each with mid-episode partial progress.
+// This proves SHOWS differ from movies: the party SHOW card anchors on EPISODE
 // ORDER FIRST (the earliest not-all-watched episode), then resumes from the
 // least-advanced viewer AT that anchor — i.e. "don't spoil the furthest-behind".
 //

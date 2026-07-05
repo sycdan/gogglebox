@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
 // ── continue-watching flow ─────────────────────────────────────────────────
 // Proves the combined Continue-watching rail holds movies+shows and persists
@@ -23,9 +23,9 @@ export async function run(page, ctx) {
       .catch(() => []);
   }
 
-  // We may be on the viewer-selection screen ("Pick the group"). Pick the
+  // We may be on the viewer-selection screen ("Pick the party"). Pick the
   // "Everyone" preset to maximise combined in-progress items, then Continue.
-  await pickEveryoneGroupAndContinue(page, 'continue-watching');
+  await pickEveryonePartyAndContinue(page, 'continue-watching');
 
   // Wait for the main app / Continue-watching section to render.
   try {
@@ -56,7 +56,7 @@ export async function run(page, ctx) {
   if (baseline.length === 0) {
     console.warn(
       '[proof] continue-watching: DATA GAP — Continue-watching rail is EMPTY. ' +
-        'The script ran fine; there is simply no in-progress data for this group. ' +
+        'The script ran fine; there is simply no in-progress data for this party. ' +
         'This is NOT a UI defect; seed in-progress items to fully validate persistence.',
     );
   }

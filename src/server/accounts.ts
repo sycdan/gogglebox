@@ -1,5 +1,5 @@
 // Config v2 pure logic: access-token authentication, tier resolution
-// (wildcards + precedence + pin-filter), visible-viewer projection, and group
+// (wildcards + precedence + pin-filter), visible-viewer projection, and party
 // pin verification. These are Jellyfin-free so they can be unit tested without
 // booting the server.
 
@@ -137,7 +137,7 @@ export function visibleViewersForAccount(
 // guest for this account). Returns { ok: true } when all required pins match,
 // otherwise { ok: false, error } describing the first failure. Pins are a map
 // of jellyfinUserId -> supplied pin, verified against the users[] pin registry.
-export function verifyGroupPins(
+export function verifyPartyPins(
   account: AccountV2,
   users: ConfigUser[],
   allJellyfinNames: string[],
@@ -174,10 +174,10 @@ export function verifyGroupPins(
 // the tertiary/guest tier for this account). Returns the resolved member
 // viewers on success, or a { status, error } the caller should send (400 for
 // member problems, 403 for a pin verdict). Pure — config is passed in — so the
-// verdict shared by /api/group, /api/group/verify-pins and /api/player/session
-// is unit-testable without booting the server. Verifies only; it never
-// activates or persists anything.
-export function resolveGroupMemberSelection(
+// verdict shared by /api/party, /api/party/verify-pins and /api/player/session
+// (and their /api/group* compatibility aliases) is unit-testable without
+// booting the server. Verifies only; it never activates or persists anything.
+export function resolvePartyMemberSelection(
   account: AccountV2,
   viewersByName: Record<string, FamilyMember>,
   users: ConfigUser[],
@@ -200,7 +200,7 @@ export function resolveGroupMemberSelection(
     members.push(viewer);
   }
 
-  const pinCheck = verifyGroupPins(account, users, Object.keys(viewersByName), members, pins);
+  const pinCheck = verifyPartyPins(account, users, Object.keys(viewersByName), members, pins);
   if (!pinCheck.ok) {
     // Never clear pin-gating with a wrong/missing required pin.
     return { ok: false, status: 403, error: pinCheck.error };

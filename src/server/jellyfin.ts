@@ -613,16 +613,22 @@ export class JellyfinClient {
     return `${this.basePath}/web/index.html#/details?${params.toString()}`;
   }
 
-  // --- Per-group playback user (Stage A) ----------------------------------
+  // --- Per-party playback user (Stage A) ----------------------------------
   //
-  // gbx owns a dedicated Jellyfin user PER GROUP (username gbx-grp-<groupId>).
-  // We persist only the group->jellyfinUserId mapping (never passwords): the
-  // password is random, rotated on every mint, used immediately, never stored.
+  // gbx owns a dedicated Jellyfin user PER PARTY (username gbx-grp-<partyId>).
+  // The "gbx-grp-" username prefix predates the group -> party rename and is
+  // left EXACTLY as-is: it is real, already-minted Jellyfin state for every
+  // existing deployment, and this effort does not change how parties map to
+  // Jellyfin users. We persist only the party->jellyfinUserId mapping (never
+  // passwords): the password is random, rotated on every mint, used
+  // immediately, never stored.
 
-  // The deterministic Jellyfin username for a group's gbx-owned playback user.
-  // Public so the server can pass it to rotatePasswordAndAuthenticate.
-  groupUserName(groupId: string): string {
-    return `gbx-grp-${groupId}`;
+  // The deterministic Jellyfin username for a party's gbx-owned playback user.
+  // Public so the server can pass it to rotatePasswordAndAuthenticate. The
+  // "gbx-grp-" prefix is intentionally unchanged by the group -> party rename
+  // (see note above).
+  partyUserName(partyId: string): string {
+    return `gbx-grp-${partyId}`;
   }
 
   // JF 10.9.11 validates these provider ids as REQUIRED on a UserPolicy update
@@ -634,11 +640,11 @@ export class JellyfinClient {
   private static readonly DEFAULT_PASSWORD_RESET_PROVIDER_ID =
     'Jellyfin.Server.Implementations.Users.DefaultPasswordResetProvider';
 
-  // Find (or create) the gbx-owned Jellyfin user for a group and return its id.
+  // Find (or create) the gbx-owned Jellyfin user for a party and return its id.
   // Idempotent: an existing user is reused. Newly created users are granted
   // access to all libraries and confirmed enabled.
-  async ensureGroupUser(groupId: string): Promise<string> {
-    const name = this.groupUserName(groupId);
+  async ensurePartyUser(partyId: string): Promise<string> {
+    const name = this.partyUserName(partyId);
     const users = await this.request<JellyfinUserRecord[]>('/Users');
     const existing = users.find((user) => user.Name === name);
     if (existing) {
@@ -669,7 +675,7 @@ export class JellyfinClient {
     return created.Id;
   }
 
-  // Rotate the per-group user's password to a fresh random value, then
+  // Rotate the per-party user's password to a fresh random value, then
   // authenticate as that user to obtain a short-lived access token. The password
   // is used immediately and never persisted. Returns the token + identity the
   // client needs to seed Jellyfin-web's localStorage.
@@ -710,7 +716,7 @@ export class JellyfinClient {
     });
 
     if (!auth?.AccessToken || !auth.User?.Id) {
-      throw new Error('Jellyfin did not return an access token for the group user');
+      throw new Error('Jellyfin did not return an access token for the party user');
     }
 
     return {

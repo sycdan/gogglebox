@@ -7,8 +7,8 @@ import session from 'express-session';
 
 import {
   accountForToken,
-  resolveGroupMemberSelection,
-  verifyGroupPins,
+  resolvePartyMemberSelection,
+  verifyPartyPins,
   visibleViewersForAccount,
 } from './accounts';
 import { AppState } from './appState';
@@ -21,8 +21,8 @@ import {
   isIgnored,
   mergeContinueWatching,
 } from './continueWatching';
-import { deriveGroupKey } from './groupKey';
-import { buildGroupAlias, resolveGroupForMembers, visibleGroupsForAccount } from './groups';
+import { derivePartyKey } from './partyKey';
+import { buildPartyAlias, resolvePartyForMembers, visiblePartiesForAccount } from './parties';
 import { JellyfinClient } from './jellyfin';
 import { AccountV2, ContinueWatchingItem, FamilyMember, LibraryItem, LibraryKind, ViewerWatchedState } from './types';
 import { computeWatchedFanout } from './watchedFanout';
@@ -101,7 +101,7 @@ function requireAuth(
   next();
 }
 
-function requireViewerGroup(
+function requireViewerParty(
   req: express.Request,
   res: express.Response,
   next: express.NextFunction,
@@ -118,33 +118,33 @@ function activeViewersForSession(req: express.Request): FamilyMember[] {
   return allViewers().filter((viewer) => req.session.activeViewerIds?.includes(viewer.id));
 }
 
-// Deterministic, order-independent key for the active viewer group, derived from
+// Deterministic, order-independent key for the active viewer party, derived from
 // the selected Jellyfin user ids. Same set of people -> same key.
-function activeGroupKey(req: express.Request): string {
+function activePartyKey(req: express.Request): string {
   const jellyfinUserIds = activeViewersForSession(req).map((viewer) => viewer.jellyfinUserId);
-  return deriveGroupKey(jellyfinUserIds);
+  return derivePartyKey(jellyfinUserIds);
 }
 
-// The human-readable alias for the active group, or null when no group is
+// The human-readable alias for the active party, or null when no party is
 // active. Prefers the stored alias; falls back to a derived alias (member names
 // joined " + " in the account's visible-user order) so the UI never shows the
-// raw gbx-grp-<hash> name even for groups created before aliases existed.
-function activeGroupAlias(req: express.Request, account: AccountV2 | null): string | null {
+// raw gbx-grp-<hash> name even for parties created before aliases existed.
+function activePartyAlias(req: express.Request, account: AccountV2 | null): string | null {
   const members = activeViewersForSession(req);
   if (!account || members.length === 0) {
     return null;
   }
-  const groupKey = activeGroupKey(req);
-  const stored = appState.getGroupAlias(groupKey);
+  const partyKey = activePartyKey(req);
+  const stored = appState.getPartyAlias(partyKey);
   if (stored) {
     return stored;
   }
   const visible = visibleViewersForAccount(account, config.viewersByName, config.users);
-  return buildGroupAlias(members.map((member) => member.id), visible) || null;
+  return buildPartyAlias(members.map((member) => member.id), visible) || null;
 }
 
 function ignoreEntriesForSession(req: express.Request) {
-  return appState.getIgnoreEntries(activeGroupKey(req));
+  return appState.getIgnoreEntries(activePartyKey(req));
 }
 
 function getItemId(req: express.Request): string {
@@ -269,6 +269,8 @@ app.get('/api/session', (req, res) => {
   // account — never the global user list, never the configured pins.
   const viewers = auth ? visibleViewersForAccount(auth.account, config.viewersByName, config.users) : [];
 
+  const partyAlias = activePartyAlias(req, auth?.account ?? null);
+
   res.json({
     authenticated: Boolean(req.session.isAuthenticated && auth),
     // Auto-login is implicit: enabled when the ACCESS_TOKEN env var is set.
@@ -279,9 +281,12 @@ app.get('/api/session', (req, res) => {
     account: auth ? auth.accountKey : null,
     viewers,
     activeViewerIds: req.session.activeViewerIds ?? [],
-    // The active group's human-readable alias (never the raw gbx-grp-<hash>),
-    // or null when no group is active. Surfaced near "Change viewers" in the app.
-    activeGroupAlias: activeGroupAlias(req, auth?.account ?? null),
+    // The active party's human-readable alias (never the raw gbx-grp-<hash>),
+    // or null when no party is active. Surfaced near "Change viewers" in the app.
+    activePartyAlias: partyAlias,
+    // Pre-rename compatibility field (identical value) for any client still
+    // reading the old name. Never diverges from activePartyAlias above.
+    activeGroupAlias: partyAlias,
   });
 });
 
@@ -300,7 +305,7 @@ app.post('/api/auth/login', (req, res) => {
 
   req.session.isAuthenticated = true;
   req.session.accountKey = match.accountKey;
-  // A fresh login starts with no active group (visible viewers differ per account).
+  // A fresh login starts with no active party (visible viewers differ per account).
   req.session.activeViewerIds = [];
   res.json({ ok: true, account: match.accountKey });
 });
@@ -332,19 +337,19 @@ function parsePins(body: unknown): Record<string, string> {
 }
 
 // Validate + pin-verify a selected member set against the live config (see
-// resolveGroupMemberSelection for the pure rules). Shared by /api/group,
-// /api/group/verify-pins and /api/player/session so pin-gating is enforced
-// everywhere a group is minted.
-function resolveGroupMembers(
+// resolvePartyMemberSelection for the pure rules). Shared by /api/party,
+// /api/party/verify-pins and /api/player/session (and their /api/group*
+// compatibility aliases) so pin-gating is enforced everywhere a party is minted.
+function resolvePartyMembers(
   account: AccountV2,
   memberIds: string[],
   pins: Record<string, string>,
 ): { ok: true; members: FamilyMember[] } | { ok: false; status: number; error: string } {
-  return resolveGroupMemberSelection(account, config.viewersByName, config.users, memberIds, pins);
+  return resolvePartyMemberSelection(account, config.viewersByName, config.users, memberIds, pins);
 }
 
-// Parse the memberIds array off a group request body (same wire shape at
-// /api/group and /api/group/verify-pins).
+// Parse the memberIds array off a party request body (same wire shape at
+// /api/party and /api/party/verify-pins, and their /api/group* aliases).
 function parseMemberIds(body: unknown): string[] {
   const raw = (body as { memberIds?: unknown } | undefined)?.memberIds;
   return Array.isArray(raw)
@@ -352,27 +357,30 @@ function parseMemberIds(body: unknown): string[] {
     : [];
 }
 
-// UX preflight for the continue-time PIN modal: verify the prospective group's
+// UX preflight for the continue-time PIN modal: verify the prospective party's
 // membership + pins at the confirm click, WITHOUT activating or persisting
-// anything. Same wire shape and { status, error } verdicts as /api/group,
+// anything. Same wire shape and { status, error } verdicts as /api/party,
 // which stays authoritative (this endpoint never replaces its enforcement).
-app.post('/api/group/verify-pins', requireAuth, (req, res) => {
+function handleVerifyPartyPins(req: express.Request, res: express.Response): void {
   const auth = accountForSession(req);
   if (!auth) {
     res.status(401).json({ error: 'Not authenticated' });
     return;
   }
 
-  const resolved = resolveGroupMembers(auth.account, parseMemberIds(req.body), parsePins(req.body));
+  const resolved = resolvePartyMembers(auth.account, parseMemberIds(req.body), parsePins(req.body));
   if (!resolved.ok) {
     res.status(resolved.status).json({ error: resolved.error });
     return;
   }
 
   res.json({ ok: true });
-});
+}
+app.post('/api/party/verify-pins', requireAuth, handleVerifyPartyPins);
+// Pre-rename compatibility alias — identical behavior.
+app.post('/api/group/verify-pins', requireAuth, handleVerifyPartyPins);
 
-app.post('/api/group', requireAuth, async (req, res) => {
+async function handleCreateParty(req: express.Request, res: express.Response): Promise<void> {
   const auth = accountForSession(req);
   if (!auth) {
     res.status(401).json({ error: 'Not authenticated' });
@@ -384,45 +392,48 @@ app.post('/api/group', requireAuth, async (req, res) => {
     : [];
   const pins = parsePins(req.body);
 
-  const resolved = resolveGroupMembers(auth.account, memberIds, pins);
+  const resolved = resolvePartyMembers(auth.account, memberIds, pins);
   if (!resolved.ok) {
     res.status(resolved.status).json({ error: resolved.error });
     return;
   }
 
-  // Persist the managed group NOW (on Continue), after pin verification. The key
+  // Persist the managed party NOW (on Continue), after pin verification. The key
   // is deterministic + order-independent, so an existing combination is reused
-  // (never duplicated) and only a brand-new combination mints + persists a group.
+  // (never duplicated) and only a brand-new combination mints + persists a party.
   try {
     const memberJellyfinUserIds = resolved.members.map((member) => member.jellyfinUserId);
-    const { groupKey, exists } = resolveGroupForMembers(
+    const { partyKey, exists } = resolvePartyForMembers(
       memberJellyfinUserIds,
-      appState.getGroupPlayerUsers(),
+      appState.getPartyPlayerUsers(),
     );
     if (!exists) {
-      const userId = await jellyfin.ensureGroupUser(groupKey);
-      appState.setGroupPlayerUser(groupKey, userId, memberJellyfinUserIds);
+      const userId = await jellyfin.ensurePartyUser(partyKey);
+      appState.setPartyPlayerUser(partyKey, userId, memberJellyfinUserIds);
       // Auto-generate + persist a default alias from member names in this
       // account's visible-viewer order (e.g. "Alice + Bob").
       const visible = visibleViewersForAccount(auth.account, config.viewersByName, config.users);
-      const alias = buildGroupAlias(resolved.members.map((member) => member.id), visible);
-      appState.setGroupAlias(groupKey, alias);
+      const alias = buildPartyAlias(resolved.members.map((member) => member.id), visible);
+      appState.setPartyAlias(partyKey, alias);
     }
   } catch (error) {
-    res.status(502).json({ error: error instanceof Error ? error.message : 'Could not create group' });
+    res.status(502).json({ error: error instanceof Error ? error.message : 'Could not create party' });
     return;
   }
 
   req.session.activeViewerIds = resolved.members.map((member) => member.id);
-  // The active group cleared pin-gating; the player-session mint can trust it.
-  req.session.activeGroupPinVerified = true;
+  // The active party cleared pin-gating; the player-session mint can trust it.
+  req.session.activePartyPinVerified = true;
   res.json({ ok: true, activeViewerIds: req.session.activeViewerIds });
-});
+}
+app.post('/api/party', requireAuth, handleCreateParty);
+// Pre-rename compatibility alias — identical behavior.
+app.post('/api/group', requireAuth, handleCreateParty);
 
-// The managed groups VISIBLE to the logged-in account: a group is visible iff
+// The managed parties VISIBLE to the logged-in account: a party is visible iff
 // ALL its members are within the account's visible users. Aliases (never the raw
 // gbx-grp-<hash> name) are backfilled from member names when not stored.
-app.get('/api/groups', requireAuth, (req, res) => {
+function handleListParties(req: express.Request, res: express.Response): void {
   const auth = accountForSession(req);
   if (!auth) {
     res.status(401).json({ error: 'Not authenticated' });
@@ -430,19 +441,30 @@ app.get('/api/groups', requireAuth, (req, res) => {
   }
 
   const visible = visibleViewersForAccount(auth.account, config.viewersByName, config.users);
-  const groups = visibleGroupsForAccount(
-    appState.getGroupPlayerUsers(),
+  const parties = visiblePartiesForAccount(
+    appState.getPartyPlayerUsers(),
     visible,
-    appState.getGroupAliases(),
+    appState.getPartyAliases(),
   );
-  res.json({ groups });
-});
+  res.json({
+    parties,
+    // Pre-rename compatibility field: the same list, shaped with `groupKey`
+    // instead of `partyKey`, for any client still reading the old field names.
+    groups: parties.map(({ partyKey, ...rest }) => ({ groupKey: partyKey, ...rest })),
+  });
+}
+app.get('/api/parties', requireAuth, handleListParties);
+// Pre-rename compatibility alias — identical behavior.
+app.get('/api/groups', requireAuth, handleListParties);
 
-app.post('/api/group/clear', requireAuth, (req, res) => {
+function handleClearParty(req: express.Request, res: express.Response): void {
   req.session.activeViewerIds = [];
-  req.session.activeGroupPinVerified = false;
+  req.session.activePartyPinVerified = false;
   res.json({ ok: true, activeViewerIds: [] });
-});
+}
+app.post('/api/party/clear', requireAuth, handleClearParty);
+// Pre-rename compatibility alias — identical behavior.
+app.post('/api/group/clear', requireAuth, handleClearParty);
 
 app.get('/api/library', requireAuth, async (req, res) => {
   try {
@@ -473,7 +495,7 @@ app.get('/api/library', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res) => {
+app.get('/api/recommendations', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const kind = req.query.kind === 'show' ? 'show' : 'movie';
     const genre = typeof req.query.genre === 'string' && req.query.genre ? req.query.genre : undefined;
@@ -502,7 +524,7 @@ app.get('/api/recommendations', requireAuth, requireViewerGroup, async (req, res
   }
 });
 
-app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, res) => {
+app.get('/api/continue-watching', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const viewers = activeViewersForSession(req);
     const ignoreEntries = ignoreEntriesForSession(req);
@@ -524,8 +546,8 @@ app.get('/api/continue-watching', requireAuth, requireViewerGroup, async (req, r
   }
 });
 
-app.get('/api/ignored', requireAuth, requireViewerGroup, (req, res) => {
-  const items = appState.getIgnoreEntries(activeGroupKey(req));
+app.get('/api/ignored', requireAuth, requireViewerParty, (req, res) => {
+  const items = appState.getIgnoreEntries(activePartyKey(req));
   res.json({ items });
 });
 
@@ -534,7 +556,7 @@ app.get('/api/ignored', requireAuth, requireViewerGroup, (req, res) => {
 // scope 'show', movie id for scope 'movie'); `matchSeriesId` is true only for
 // whole-show scope. `label` is the display string captured at ignore-time from
 // the card itself, so the ignored panel never needs a separate name lookup.
-app.post('/api/ignored', requireAuth, requireViewerGroup, (req, res) => {
+app.post('/api/ignored', requireAuth, requireViewerParty, (req, res) => {
   const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
   const matchSeriesId = Boolean(req.body?.matchSeriesId);
   const label = typeof req.body?.label === 'string' ? req.body.label.trim() : '';
@@ -544,17 +566,17 @@ app.post('/api/ignored', requireAuth, requireViewerGroup, (req, res) => {
     return;
   }
 
-  const items = appState.ignoreItem(activeGroupKey(req), { key, matchSeriesId, label: label || key });
+  const items = appState.ignoreItem(activePartyKey(req), { key, matchSeriesId, label: label || key });
   res.json({ items });
 });
 
-app.delete('/api/ignored/:key', requireAuth, requireViewerGroup, (req, res) => {
+app.delete('/api/ignored/:key', requireAuth, requireViewerParty, (req, res) => {
   const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
-  const items = appState.unignoreItem(activeGroupKey(req), key);
+  const items = appState.unignoreItem(activePartyKey(req), key);
   res.json({ items });
 });
 
-app.get('/api/shows/:seriesId/episodes', requireAuth, requireViewerGroup, async (req, res) => {
+app.get('/api/shows/:seriesId/episodes', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const seriesId = Array.isArray(req.params.seriesId) ? req.params.seriesId[0] : req.params.seriesId;
     const episodes = await jellyfin.listEpisodes(seriesId);
@@ -564,7 +586,7 @@ app.get('/api/shows/:seriesId/episodes', requireAuth, requireViewerGroup, async 
   }
 });
 
-app.post('/api/items/:itemId/watched', requireAuth, requireViewerGroup, async (req, res) => {
+app.post('/api/items/:itemId/watched', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const viewers = activeViewersForSession(req);
     const itemId = getItemId(req);
@@ -576,16 +598,16 @@ app.post('/api/items/:itemId/watched', requireAuth, requireViewerGroup, async (r
 });
 
 // Toggle a single viewer's played state for one item (the card's current
-// episode/movie). The viewer must be in the active group. State lives in
+// episode/movie). The viewer must be in the active party. State lives in
 // Jellyfin; we return the new value so the client can reconcile.
-app.post('/api/items/:itemId/viewer-watched', requireAuth, requireViewerGroup, async (req, res) => {
+app.post('/api/items/:itemId/viewer-watched', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const viewerId = typeof req.body?.viewerId === 'string' ? req.body.viewerId : '';
     const watched = Boolean(req.body?.watched);
     const viewer = activeViewersForSession(req).find((candidate) => candidate.id === viewerId);
 
     if (!viewer) {
-      res.status(400).json({ error: 'Viewer must be in the active group' });
+      res.status(400).json({ error: 'Viewer must be in the active party' });
       return;
     }
 
@@ -602,7 +624,7 @@ app.post('/api/items/:itemId/viewer-watched', requireAuth, requireViewerGroup, a
   }
 });
 
-app.post('/api/items/:itemId/progress/sync', requireAuth, requireViewerGroup, async (req, res) => {
+app.post('/api/items/:itemId/progress/sync', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const sourceViewerId = typeof req.body?.sourceViewerId === 'string' ? req.body.sourceViewerId : '';
     const playbackPositionTicks = Number(req.body?.playbackPositionTicks);
@@ -610,7 +632,7 @@ app.post('/api/items/:itemId/progress/sync', requireAuth, requireViewerGroup, as
     const sourceViewer = viewers.find((viewer) => viewer.id === sourceViewerId);
 
     if (!sourceViewer) {
-      res.status(400).json({ error: 'Source viewer must be in the active group' });
+      res.status(400).json({ error: 'Source viewer must be in the active party' });
       return;
     }
 
@@ -636,7 +658,7 @@ app.post('/api/items/:itemId/progress/sync', requireAuth, requireViewerGroup, as
   }
 });
 
-app.delete('/api/items/:itemId/watched', requireAuth, requireViewerGroup, async (req, res) => {
+app.delete('/api/items/:itemId/watched', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const viewers = activeViewersForSession(req);
     const itemId = getItemId(req);
@@ -647,25 +669,25 @@ app.delete('/api/items/:itemId/watched', requireAuth, requireViewerGroup, async 
   }
 });
 
-// Stage A: mint a fresh Jellyfin playback session for the active group's
+// Stage A: mint a fresh Jellyfin playback session for the active party's
 // gbx-owned JF user, so the client can seed Jellyfin-web's localStorage and
-// auto-login in the /player tab. The active group id is the deterministic,
+// auto-login in the /player tab. The active party id is the deterministic,
 // order-independent key derived from the active viewers' Jellyfin user ids
-// (activeGroupKey / deriveGroupKey) — same set of people -> same JF user. We
-// rotate a random password on every mint and persist only the group->userId
+// (activePartyKey / derivePartyKey) — same set of people -> same JF user. We
+// rotate a random password on every mint and persist only the party->userId
 // mapping (never the password).
-app.post('/api/player/session', requireAuth, requireViewerGroup, async (req, res) => {
+app.post('/api/player/session', requireAuth, requireViewerParty, async (req, res) => {
   try {
-    // Defense in depth: never mint a group player user for a group that hasn't
-    // cleared pin-gating. The group is normally verified at /api/group, but a
+    // Defense in depth: never mint a party player user for a party that hasn't
+    // cleared pin-gating. The party is normally verified at /api/party, but a
     // direct mint must re-prove any required pins (accepting pins in the body).
     const auth = accountForSession(req);
     if (!auth) {
       res.status(401).json({ error: 'Not authenticated' });
       return;
     }
-    if (!req.session.activeGroupPinVerified) {
-      const pinCheck = verifyGroupPins(
+    if (!req.session.activePartyPinVerified) {
+      const pinCheck = verifyPartyPins(
         auth.account,
         config.users,
         allJellyfinNames(),
@@ -676,21 +698,21 @@ app.post('/api/player/session', requireAuth, requireViewerGroup, async (req, res
         res.status(403).json({ error: pinCheck.error });
         return;
       }
-      req.session.activeGroupPinVerified = true;
+      req.session.activePartyPinVerified = true;
     }
 
-    const groupKey = activeGroupKey(req);
-    const userId = await jellyfin.ensureGroupUser(groupKey);
-    // Stage B: persist the group player user id AND the member ids (the active
+    const partyKey = activePartyKey(req);
+    const userId = await jellyfin.ensurePartyUser(partyKey);
+    // Stage B: persist the party player user id AND the member ids (the active
     // viewers' Jellyfin user ids) so the watched fan-out poller can map this
     // player user's sessions back to the individual members to mark played.
     const memberIds = activeViewersForSession(req).map((viewer) => viewer.jellyfinUserId);
-    appState.setGroupPlayerUser(groupKey, userId, memberIds);
+    appState.setPartyPlayerUser(partyKey, userId, memberIds);
 
     const deviceId = crypto.randomUUID();
     const token = await jellyfin.rotatePasswordAndAuthenticate(
       userId,
-      jellyfin.groupUserName(groupKey),
+      jellyfin.partyUserName(partyKey),
       deviceId,
     );
 
@@ -706,7 +728,7 @@ app.post('/api/player/session', requireAuth, requireViewerGroup, async (req, res
   }
 });
 
-app.get('/api/items/:itemId/playback-url', requireAuth, requireViewerGroup, (req, res) => {
+app.get('/api/items/:itemId/playback-url', requireAuth, requireViewerParty, (req, res) => {
   const itemId = getItemId(req);
   const hasStartPosition = typeof req.query.startPositionTicks === 'string';
   const startPositionTicks = hasStartPosition ? Number(req.query.startPositionTicks) : undefined;
@@ -725,7 +747,7 @@ app.get('/api/items/:itemId/playback-url', requireAuth, requireViewerGroup, (req
   res.json({ url });
 });
 
-app.get('/api/items/:itemId/playback-progress', requireAuth, requireViewerGroup, async (req, res) => {
+app.get('/api/items/:itemId/playback-progress', requireAuth, requireViewerParty, async (req, res) => {
   try {
     const itemId = getItemId(req);
     const viewers = activeViewersForSession(req);
@@ -756,10 +778,10 @@ app.get('/{*rest}', (_req, res, next) => {
 
 // ── Stage B: watched fan-out poller ────────────────────────────────────────
 //
-// A single server-side interval polls Jellyfin's active sessions. When a GROUP
+// A single server-side interval polls Jellyfin's active sessions. When a PARTY
 // PLAYER user (minted by POST /api/player/session) crosses the watched threshold
 // on the item it's playing, gbx marks that item Played for every INDIVIDUAL
-// member id of the group. The decision logic is the pure computeWatchedFanout;
+// member id of the party. The decision logic is the pure computeWatchedFanout;
 // this wrapper does the IO. Idempotent across ticks via the marked-set carried in
 // `watchedFanoutMarked`.
 const WATCHED_FANOUT_INTERVAL_MS = 5000;
@@ -774,8 +796,8 @@ async function runWatchedFanoutTick(): Promise<void> {
   watchedFanoutRunning = true;
 
   try {
-    // Map each group player jellyfinUserId -> the member ids to fan out to.
-    const players = appState.getGroupPlayerUsers();
+    // Map each party player jellyfinUserId -> the member ids to fan out to.
+    const players = appState.getPartyPlayerUsers();
     const playerUserMembers = new Map<string, string[]>();
     for (const { jellyfinUserId, memberIds } of Object.values(players)) {
       if (jellyfinUserId && memberIds.length > 0) {
@@ -783,7 +805,7 @@ async function runWatchedFanoutTick(): Promise<void> {
       }
     }
     if (playerUserMembers.size === 0) {
-      // No minted group players yet (or none with members) — nothing to poll.
+      // No minted party players yet (or none with members) — nothing to poll.
       watchedFanoutMarked = new Set<string>();
       return;
     }

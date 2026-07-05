@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 import { seedStaggeredShow } from '../lib/seed-inprogress.mjs';
 import { makeJellyfin } from '../lib/jellyfin.mjs';
 import { collectAllRailCards, goToFirstRailPage, goToRailPage } from '../lib/rail.mjs';
@@ -81,7 +81,7 @@ export async function run(page, ctx) {
     fail('show-cross-episode: could not seed a staggered (fan-out) show fixture (DATA GAP).');
   }
 
-  await pickEveryoneGroupAndContinue(page, flowName);
+  await pickEveryonePartyAndContinue(page, flowName);
 
   try {
     await rail(page).waitFor({ state: 'visible', timeout: 30000 });

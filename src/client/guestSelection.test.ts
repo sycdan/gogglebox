@@ -49,8 +49,8 @@ test('reconcileContinueGuestSelection can add a confirmed modal guest missing fr
 });
 
 // The submission buildContinueGuestSubmission returns is exactly what the
-// confirm click sends to POST /api/group/verify-pins (and, once verified, to
-// POST /api/group): reconciled member ids plus pins keyed by jellyfinUserId.
+// confirm click sends to POST /api/party/verify-pins (and, once verified, to
+// POST /api/party): reconciled member ids plus pins keyed by jellyfinUserId.
 test('buildContinueGuestSubmission collects typed pins keyed by jellyfinUserId', () => {
   const result = buildContinueGuestSubmission({
     selectedViewerIds: ['primary-a', 'guest-carol'],
@@ -151,7 +151,7 @@ test('guestIdsForPinRetry reopens the pin modal for exactly the submitted guest 
   );
 });
 
-test('guestIdsForPinRetry yields no guests for an all-household group (banner fallback)', () => {
+test('guestIdsForPinRetry yields no guests for an all-household party (banner fallback)', () => {
   const viewers = [
     { id: 'primary-a', tier: 'primary' },
     { id: 'guest-carol', tier: 'tertiary' },

@@ -52,10 +52,11 @@ After step 3 you have, at the project root:
     `ACCESS_TOKEN` so auto-login works.
   - `visitor` (token `sbx-visitor-token`) — no primaries, Dave as a secondary,
     Carol as a TERTIARY guest (addable only via the "+ Add guest" modal with
-    her pin), for the guest-PIN group proof (`PROOF_FLOW=group-pin`).
+    her pin), for the guest-PIN party proof (`PROOF_FLOW=party-pin`).
 
   The server resolves these names → Jellyfin ids at startup (`fetchUsers`); no
-  UUIDs, `groups[]`, or `household`/password creds are written.
+  UUIDs, legacy `groups[]`/`parties[]` presets, or `household`/password creds
+  are written.
 
 Sandbox volumes are disposable. If provisioning or proof ever looks wedged from
 old Jellyfin state, reset from scratch instead of migrating it:
@@ -119,7 +120,7 @@ What the overlay bakes into `server`/`proof` (so you never hand-hack again):
   to the sandbox-pointed `server` because the overlay overrides that same service.
 - **`proof`**: `env_file: [.env, .env.sbx]` (so seeders get the sandbox Jellyfin
   creds layered over the shared `.env`) and the same `config.sbx.json` mount, so the flow reads the
-  **household group** and scopes seeders to Alice/Bob/Carol/Dave only — not the
+  **household party** and scopes seeders to Alice/Bob/Carol/Dave only — not the
   `gogglebox-admin` user, whose stray played-state would desync the rail.
 
 > Gotcha: if a container ever comes up with **no network** (can happen if a prior

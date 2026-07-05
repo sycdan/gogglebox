@@ -4,7 +4,7 @@
 # gbx client JS (served at /) and Jellyfin-web (served at /player) share a
 # localStorage origin. That lets the client seed Jellyfin-web's credentials
 # for the same origin, so opening /player in a new tab auto-logs-in as a
-# gbx-controlled, per-group Jellyfin user.
+# gbx-controlled, per-party Jellyfin user.
 #
 # Routes:
 #   /api/*    -> gbx server  (Express :3000)

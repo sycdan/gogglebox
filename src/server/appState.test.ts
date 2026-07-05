@@ -20,7 +20,7 @@ test('getIgnoreEntries returns empty when the state file does not exist', () => 
   assert.deepEqual(state.getIgnoreEntries('group-1'), []);
 });
 
-test('ignoreItem creates the file and persists per group', () => {
+test('ignoreItem creates the file and persists per party', () => {
   const filePath = tempStatePath();
   const state = new AppState(filePath);
 
@@ -56,7 +56,7 @@ test('getIgnoreEntries orders most-recent-first, and re-ignoring the same key bu
   assert.equal(bumped?.matchSeriesId, true);
 });
 
-test('unignoreItem removes the item and prunes empty groups', () => {
+test('unignoreItem removes the item and prunes empty parties', () => {
   const filePath = tempStatePath();
   const state = new AppState(filePath);
   state.ignoreItem('group-1', { key: 'item-a', matchSeriesId: false, label: 'A' });
@@ -71,26 +71,61 @@ test('unignoreItem removes the item and prunes empty groups', () => {
   assert.equal(raw.ignoredItems?.['group-1'], undefined);
 });
 
-test('group aliases persist and read back, ignoring empty/blank aliases', () => {
+test('party aliases persist and read back, ignoring empty/blank aliases', () => {
   const filePath = tempStatePath();
   const state = new AppState(filePath);
 
-  assert.equal(state.getGroupAlias('group-1'), undefined);
+  assert.equal(state.getPartyAlias('group-1'), undefined);
 
-  state.setGroupAlias('group-1', 'Alice + Bob');
-  assert.equal(state.getGroupAlias('group-1'), 'Alice + Bob');
+  state.setPartyAlias('group-1', 'Alice + Bob');
+  assert.equal(state.getPartyAlias('group-1'), 'Alice + Bob');
 
   // An empty/blank alias is a no-op (never overwrites with garbage).
-  state.setGroupAlias('group-1', '   ');
-  assert.equal(state.getGroupAlias('group-1'), 'Alice + Bob');
+  state.setPartyAlias('group-1', '   ');
+  assert.equal(state.getPartyAlias('group-1'), 'Alice + Bob');
 
-  state.setGroupAlias('group-2', 'Carol');
-  assert.deepEqual(state.getGroupAliases(), { 'group-1': 'Alice + Bob', 'group-2': 'Carol' });
+  state.setPartyAlias('group-2', 'Carol');
+  assert.deepEqual(state.getPartyAliases(), { 'group-1': 'Alice + Bob', 'group-2': 'Carol' });
 
-  // Aliases coexist with other state (e.g. group player users) without clobbering.
-  state.setGroupPlayerUser('group-1', 'jf-1', ['m-1', 'm-2']);
-  assert.equal(state.getGroupAlias('group-1'), 'Alice + Bob');
-  assert.deepEqual(state.getGroupPlayerUserId('group-1'), 'jf-1');
+  // Aliases coexist with other state (e.g. party player users) without clobbering.
+  state.setPartyPlayerUser('group-1', 'jf-1', ['m-1', 'm-2']);
+  assert.equal(state.getPartyAlias('group-1'), 'Alice + Bob');
+  assert.deepEqual(state.getPartyPlayerUserId('group-1'), 'jf-1');
+});
+
+test('reads a pre-rename groupAliases/groupPlayerUsers-only file and migrates on next write', () => {
+  const filePath = tempStatePath();
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(
+    filePath,
+    JSON.stringify(
+      {
+        groupAliases: { 'group-1': 'Alice + Bob' },
+        groupPlayerUsers: { 'group-1': { jellyfinUserId: 'jf-1', memberIds: ['m-1'] } },
+      },
+      null,
+      2,
+    ),
+  );
+  const state = new AppState(filePath);
+
+  // READ falls back to the pre-rename keys with zero data loss.
+  assert.equal(state.getPartyAlias('group-1'), 'Alice + Bob');
+  assert.deepEqual(state.getPartyPlayerUserId('group-1'), 'jf-1');
+  assert.deepEqual(state.getPartyPlayerUsers(), { 'group-1': { jellyfinUserId: 'jf-1', memberIds: ['m-1'] } });
+
+  // WRITE migrates: the new keys carry the data; the legacy keys are dropped.
+  state.setPartyAlias('group-2', 'Carol');
+  const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as {
+    groupAliases?: unknown;
+    groupPlayerUsers?: unknown;
+    partyAliases?: Record<string, string>;
+    partyPlayerUsers?: Record<string, unknown>;
+  };
+  assert.equal(raw.groupAliases, undefined);
+  assert.equal(raw.groupPlayerUsers, undefined);
+  assert.deepEqual(raw.partyAliases, { 'group-1': 'Alice + Bob', 'group-2': 'Carol' });
+  assert.ok(raw.partyPlayerUsers?.['group-1']);
 });
 
 test('reads survive a corrupt state file by starting fresh', () => {

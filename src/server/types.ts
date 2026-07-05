@@ -8,7 +8,7 @@ export interface FamilyMember {
 }
 
 // Config v2: a configured user, referenced by its (unique) Jellyfin name. The
-// pin registry: the optional pin gates adding this user to a group whenever
+// pin registry: the optional pin gates adding this user to a party whenever
 // they resolve to the tertiary (guest) tier for the logged-in account.
 export interface ConfigUser {
   jellyfin_name: string;

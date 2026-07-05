@@ -3,12 +3,12 @@
 _Watch together, decide together._
 
 Gogglebox is a LAN-first [Jellyfin](https://jellyfin.org/) frontend for people who want the best possible
-experience choosing and watching something as a group. It treats the room as the
+experience choosing and watching something as a party. It treats the room as the
 important unit: pick who is watching, see what makes sense for that set of people,
 and hand off playback to Jellyfin without turning movie night into admin work.
 
 Jellyfin remains the source of truth for media, metadata, and watch history.
-Gogglebox sits in front of it as a focused, group-aware layer for shared
+Gogglebox sits in front of it as a focused, party-aware layer for shared
 selection, shared progress, and a smoother path from "what should we watch?" to
 "press play."
 
@@ -16,16 +16,18 @@ selection, shared progress, and a smoother path from "what should we watch?" to
 
 Users are referenced by their (unique) Jellyfin name in `config.json`; Gogglebox
 resolves names to ids itself at startup. One or more login accounts each see only
-the users they are allowed to, and groups are formed live in the UI (a group is a
-Jellyfin user created on demand). Jellyfin remains the source of truth for
-library, metadata, and watch history; Gogglebox is a thin group-aware layer on
-top.
+the users they are allowed to, and parties are formed live in the UI (a party is a
+Jellyfin user created on demand). Parties were formerly called "groups" — the
+server still accepts the old `/api/group*` routes and response fields as
+compatibility aliases (see `src/server/server.ts`). Jellyfin remains the source
+of truth for library, metadata, and watch history; Gogglebox is a thin
+party-aware layer on top.
 
 ## Where it is going
 
 The work backlog lives under [`efforts`](./efforts). Current top-level efforts include
-authentication, persistence, renaming the visible "group" concept to "party", show-detail
-browsing, and the `v2026.8.29` "Judgement Day" discovery work.
+authentication, persistence, show-detail browsing, and the `v2026.8.29`
+"Judgement Day" discovery work.
 
 Judgement Day is the main product direction: a single responsive discovery rail
 with recommendation channels, reroll controls, and search that filters the rail
@@ -137,7 +139,7 @@ Account tiers control the picker:
 - `secondary_users` are shown as normal selectable viewers, but are not selected
   by default.
 - `tertiary_users` are guests. They are hidden behind Add guest and require the
-  configured user PIN whenever they are added to a group for that account.
+  configured user PIN whenever they are added to a party for that account.
 
 If `secondary_users` or `tertiary_users` is omitted or set to `null`, it acts as
 a wildcard over the remaining live Jellyfin users after higher-priority tiers

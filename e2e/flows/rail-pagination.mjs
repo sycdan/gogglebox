@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
 // ── rail-pagination flow ───────────────────────────────────────────────────
 // Proves the Continue-watching rail pages 3 tiles at a time via top-right
@@ -9,7 +9,7 @@ export const match = /pagination|pager|rail-pag/i;
 export async function run(page, ctx) {
   const { fail, shoot, flowName } = ctx;
 
-  await pickEveryoneGroupAndContinue(page, 'rail-pagination');
+  await pickEveryonePartyAndContinue(page, 'rail-pagination');
 
   const cwSection = page.locator('.section-block').first();
   try {

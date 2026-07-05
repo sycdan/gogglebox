@@ -1,6 +1,8 @@
-// ── group-pin flow ─────────────────────────────────────────────────────────
-// Proves the Config v2 guest (tertiary) PIN-gated group path end-to-end against
-// the sbx stack.
+// ── party-pin flow ─────────────────────────────────────────────────────────
+// Proves the Config v2 guest (tertiary) PIN-gated party path end-to-end against
+// the sbx stack. (Parties were formerly called "groups"; the server still
+// accepts the old /api/group* routes as compatibility aliases — see
+// src/server/server.ts.)
 //
 // The sandbox config (config.sbx.json) defines a second account "visitor"
 // (access token "sbx-visitor-token") with no primaries, Dave as a secondary and
@@ -8,33 +10,33 @@
 // plain viewer cards — they are only addable via the SELECTION-ONLY "+ Add
 // guest" modal (no PIN inputs there). PINs are typed at Continue time in the
 // continue-time PIN modal, and the "Confirm PINs" click verifies them with the
-// server IMMEDIATELY (POST /api/group/verify-pins): a 403 pin rejection shows
-// the server's error inside the STILL-OPEN modal — before any mixed-group
-// warning or group POST — for a retype. /api/group stays authoritative for the
-// eventual group creation.
+// server IMMEDIATELY (POST /api/party/verify-pins): a 403 pin rejection shows
+// the server's error inside the STILL-OPEN modal — before any mixed-party
+// warning or party POST — for a retype. /api/party stays authoritative for the
+// eventual party creation.
 // This flow logs in AS visitor — explicitly, filling the token form, NOT the
 // auto-login household — then drives:
-//   1. login screen (single access-token input)        -> group-pin-login.png
+//   1. login screen (single access-token input)        -> party-pin-login.png
 //   2. picker: Dave card only; Carol NOT a plain card;
-//      "+ Add guest" card present                       -> group-pin-picker.png
+//      "+ Add guest" card present                       -> party-pin-picker.png
 //   3. open "+ Add guest": Carol listed; NO PIN input;
 //      confirm adds her without a PIN; Continue opens
-//      the PIN modal for her                            -> group-pin-prompt.png
+//      the PIN modal for her                            -> party-pin-prompt.png
 //   4. WRONG pin -> confirm click -> verify-pins 403;
 //      the modal NEVER closes, NO mixed warning; the
-//      server error shows in the modal, picker kept     -> group-pin-wrong.png
+//      server error shows in the modal, picker kept     -> party-pin-wrong.png
 //   5. retype correct pin 5678 in the same modal ->
-//      verify ok -> mixed warning -> POST /api/group ->
-//      group forms, app proceeds                        -> group-pin-success.png
+//      verify ok -> mixed warning -> POST /api/party ->
+//      party forms, app proceeds                        -> party-pin-success.png
 //
 // Run it with:
-//   PROOF_FLOW=group-pin ./scripts/sbx.sh run --rm proof
+//   PROOF_FLOW=party-pin ./scripts/sbx.sh run --rm proof
 //
 // NOTE: run.mjs logs in (auto-login household in sbx) BEFORE dispatching flows.
 // To log in as a DIFFERENT account we first log out, then defeat the client's
 // implicit auto-login by patching GET /api/session (portalAutoLoginEnabled:
 // false) so the login form stays put for us to fill with the visitor token.
-export const match = /group-pin|pin/i;
+export const match = /party-pin|group-pin|pin/i;
 
 const VISITOR_TOKEN = 'sbx-visitor-token';
 const CAROL_PIN = '5678';
@@ -42,7 +44,7 @@ const CAROL_PIN = '5678';
 export async function run(page, ctx) {
   const { fail, shoot, flowName } = ctx;
 
-  console.log('[proof] group-pin: resetting to a logged-out state for explicit visitor login');
+  console.log('[proof] party-pin: resetting to a logged-out state for explicit visitor login');
 
   // Kill the client's auto-login AT THE DECISION POINT. The client auto-logins
   // whenever GET /api/session reports portalAutoLoginEnabled: true (the sbx
@@ -73,7 +75,7 @@ export async function run(page, ctx) {
       });
     } catch (error) {
       // Never let the patch take down the flow — fall back to the real response.
-      console.log(`[proof] group-pin: /api/session patch failed (${error?.message ?? error}); continuing`);
+      console.log(`[proof] party-pin: /api/session patch failed (${error?.message ?? error}); continuing`);
       await route.continue().catch(() => {});
     }
   });
@@ -95,9 +97,9 @@ export async function run(page, ctx) {
     await loginForm.waitFor({ state: 'visible', timeout: 20_000 });
   } catch (error) {
     await shoot(page, `${flowName}-login-MISSING`);
-    fail('group-pin: login form never appeared (session auto-login patch not applied?)', error);
+    fail('party-pin: login form never appeared (session auto-login patch not applied?)', error);
   }
-  await shoot(page, 'group-pin-login');
+  await shoot(page, 'party-pin-login');
 
   // ── 1a. Deliberately invalid access token -> 401 rejection, form persists ──
   // Proves the login form REJECTS a bogus token with a clear error and does
@@ -117,11 +119,11 @@ export async function run(page, ctx) {
     const invalidResponse = await invalidResponsePromise;
     if (!invalidResponse) {
       await shoot(page, `${flowName}-invalid-token-NO-RESPONSE`);
-      fail('group-pin: submitting an invalid access token never hit POST /api/auth/login');
+      fail('party-pin: submitting an invalid access token never hit POST /api/auth/login');
     }
     if (invalidResponse.status() < 400 || invalidResponse.status() >= 500) {
       await shoot(page, `${flowName}-invalid-token-WRONG-STATUS`);
-      fail(`group-pin: invalid access token should be rejected 4xx (got ${invalidResponse.status()})`);
+      fail(`party-pin: invalid access token should be rejected 4xx (got ${invalidResponse.status()})`);
     }
     // `.error` renders as a SIBLING of form.stack (both under .auth-panel), not
     // nested inside the form — scope to the panel, not the form itself.
@@ -130,24 +132,24 @@ export async function run(page, ctx) {
       await loginError.waitFor({ state: 'visible', timeout: 10_000 });
     } catch (error) {
       await shoot(page, `${flowName}-invalid-token-NO-ERROR`);
-      fail('group-pin: an invalid access token did not surface a visible error on the login form', error);
+      fail('party-pin: an invalid access token did not surface a visible error on the login form', error);
     }
     const invalidErrorText = ((await loginError.textContent().catch(() => '')) ?? '').trim();
-    console.log('[proof] group-pin: invalid-token login error =', JSON.stringify(invalidErrorText));
+    console.log('[proof] party-pin: invalid-token login error =', JSON.stringify(invalidErrorText));
     if (!invalidErrorText) {
-      fail('group-pin: the invalid-token error text was empty');
+      fail('party-pin: the invalid-token error text was empty');
     }
     // The login form must still be showing (nothing authenticated/persisted).
     if (!(await loginForm.isVisible().catch(() => false))) {
       await shoot(page, `${flowName}-invalid-token-FORM-GONE`);
-      fail('group-pin: the login form disappeared after an invalid token — it must persist for retry');
+      fail('party-pin: the login form disappeared after an invalid token — it must persist for retry');
     }
     const storedToken = await page.evaluate(() => window.localStorage.getItem('gogglebox.accessToken'));
     if (storedToken) {
-      fail('group-pin: an invalid access token must not be persisted to localStorage');
+      fail('party-pin: an invalid access token must not be persisted to localStorage');
     }
-    await shoot(page, 'group-pin-invalid-token');
-    console.log('[proof] group-pin: PASS — invalid access token rejected (4xx + visible error), login form persists, no token stored');
+    await shoot(page, 'party-pin-invalid-token');
+    console.log('[proof] party-pin: PASS — invalid access token rejected (4xx + visible error), login form persists, no token stored');
   }
 
   // ── 1b. Submit the visitor access token (deterministic) ──────────────────
@@ -156,7 +158,7 @@ export async function run(page, ctx) {
   // RESPONSE (not form-detach): arm waitForResponse for the token POST BEFORE
   // clicking, assert it's 200, THEN wait for the picker heading. A single retry
   // remains as a safety net but should not be needed.
-  const pickHeading = page.getByRole('heading', { name: /pick the group/i });
+  const pickHeading = page.getByRole('heading', { name: /pick the party/i });
   const tokenInput = loginForm.locator('input[type="password"]').first();
   const submitBtn = loginForm.locator('button[type="submit"]');
 
@@ -177,7 +179,7 @@ export async function run(page, ctx) {
   };
 
   async function attemptVisitorLogin(attempt) {
-    console.log(`[proof] group-pin: visitor login attempt ${attempt} with the visitor access token`);
+    console.log(`[proof] party-pin: visitor login attempt ${attempt} with the visitor access token`);
     // Let any in-flight request finish so the button is interactable before we
     // type (the click + response wait below is what determines success).
     await submitBtn.waitFor({ state: 'visible', timeout: 15_000 });
@@ -201,14 +203,14 @@ export async function run(page, ctx) {
     const response = await responsePromise;
 
     if (!response) {
-      console.log('[proof] group-pin: no explicit login response observed within timeout');
+      console.log('[proof] party-pin: no explicit login response observed within timeout');
       return false;
     }
     if (response.status() !== 200) {
-      console.log(`[proof] group-pin: explicit login returned ${response.status()} (expected 200)`);
+      console.log(`[proof] party-pin: explicit login returned ${response.status()} (expected 200)`);
       return false;
     }
-    console.log('[proof] group-pin: explicit visitor token login -> 200; waiting for picker');
+    console.log('[proof] party-pin: explicit visitor token login -> 200; waiting for picker');
 
     // 200 confirmed; the picker should render next.
     try {
@@ -222,14 +224,14 @@ export async function run(page, ctx) {
   let loggedIn = await attemptVisitorLogin(1);
   if (!loggedIn) {
     const stale = await page.locator('.error').first().textContent().catch(() => null);
-    console.log(`[proof] group-pin: first visitor login did not reach the picker (error: ${stale ? stale.trim() : 'none'}); retrying once`);
+    console.log(`[proof] party-pin: first visitor login did not reach the picker (error: ${stale ? stale.trim() : 'none'}); retrying once`);
     loggedIn = await attemptVisitorLogin(2);
   }
 
   if (!loggedIn) {
     const err = await page.locator('.error').first().textContent().catch(() => null);
     await shoot(page, `${flowName}-login-FAILED`);
-    fail(`group-pin: visitor login did not complete after retry${err ? ` (app error: ${err.trim()})` : ''}`);
+    fail(`party-pin: visitor login did not complete after retry${err ? ` (app error: ${err.trim()})` : ''}`);
   }
 
   // ── 2. Picker: Dave only; Carol NOT a plain card; "+ Add guest" present ───
@@ -237,13 +239,13 @@ export async function run(page, ctx) {
     await pickHeading.waitFor({ state: 'visible', timeout: 20_000 });
   } catch (error) {
     await shoot(page, `${flowName}-picker-MISSING`);
-    fail('group-pin: "Pick the group" screen did not appear after visitor login', error);
+    fail('party-pin: "Pick the party" screen did not appear after visitor login', error);
   }
 
   const cards = page.locator('button.viewer-card:not(.saved-group-card):not(.add-guest-card)');
   const names = (await cards.locator('strong').allTextContents()).map((s) => s.trim());
-  console.log('[proof] group-pin: plain viewer cards =', JSON.stringify(names));
-  await shoot(page, 'group-pin-picker');
+  console.log('[proof] party-pin: plain viewer cards =', JSON.stringify(names));
+  await shoot(page, 'party-pin-picker');
 
   // Visitor: Dave (secondary) is the only plain card; Carol (tertiary/guest)
   // must NOT be one.
@@ -252,18 +254,18 @@ export async function run(page, ctx) {
     names.length === expected.length && expected.every((n) => names.includes(n));
   if (!sameSet) {
     fail(
-      `group-pin: visitor should see exactly [${expected.join(', ')}] as plain cards but saw [${names.join(', ')}]`,
+      `party-pin: visitor should see exactly [${expected.join(', ')}] as plain cards but saw [${names.join(', ')}]`,
     );
   }
   if (names.includes('Carol')) {
-    fail('group-pin: Carol is a GUEST for visitor and must not render as a plain viewer card');
+    fail('party-pin: Carol is a GUEST for visitor and must not render as a plain viewer card');
   }
 
   const addGuestCard = page.locator('button.add-guest-card').first();
   if (!(await addGuestCard.count().then((n) => n > 0))) {
-    fail('group-pin: the "+ Add guest" card is missing (visitor has Carol as a guest candidate)');
+    fail('party-pin: the "+ Add guest" card is missing (visitor has Carol as a guest candidate)');
   }
-  console.log('[proof] group-pin: PASS — picker shows only Dave plus the "+ Add guest" card');
+  console.log('[proof] party-pin: PASS — picker shows only Dave plus the "+ Add guest" card');
 
   // ── 3. "+ Add guest": Carol listed, selection-only (NO PIN input) ─────────
   // The add-guest modal collects no PINs — confirming adds Carol to the
@@ -274,29 +276,29 @@ export async function run(page, ctx) {
     await guestModal.waitFor({ state: 'visible', timeout: 10_000 });
   } catch (error) {
     await shoot(page, `${flowName}-guest-modal-MISSING`);
-    fail('group-pin: clicking "+ Add guest" did not open the guest modal', error);
+    fail('party-pin: clicking "+ Add guest" did not open the guest modal', error);
   }
   const carolGuestCard = guestModal.locator('button.guest-card', { hasText: 'Carol' }).first();
   if (!(await carolGuestCard.count().then((n) => n > 0))) {
     await shoot(page, `${flowName}-guest-carol-MISSING`);
-    fail('group-pin: Carol is not listed in the guest modal');
+    fail('party-pin: Carol is not listed in the guest modal');
   }
   await carolGuestCard.click();
   if (await guestModal.locator('input[type="password"]').count().then((n) => n > 0)) {
     await shoot(page, `${flowName}-add-guest-HAS-PIN`);
-    fail('group-pin: the add-guest modal must be selection-only — no PIN input belongs there');
+    fail('party-pin: the add-guest modal must be selection-only — no PIN input belongs there');
   }
   const addGuestsBtn = guestModal.getByRole('button', { name: /^Add guests$/ });
   if (await addGuestsBtn.isDisabled()) {
-    fail('group-pin: add-guest confirm should ENABLE once Carol is selected (no PIN required)');
+    fail('party-pin: add-guest confirm should ENABLE once Carol is selected (no PIN required)');
   }
   await addGuestsBtn.click();
   await guestModal.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
   if (!(await cards.filter({ hasText: 'Carol' }).count().then((n) => n > 0))) {
     await shoot(page, `${flowName}-carol-NOT-ADDED`);
-    fail('group-pin: confirming the add-guest modal did not add Carol to the picker selection');
+    fail('party-pin: confirming the add-guest modal did not add Carol to the picker selection');
   }
-  console.log('[proof] group-pin: PASS — add-guest modal is selection-only and added Carol without a PIN');
+  console.log('[proof] party-pin: PASS — add-guest modal is selection-only and added Carol without a PIN');
 
   const continueBtn = page.getByRole('button', { name: /^Continue$/ }).first();
   const confirmModal = page.locator('.confirm-modal');
@@ -310,29 +312,29 @@ export async function run(page, ctx) {
     await pinInput.waitFor({ state: 'visible', timeout: 10_000 });
   } catch (error) {
     await shoot(page, `${flowName}-pin-modal-MISSING`);
-    fail('group-pin: Continue with a selected guest did not open the PIN modal', error);
+    fail('party-pin: Continue with a selected guest did not open the PIN modal', error);
   }
   if (!(await confirmPinsBtn.isDisabled())) {
-    fail('group-pin: the PIN-modal confirm must be DISABLED until Carol\'s PIN is typed');
+    fail('party-pin: the PIN-modal confirm must be DISABLED until Carol\'s PIN is typed');
   }
-  await shoot(page, 'group-pin-prompt');
-  console.log('[proof] group-pin: PASS — Continue routed to the PIN modal; confirm disabled until PIN typed');
+  await shoot(page, 'party-pin-prompt');
+  console.log('[proof] party-pin: PASS — Continue routed to the PIN modal; confirm disabled until PIN typed');
 
   // Confirm the PIN modal (the confirm click verifies the pins with the server
-  // via POST /api/group/verify-pins), then the mixed-group (shared watch
+  // via POST /api/party/verify-pins), then the mixed-party (shared watch
   // progress) warning — it always appears on success (a guest is never
-  // primary) — so the authoritative group POST fires.
+  // primary) — so the authoritative party POST fires.
   const confirmPinsAndMixed = async () => {
     await confirmPinsBtn.click();
     try {
       await confirmModal.waitFor({ state: 'visible', timeout: 10_000 });
     } catch (error) {
       await shoot(page, `${flowName}-mixed-modal-MISSING`);
-      fail('group-pin: the mixed-group confirmation modal did not appear before the group POST', error);
+      fail('party-pin: the mixed-party confirmation modal did not appear before the party POST', error);
     }
     // Human-readable proof of the warning ITSELF (not just a DOM assertion) —
     // screenshot before dismissing it.
-    await shoot(page, 'group-pin-mixed-warning');
+    await shoot(page, 'party-pin-mixed-warning');
     await confirmModal.getByRole('button', { name: /^Confirm$/ }).click();
   };
 
@@ -340,15 +342,15 @@ export async function run(page, ctx) {
   // "Confirm PINs" must contact the server immediately: arm the wait for the
   // verify-pins response BEFORE clicking, assert the 403, and assert the
   // rejection lands IN the still-open modal — the modal never closes and the
-  // mixed-group warning never appears. Never stub pin validation.
+  // mixed-party warning never appears. Never stub pin validation.
   await pinInput.fill('0000');
   if (await confirmPinsBtn.isDisabled()) {
-    fail('group-pin: the PIN-modal confirm should ENABLE once a PIN is typed');
+    fail('party-pin: the PIN-modal confirm should ENABLE once a PIN is typed');
   }
   const verifyResponsePromise = page
     .waitForResponse(
       (response) =>
-        response.url().includes('/api/group/verify-pins') &&
+        response.url().includes('/api/party/verify-pins') &&
         response.request().method() === 'POST',
       { timeout: 10_000 },
     )
@@ -357,10 +359,10 @@ export async function run(page, ctx) {
   const verifyResponse = await verifyResponsePromise;
   if (!verifyResponse) {
     await shoot(page, `${flowName}-wrong-NO-VERIFY`);
-    fail('group-pin: clicking "Confirm PINs" did not hit POST /api/group/verify-pins');
+    fail('party-pin: clicking "Confirm PINs" did not hit POST /api/party/verify-pins');
   }
   if (verifyResponse.status() !== 403) {
-    fail(`group-pin: verify-pins returned ${verifyResponse.status()} for a wrong PIN (expected 403)`);
+    fail(`party-pin: verify-pins returned ${verifyResponse.status()} for a wrong PIN (expected 403)`);
   }
 
   const modalError = guestModal.locator('.error').first();
@@ -368,54 +370,54 @@ export async function run(page, ctx) {
     await modalError.waitFor({ state: 'visible', timeout: 10_000 });
   } catch (error) {
     await shoot(page, `${flowName}-wrong-NO-ERROR`);
-    fail('group-pin: a wrong PIN did not surface the server error at the PIN modal', error);
+    fail('party-pin: a wrong PIN did not surface the server error at the PIN modal', error);
   }
   // The modal must have STAYED open (rejection at the click, not after a
-  // reopen), and the mixed-group warning must not have appeared first.
+  // reopen), and the mixed-party warning must not have appeared first.
   if (!(await guestModal.isVisible().catch(() => false))) {
     await shoot(page, `${flowName}-wrong-MODAL-CLOSED`);
-    fail('group-pin: the PIN modal closed on a wrong PIN — the rejection must show in the still-open modal');
+    fail('party-pin: the PIN modal closed on a wrong PIN — the rejection must show in the still-open modal');
   }
   if (await confirmModal.isVisible().catch(() => false)) {
     await shoot(page, `${flowName}-wrong-MIXED-SHOWN`);
-    fail('group-pin: the mixed-group warning appeared for a wrong PIN — verification must happen first');
+    fail('party-pin: the mixed-party warning appeared for a wrong PIN — verification must happen first');
   }
   const errorText = (await modalError.textContent().catch(() => '')) ?? '';
   const stillOnPicker = await pickHeading.isVisible().catch(() => false);
-  console.log('[proof] group-pin: wrong-pin modal error =', JSON.stringify(errorText.trim()));
-  console.log('[proof] group-pin: still on picker after wrong pin =', stillOnPicker);
-  await shoot(page, 'group-pin-wrong');
+  console.log('[proof] party-pin: wrong-pin modal error =', JSON.stringify(errorText.trim()));
+  console.log('[proof] party-pin: still on picker after wrong pin =', stillOnPicker);
+  await shoot(page, 'party-pin-wrong');
   if (!stillOnPicker) {
-    fail('group-pin: a wrong PIN should NOT activate the group, but the picker was left');
+    fail('party-pin: a wrong PIN should NOT activate the party, but the picker was left');
   }
   if (!/pin/i.test(errorText)) {
-    fail(`group-pin: wrong-pin error did not mention the PIN (got: ${JSON.stringify(errorText.trim())})`);
+    fail(`party-pin: wrong-pin error did not mention the PIN (got: ${JSON.stringify(errorText.trim())})`);
   }
-  console.log('[proof] group-pin: PASS — wrong PIN rejected AT the confirm click (verify-pins 403 in the still-open modal, no mixed warning, group not activated)');
+  console.log('[proof] party-pin: PASS — wrong PIN rejected AT the confirm click (verify-pins 403 in the still-open modal, no mixed warning, party not activated)');
 
-  // ── 5. Retype the correct pin in the SAME open modal -> group forms ───────
+  // ── 5. Retype the correct pin in the SAME open modal -> party forms ───────
   // The rejection cleared the typed pin (retype starts clean); type the correct
   // PIN and resubmit — this time verify passes, the modal closes, the mixed
-  // warning shows, and the group POST proceeds.
+  // warning shows, and the party POST proceeds.
   await pinInput.waitFor({ state: 'visible', timeout: 10_000 });
   await pinInput.fill(CAROL_PIN);
   await confirmPinsAndMixed();
 
   // Gate on leaving the picker via an element wait (not networkidle —
-  // background data fetches keep the network busy after the group forms).
+  // background data fetches keep the network busy after the party forms).
   try {
     await pickHeading.waitFor({ state: 'detached', timeout: 20_000 });
   } catch (error) {
     const err = await page.locator('.error').first().textContent().catch(() => null);
     await shoot(page, `${flowName}-success-STUCK`);
     fail(
-      `group-pin: correct PIN did not form the group / leave the picker${err ? ` (app error: ${err.trim()})` : ''}`,
+      `party-pin: correct PIN did not form the party / leave the picker${err ? ` (app error: ${err.trim()})` : ''}`,
       error,
     );
   }
 
   // The main app proceeded: the Continue-watching heading AND the "Change
-  // viewers" control (only present post-group) render. Wait on each separately —
+  // viewers" control (only present post-party) render. Wait on each separately —
   // combining them with .or() matches BOTH once home renders, which trips
   // Playwright strict mode and aborts the success assertion.
   const continueHeading = page.getByRole('heading', { name: /continue watching/i }).first();
@@ -427,8 +429,8 @@ export async function run(page, ctx) {
     ]);
   } catch (error) {
     await shoot(page, `${flowName}-success-NO-HOME`);
-    fail('group-pin: group formed but the main app (continue-watching/home) did not render', error);
+    fail('party-pin: party formed but the main app (continue-watching/home) did not render', error);
   }
-  await shoot(page, 'group-pin-success');
-  console.log('[proof] group-pin: PASS — correct guest PIN formed the group and the app proceeded');
+  await shoot(page, 'party-pin-success');
+  console.log('[proof] party-pin: PASS — correct guest PIN formed the party and the app proceeded');
 }

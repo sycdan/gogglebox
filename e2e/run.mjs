@@ -57,8 +57,8 @@ import * as showCrossEpisode from './flows/show-cross-episode.mjs';
 import * as railPagination from './flows/rail-pagination.mjs';
 import * as playerHandoff from './flows/player-handoff.mjs';
 import * as playerUat from './flows/player-uat.mjs';
-import * as groupPin from './flows/group-pin.mjs';
-import * as groupAlias from './flows/group-alias.mjs';
+import * as partyPin from './flows/party-pin.mjs';
+import * as partyAlias from './flows/party-alias.mjs';
 
 // Flow dispatch order — preserved from the original single-file script. Each
 // flow whose `match` matches the flowName runs; multiple may fire for one name.
@@ -66,8 +66,8 @@ import * as groupAlias from './flows/group-alias.mjs';
 // pick a per-flow screenshot subdirectory and login flowName — single-flow
 // invocations still key entirely off the PROOF_FLOW string against `match`.
 const flows = [
-  { name: 'group-alias', mod: groupAlias },
-  { name: 'group-pin', mod: groupPin },
+  { name: 'party-alias', mod: partyAlias },
+  { name: 'party-pin', mod: partyPin },
   { name: 'player-handoff', mod: playerHandoff },
   { name: 'player-uat', mod: playerUat },
   { name: 'player-focus', mod: playerFocus },
@@ -182,9 +182,9 @@ async function runSingleFlowInvocation() {
 // Runs every flow in `flows` order, in ONE process invocation, but isolates
 // each flow with its OWN fresh browser (a fresh startSession() launch + login)
 // rather than sharing one page/session across flows. So route interception
-// (group-pin's /api/session patch), localStorage/session state
+// (party-pin's /api/session patch), localStorage/session state
 // (player-handoff's seeded jellyfin_credentials), the selected account
-// (group-pin logs in as a different user), and any other per-flow mutation
+// (party-pin logs in as a different user), and any other per-flow mutation
 // from one flow cannot leak into the next — each flow starts from the exact
 // same clean logged-in state single-flow mode starts from today. Each flow
 // also gets its own screenshot subdirectory (keyed by the flow's own canonical

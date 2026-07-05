@@ -4,8 +4,8 @@ import test from 'node:test';
 import {
   accountForToken,
   resolveAccountTiers,
-  resolveGroupMemberSelection,
-  verifyGroupPins,
+  resolvePartyMemberSelection,
+  verifyPartyPins,
   visibleViewersForAccount,
 } from './accounts';
 import { AccountV2, ConfigUser, FamilyMember } from './types';
@@ -177,54 +177,55 @@ test('visibleViewersForAccount resolves wildcards against the whole viewer map',
   );
 });
 
-test('verifyGroupPins requires the correct pin exactly for tertiary members', () => {
+test('verifyPartyPins requires the correct pin exactly for tertiary members', () => {
   const carol = viewersByName.Carol;
   const dave = viewersByName.Dave;
 
   // house1: Dave is a guest (needs pin 2468); Carol is secondary (no pin).
   assert.deepEqual(
-    verifyGroupPins(explicitAccount, users, allNames, [carol, dave], { d: '2468' }),
+    verifyPartyPins(explicitAccount, users, allNames, [carol, dave], { d: '2468' }),
     { ok: true },
   );
 
-  const missing = verifyGroupPins(explicitAccount, users, allNames, [carol, dave], {});
+  const missing = verifyPartyPins(explicitAccount, users, allNames, [carol, dave], {});
   assert.equal(missing.ok, false);
   assert.match((missing as { error: string }).error, /Dave/);
 
-  const wrong = verifyGroupPins(explicitAccount, users, allNames, [carol, dave], { d: '0000' });
+  const wrong = verifyPartyPins(explicitAccount, users, allNames, [carol, dave], { d: '0000' });
   assert.equal(wrong.ok, false);
 
   // Carol alone needs nothing — she is secondary for this account even though
   // she has a configured pin.
-  assert.deepEqual(verifyGroupPins(explicitAccount, users, allNames, [carol], {}), { ok: true });
+  assert.deepEqual(verifyPartyPins(explicitAccount, users, allNames, [carol], {}), { ok: true });
 });
 
-test('verifyGroupPins gates by the SELECTING account, not globally', () => {
+test('verifyPartyPins gates by the SELECTING account, not globally', () => {
   const dave = viewersByName.Dave;
   // house2: Dave is PRIMARY there, so no pin is needed even though he has one.
-  assert.deepEqual(verifyGroupPins(accounts.house2, users, allNames, [dave], {}), { ok: true });
+  assert.deepEqual(verifyPartyPins(accounts.house2, users, allNames, [dave], {}), { ok: true });
 });
 
-// The shared verdict behind /api/group, /api/group/verify-pins and
-// /api/player/session. It is pure (verify-only by construction): it takes no
-// session or app state, so a verdict can never set an active group or persist
-// a managed group — the verify-pins route just relays { status, error } / ok.
-test('resolveGroupMemberSelection returns the 403 pin verdict for a wrong guest pin', () => {
+// The shared verdict behind /api/party, /api/party/verify-pins and
+// /api/player/session (and their /api/group* compatibility aliases). It is
+// pure (verify-only by construction): it takes no session or app state, so a
+// verdict can never set an active party or persist a managed party — the
+// verify-pins route just relays { status, error } / ok.
+test('resolvePartyMemberSelection returns the 403 pin verdict for a wrong guest pin', () => {
   // house1: Dave ('d') is a guest whose configured pin is 2468.
-  const wrong = resolveGroupMemberSelection(explicitAccount, viewersByName, users, ['a', 'd'], {
+  const wrong = resolvePartyMemberSelection(explicitAccount, viewersByName, users, ['a', 'd'], {
     d: '0000',
   });
   assert.equal(wrong.ok, false);
   assert.equal((wrong as { status: number }).status, 403);
   assert.match((wrong as { error: string }).error, /pin/i);
 
-  const missing = resolveGroupMemberSelection(explicitAccount, viewersByName, users, ['a', 'd'], {});
+  const missing = resolvePartyMemberSelection(explicitAccount, viewersByName, users, ['a', 'd'], {});
   assert.equal(missing.ok, false);
   assert.equal((missing as { status: number }).status, 403);
 });
 
-test('resolveGroupMemberSelection resolves members for a correct guest pin', () => {
-  const resolved = resolveGroupMemberSelection(explicitAccount, viewersByName, users, ['a', 'd'], {
+test('resolvePartyMemberSelection resolves members for a correct guest pin', () => {
+  const resolved = resolvePartyMemberSelection(explicitAccount, viewersByName, users, ['a', 'd'], {
     d: '2468',
   });
   assert.equal(resolved.ok, true);
@@ -234,13 +235,13 @@ test('resolveGroupMemberSelection resolves members for a correct guest pin', () 
   );
 });
 
-test('resolveGroupMemberSelection rejects member problems with a 400', () => {
-  const empty = resolveGroupMemberSelection(explicitAccount, viewersByName, users, [], {});
+test('resolvePartyMemberSelection rejects member problems with a 400', () => {
+  const empty = resolvePartyMemberSelection(explicitAccount, viewersByName, users, [], {});
   assert.equal(empty.ok, false);
   assert.equal((empty as { status: number }).status, 400);
 
   // 'z' is not a visible viewer for house1.
-  const unknown = resolveGroupMemberSelection(explicitAccount, viewersByName, users, ['a', 'z'], {});
+  const unknown = resolvePartyMemberSelection(explicitAccount, viewersByName, users, ['a', 'z'], {});
   assert.equal(unknown.ok, false);
   assert.equal((unknown as { status: number }).status, 400);
 });

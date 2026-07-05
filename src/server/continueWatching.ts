@@ -32,7 +32,7 @@ function railSortName(candidate: ContinueWatchingCandidate): string {
 }
 
 // Pick which of two candidates for the SAME exact item (episode or movie)
-// becomes the group's displayed card. Since both candidates already point at
+// becomes the party's displayed card. Since both candidates already point at
 // the identical id, there is no cross-episode ordering left to consider: prefer
 // an actually-resuming candidate (real playback progress) over a NextUp
 // placeholder; between two real-progress candidates, the LEAST advanced wins,
@@ -99,7 +99,7 @@ export function getProgressPropagationTargets(activeViewerIds: string[], sourceV
   return activeViewerIds.filter((viewerId) => viewerId !== sourceViewerId);
 }
 
-// True when an item should be hidden per the group's ignore entries: either its
+// True when an item should be hidden per the party's ignore entries: either its
 // own exact id was ignored (episode or movie scope), or — for a show — some
 // entry ignored the whole series (matchSeriesId) and matches item.seriesId.
 export function isIgnored(

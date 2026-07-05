@@ -7,7 +7,7 @@ import { PlayerSessionProgress } from './jellyfin';
 const THRESHOLD = 0.9;
 const RUNTIME = 1_000_000;
 
-// Group player "gp1" fans out to members m1, m2, m3.
+// Party player "gp1" fans out to members m1, m2, m3.
 function members() {
   return new Map<string, string[]>([['gp1', ['m1', 'm2', 'm3']]]);
 }
@@ -73,7 +73,7 @@ test('item change can mark the new item even after a prior item was marked', () 
   assert.equal(second.nextMarked.has(markerKey('gp1', 'item-2')), true);
 });
 
-test('unknown session user (not a group player) is ignored', () => {
+test('unknown session user (not a party player) is ignored', () => {
   const sessions = [
     session({ userId: 'some-other-user', positionTicks: RUNTIME }),
   ];
@@ -107,7 +107,7 @@ test('a previously-finished item can be re-marked after re-watching from the sta
   assert.equal(third.marks.length, 3);
 });
 
-test('multiple group players in one tick each fan out to their own members', () => {
+test('multiple party players in one tick each fan out to their own members', () => {
   const map = new Map<string, string[]>([
     ['gp1', ['m1', 'm2']],
     ['gp2', ['n1']],

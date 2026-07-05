@@ -249,8 +249,11 @@ h3 {
   width: 100%;
 }
 
-/* Saved (managed) groups on the picker: alias-first selectable cards, and the
-   active-group alias label in the hero. Cards reuse .viewer-card layout. */
+/* Saved (managed) parties on the picker: alias-first selectable cards, and the
+   active-party alias label in the hero. Cards reuse .viewer-card layout.
+   Class names kept as `saved-groups`/`saved-group-card`/`group-alias` (the
+   pre-rename spelling) purely so this stylesheet stays a stable, unbroken
+   contract for the existing markup; parties were formerly called "groups". */
 .saved-groups {
   margin-top: 0.5rem;
 }

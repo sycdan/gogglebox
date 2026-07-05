@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 import { seedMultiViewerMovie, seedStaggeredShow } from '../lib/seed-inprogress.mjs';
 import { makeJellyfin } from '../lib/jellyfin.mjs';
 import { collectAllRailCards, goToFirstRailPage, goToRailPage } from '../lib/rail.mjs';
@@ -8,8 +8,8 @@ import { collectAllRailCards, goToFirstRailPage, goToRailPage } from '../lib/rai
 //
 // Backend rule (src/server/continueWatching.ts mergeContinueWatching ->
 // pickRepresentative): when the SAME movie is in-progress for several
-// active-group viewers at different positions, they all collide on the same
-// movie id (movies have no episode granularity), and the single group card
+// active-party viewers at different positions, they all collide on the same
+// movie id (movies have no episode granularity), and the single party card
 // resumes from the viewer with the LEAST real progress (ties: prefer an
 // actual resume position over a NextUp placeholder, then lower %). That
 // viewer becomes the card's sourceViewer / resume point, so nobody's
@@ -90,7 +90,7 @@ export async function run(page, ctx) {
     console.warn('[proof] movie-least-watched: show seed failed: ' + (e?.message ?? e));
   }
 
-  await pickEveryoneGroupAndContinue(page, flowName);
+  await pickEveryonePartyAndContinue(page, flowName);
 
   try {
     await rail(page).waitFor({ state: 'visible', timeout: 30000 });

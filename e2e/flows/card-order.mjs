@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 import {
   seedInProgressEpisode,
   seedPartialCard,
@@ -76,7 +76,7 @@ export async function run(page, ctx) {
     console.warn('[proof] card-order: staggered-show seed failed: ' + (e?.message ?? e));
   }
 
-  await pickEveryoneGroupAndContinue(page, flowName);
+  await pickEveryonePartyAndContinue(page, flowName);
 
   try {
     await rail(page).waitFor({ state: 'visible', timeout: 30000 });

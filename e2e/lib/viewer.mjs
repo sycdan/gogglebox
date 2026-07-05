@@ -1,29 +1,32 @@
-// Viewer-selection helpers. The proof run may land on the "Pick the group"
-// screen; these advance into the main app.
+// Viewer-selection helpers. The proof run may land on the "Pick the party"
+// screen (parties were formerly called "groups"); these advance into the main
+// app.
 //
 // Config v2 picker rules every helper must respect:
 //   - The account's PRIMARY viewers arrive PRESELECTED (card class "selected"),
-//     so building a specific group means DESELECTING preselected cards outside
+//     so building a specific party means DESELECTING preselected cards outside
 //     the wanted set before selecting the wanted ones (a blind click toggles a
 //     preselected card OFF).
 //   - The "+ Add guest" card is also a button.viewer-card — exclude it (and
-//     saved-group cards) from plain viewer-card iteration.
+//     saved-party cards) from plain viewer-card iteration.
 //   - Continuing with ANY non-primary member selected pops a confirmation modal
 //     ("shared watch progress"); continueFromPicker confirms it when it appears
 //     so every flow gets the same handling.
 
-// Plain (selectable) viewer cards: not saved-group cards, not the add-guest card.
+// Plain (selectable) viewer cards: not saved-party cards, not the add-guest
+// card. (`.saved-group-card` is the pre-rename class name, kept unchanged in
+// the markup/stylesheet — see src/client/styles.css.)
 export function viewerCards(page) {
   return page.locator('button.viewer-card:not(.saved-group-card):not(.add-guest-card)');
 }
 
-// Click Continue, confirm the mixed-group modal if it appears, and wait for the
+// Click Continue, confirm the mixed-party modal if it appears, and wait for the
 // network to settle. Shared by every helper that leaves the picker.
 export async function continueFromPicker(page, label = 'picker') {
   const cont = page.getByRole('button', { name: /^Continue$/ }).first();
   await cont.click();
 
-  // The confirmation modal appears synchronously with Continue when the group
+  // The confirmation modal appears synchronously with Continue when the party
   // has any non-primary member; a short wait is enough to detect it.
   const confirmModal = page.locator('.confirm-modal');
   const appeared = await confirmModal
@@ -31,7 +34,7 @@ export async function continueFromPicker(page, label = 'picker') {
     .then(() => true)
     .catch(() => false);
   if (appeared) {
-    console.log(`[proof] ${label}: confirming the mixed-group (shared watch progress) modal`);
+    console.log(`[proof] ${label}: confirming the mixed-party (shared watch progress) modal`);
     await confirmModal.getByRole('button', { name: /^Confirm$/ }).click();
   }
 
@@ -77,12 +80,12 @@ export async function selectExactViewersByName(page, names) {
   return { missing, labels };
 }
 
-// player-focus variant: form a single-viewer group from the FIRST viewer card
+// player-focus variant: form a single-viewer party from the FIRST viewer card
 // (deselecting any other preselected primaries) and Continue.
 export async function pickFirstViewerAndContinue(page) {
-  const pickHeading = page.getByRole('heading', { name: /pick the group/i });
+  const pickHeading = page.getByRole('heading', { name: /pick the party/i });
   if (await pickHeading.count().then((n) => n > 0)) {
-    console.log('[proof] player-focus: selecting a viewer group');
+    console.log('[proof] player-focus: selecting a viewer party');
     await selectExactlyByIndex(page, [0]);
     await continueFromPicker(page, 'player-focus');
   }
@@ -91,10 +94,10 @@ export async function pickFirstViewerAndContinue(page) {
 // Everyone variant shared by continue-watching, recommendations, ignore-shows
 // and search: select EVERY plain viewer card (primaries are already selected)
 // so the combined data set is as large as possible. Guests (tertiaries) are not
-// plain cards, so no PIN prompt blocks Continue; the mixed-group confirmation
+// plain cards, so no PIN prompt blocks Continue; the mixed-party confirmation
 // (secondaries present) is handled by continueFromPicker.
-export async function pickEveryoneGroupAndContinue(page, label) {
-  const pickHeading = page.getByRole('heading', { name: /pick the group/i });
+export async function pickEveryonePartyAndContinue(page, label) {
+  const pickHeading = page.getByRole('heading', { name: /pick the party/i });
   if (await pickHeading.count().then((n) => n > 0)) {
     const cards = viewerCards(page);
     const count = await cards.count();
@@ -105,3 +108,6 @@ export async function pickEveryoneGroupAndContinue(page, label) {
     console.log(`[proof] ${label}: already in main app (no viewer-selection screen)`);
   }
 }
+
+// Pre-rename compatibility alias — identical behavior, old name.
+export const pickEveryoneGroupAndContinue = pickEveryonePartyAndContinue;

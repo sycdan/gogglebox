@@ -82,7 +82,9 @@ export interface Migration {
 // ── Legacy (schemaVersion 0) shapes ────────────────────────────────────────
 // The pre-users/accounts config: a single household + groups[] whose memberIds
 // are Jellyfin UUIDs. PORTAL_AUTO_LOGIN lived in .env (not the file) and is
-// obsolete; we warn about it from server startup, not here.
+// obsolete; we warn about it from server startup, not here. A schemaVersion-0
+// source may spell this preset list `parties[]` (post-rename terminology) or
+// `groups[]` (pre-rename); both are accepted — see legacyGroupsFrom below.
 interface LegacyGroup {
   id?: string;
   name?: string;
@@ -92,26 +94,37 @@ interface LegacyGroup {
 interface LegacyConfig {
   household?: { username?: string; password?: string };
   groups?: LegacyGroup[];
+  // Alias for `groups[]` using the current "party" terminology. A source
+  // written by/for a post-rename deployer may use this key instead; if BOTH
+  // are present, `parties` wins (it is the more specific/intentional key).
+  parties?: LegacyGroup[];
   playback?: { watchedThreshold?: number };
   recommendations?: { count?: number };
 }
 
+// The legacy preset list, accepting either spelling: `parties[]` (current
+// terminology) takes precedence when present, else the pre-rename `groups[]`.
+function legacyGroupsFrom(legacy: LegacyConfig): LegacyGroup[] {
+  return legacy.parties ?? legacy.groups ?? [];
+}
+
 // ── Migration 0 -> 1: legacy household/groups (UUIDs) -> users/accounts ─────
-// Pure (ctx supplies the Jellyfin user list). Maps each legacy group memberId
+// Pure (ctx supplies the Jellyfin user list). Maps each legacy party memberId
 // UUID to its Jellyfin user NAME, unions them into users[] (no pins existed),
 // synthesizes a single account from the household/portal creds, carries over
-// playback/recommendations, and drops the obsolete groups[] presets.
+// playback/recommendations, and drops the obsolete groups[]/parties[] presets.
 export function migrate0to1(
   rawConfig: Record<string, unknown>,
   ctx: MigrationContext,
 ): SchemaV1Config {
   const legacy = rawConfig as LegacyConfig;
   const nameById = new Map(ctx.jellyfinUsers.map((user) => [user.id, user.name]));
+  const legacyGroups = legacyGroupsFrom(legacy);
 
-  // Union of resolved user names across all legacy groups, in first-seen order.
+  // Union of resolved user names across all legacy parties, in first-seen order.
   const resolvedNames: string[] = [];
   const seen = new Set<string>();
-  for (const group of legacy.groups ?? []) {
+  for (const group of legacyGroups) {
     const memberIds = Array.isArray(group.memberIds) ? group.memberIds : [];
     for (const memberId of memberIds) {
       if (typeof memberId !== 'string') {
@@ -159,8 +172,8 @@ export function migrate0to1(
 
   const accounts: ConfigAccountV1[] = [{ username, password, visible_users: visibleUsers }];
 
-  if ((legacy.groups?.length ?? 0) > 0) {
-    warnWith(ctx, 'dropped obsolete legacy groups[] presets (groups are now formed live in the UI).');
+  if (legacyGroups.length > 0) {
+    warnWith(ctx, 'dropped obsolete legacy groups[]/parties[] presets (parties are now formed live in the UI).');
   }
 
   return {

@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
 // ── search flow ────────────────────────────────────────────────────────────
 // Proves the Phase-3 search experience: the full-library "Browse" grid is gone,
@@ -11,9 +11,9 @@ export async function run(page, ctx) {
 
   console.log('[proof] search: locating viewer-selection screen');
 
-  // We may be on the viewer-selection screen ("Pick the group"). Pick the
+  // We may be on the viewer-selection screen ("Pick the party"). Pick the
   // "Everyone" preset (same approach as the other flows), then Continue.
-  await pickEveryoneGroupAndContinue(page, 'search');
+  await pickEveryonePartyAndContinue(page, 'search');
 
   // Wait for the main app to render (the toolbar holds the search input).
   try {

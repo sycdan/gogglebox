@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// One ignored item/scope for a group. `key` is the exact id being matched
-// (episode id, series id, or movie id, depending on scope). `matchSeriesId`
-// is true only for whole-show scope: it additionally hides every OTHER episode
-// of that series (matched via item.seriesId), not just the item at `key`
-// itself. `label` is the display string captured at ignore-time (from the
-// card that was ignored) so the client never needs a separate name lookup.
-// `ignoredAt` is Date.now() ms, used to order the ignored panel most-recent-first.
+// One ignored item/scope for a party (formerly "group"). `key` is the exact id
+// being matched (episode id, series id, or movie id, depending on scope).
+// `matchSeriesId` is true only for whole-show scope: it additionally hides
+// every OTHER episode of that series (matched via item.seriesId), not just the
+// item at `key` itself. `label` is the display string captured at ignore-time
+// (from the card that was ignored) so the client never needs a separate name
+// lookup. `ignoredAt` is Date.now() ms, used to order the ignored panel
+// most-recent-first.
 export interface IgnoreEntry {
   key: string;
   matchSeriesId: boolean;
@@ -15,13 +16,17 @@ export interface IgnoreEntry {
   ignoredAt: number;
 }
 
-// Stage A/B: the persisted record for a group's gbx-owned player user. Holds the
-// minted Jellyfin user id AND the member ids (the active viewers' Jellyfin user
-// ids) to fan watched-state out to. IDs ONLY — passwords are never stored.
-export interface GroupPlayerUser {
+// Stage A/B: the persisted record for a party's gbx-owned player user. Holds
+// the minted Jellyfin user id AND the member ids (the active viewers' Jellyfin
+// user ids) to fan watched-state out to. IDs ONLY — passwords are never stored.
+export interface PartyPlayerUser {
   jellyfinUserId: string;
   memberIds: string[];
 }
+
+// Pre-rename alias kept for any external/compiled consumer still importing the
+// old type name. Structurally identical — never diverge these.
+export type GroupPlayerUser = PartyPlayerUser;
 
 // The cached "effective config" derived from the read-only config.json: the
 // migrated + merged + validated users/accounts/accessTokens plus provenance for
@@ -41,52 +46,58 @@ export interface CachedEffectiveConfig {
   recommendationCount: number;
 }
 
-// Writable runtime state — distinct from the read-only config.json. Stores a map
-// of groupKey -> ignored item entries (shows, single episodes, and movies).
-// Lives at a host-mounted location so it survives redeploys.
+// Writable runtime state — distinct from the read-only config.json. Stores a
+// map of partyKey -> ignored item entries (shows, single episodes, and
+// movies). Lives at a host-mounted location so it survives redeploys.
 interface AppStateFile {
   ignoredItems?: Record<string, IgnoreEntry[] | string[]>;
   // Legacy key (pre-rename, flat string[] shape). Read as a fallback; never written.
   ignoredShows?: Record<string, string[]>;
-  // Stage A/B: map of groupKey -> the gbx-owned player user record. A Stage A
-  // state file may have stored a bare string (the jellyfinUserId); normalizeGroupPlayerUsers
+  // Stage A/B: map of partyKey -> the gbx-owned player user record. A Stage A
+  // state file may have stored a bare string (the jellyfinUserId); normalizePartyPlayerUsers
   // upgrades that shape on read so old files keep working.
-  groupPlayerUsers?: Record<string, GroupPlayerUser | string>;
-  // Human-readable alias per managed group (groupKey -> alias, e.g. "Alice + Bob").
-  // IDs/keys only, no secrets. Shown wherever a group surfaces so the UI never
-  // renders the raw gbx-grp-<hash> name. A group with no stored alias falls back
-  // to a derived alias on read (see groups.ts), so this is best-effort.
+  partyPlayerUsers?: Record<string, PartyPlayerUser | string>;
+  // Pre-rename key (formerly "groupPlayerUsers"). Read as a fallback for any
+  // state file written before this rename; never written again.
+  groupPlayerUsers?: Record<string, PartyPlayerUser | string>;
+  // Human-readable alias per managed party (partyKey -> alias, e.g. "Alice + Bob").
+  // IDs/keys only, no secrets. Shown wherever a party surfaces so the UI never
+  // renders the raw gbx-grp-<hash> name. A party with no stored alias falls back
+  // to a derived alias on read (see parties.ts), so this is best-effort.
+  partyAliases?: Record<string, string>;
+  // Pre-rename key (formerly "groupAliases"). Read as a fallback for any state
+  // file written before this rename; never written again.
   groupAliases?: Record<string, string>;
   // The cached effective config + provenance (see CachedEffectiveConfig). Re-
   // derived on startup when the source hash or package version changed.
   effectiveConfig?: CachedEffectiveConfig;
 }
 
-// Normalize the groupAliases map: drop non-string / empty entries so callers
-// always get a clean groupKey -> alias record.
-function normalizeGroupAliases(
+// Normalize the partyAliases map: drop non-string / empty entries so callers
+// always get a clean partyKey -> alias record.
+function normalizePartyAliases(
   raw: Record<string, unknown> | undefined,
 ): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const [groupKey, value] of Object.entries(raw ?? {})) {
+  for (const [partyKey, value] of Object.entries(raw ?? {})) {
     if (typeof value === 'string' && value.trim()) {
-      out[groupKey] = value;
+      out[partyKey] = value;
     }
   }
   return out;
 }
 
-// Normalize the groupPlayerUsers map to the rich {jellyfinUserId, memberIds}
+// Normalize the partyPlayerUsers map to the rich {jellyfinUserId, memberIds}
 // shape, upgrading any legacy bare-string (Stage A) values (no member ids yet).
-function normalizeGroupPlayerUsers(
-  raw: Record<string, GroupPlayerUser | string> | undefined,
-): Record<string, GroupPlayerUser> {
-  const out: Record<string, GroupPlayerUser> = {};
-  for (const [groupKey, value] of Object.entries(raw ?? {})) {
+function normalizePartyPlayerUsers(
+  raw: Record<string, PartyPlayerUser | string> | undefined,
+): Record<string, PartyPlayerUser> {
+  const out: Record<string, PartyPlayerUser> = {};
+  for (const [partyKey, value] of Object.entries(raw ?? {})) {
     if (typeof value === 'string') {
-      out[groupKey] = { jellyfinUserId: value, memberIds: [] };
+      out[partyKey] = { jellyfinUserId: value, memberIds: [] };
     } else if (value && typeof value === 'object' && typeof value.jellyfinUserId === 'string') {
-      out[groupKey] = {
+      out[partyKey] = {
         jellyfinUserId: value.jellyfinUserId,
         memberIds: Array.isArray(value.memberIds) ? value.memberIds : [],
       };
@@ -127,7 +138,7 @@ function migrateLegacyEntry(id: string): IgnoreEntry {
   return { key: id, matchSeriesId: true, label: id, ignoredAt: 0 };
 }
 
-// Normalize one group's stored ignore list to the rich IgnoreEntry[] shape,
+// Normalize one party's stored ignore list to the rich IgnoreEntry[] shape,
 // migrating the legacy flat string[] shape losslessly.
 function normalizeIgnoreEntries(raw: IgnoreEntry[] | string[] | undefined): IgnoreEntry[] {
   if (!raw) {
@@ -138,14 +149,28 @@ function normalizeIgnoreEntries(raw: IgnoreEntry[] | string[] | undefined): Igno
 
 // Prefer the new key; fall back to the legacy `ignoredShows` key so a
 // pre-rename state file keeps working with zero data loss until its first write.
-// Normalizes every group's entries to the rich IgnoreEntry[] shape.
+// Normalizes every party's entries to the rich IgnoreEntry[] shape.
 function ignoredItemsFrom(state: AppStateFile): Record<string, IgnoreEntry[]> {
   const raw = state.ignoredItems ?? state.ignoredShows ?? {};
   const out: Record<string, IgnoreEntry[]> = {};
-  for (const [groupKey, entries] of Object.entries(raw)) {
-    out[groupKey] = normalizeIgnoreEntries(entries as IgnoreEntry[] | string[]);
+  for (const [partyKey, entries] of Object.entries(raw)) {
+    out[partyKey] = normalizeIgnoreEntries(entries as IgnoreEntry[] | string[]);
   }
   return out;
+}
+
+// Prefer the new `partyPlayerUsers` key; fall back to the pre-rename
+// `groupPlayerUsers` key so a state file written before this rename keeps
+// working with zero data loss until its first write under the new key.
+function partyPlayerUsersFrom(state: AppStateFile): Record<string, PartyPlayerUser> {
+  return normalizePartyPlayerUsers(state.partyPlayerUsers ?? state.groupPlayerUsers);
+}
+
+// Prefer the new `partyAliases` key; fall back to the pre-rename `groupAliases`
+// key so a state file written before this rename keeps working with zero data
+// loss until its first write under the new key.
+function partyAliasesFrom(state: AppStateFile): Record<string, string> {
+  return normalizePartyAliases(state.partyAliases ?? state.groupAliases);
 }
 
 // Most-recent-first: higher ignoredAt sorts first.
@@ -154,14 +179,21 @@ function sortMostRecentFirst(entries: IgnoreEntry[]): IgnoreEntry[] {
 }
 
 // Write-then-rename so a concurrent reader never observes a truncated file.
-// Always normalizes to the new `ignoredItems` key (migrating the legacy
-// `ignoredShows` key transparently) and preserves any other state fields
-// (e.g. groupPlayerUsers) via the spread.
+// Always normalizes to the new `ignoredItems`/`partyPlayerUsers`/`partyAliases`
+// keys (migrating the legacy `ignoredShows`/`groupPlayerUsers`/`groupAliases`
+// keys transparently on first write) and preserves any other state fields via
+// the spread.
 function writeState(filePath: string, state: AppStateFile, patch: Partial<AppStateFile>): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
-  const { ignoredShows: _legacy, ...rest } = state;
-  const next: AppStateFile = { ignoredItems: ignoredItemsFrom(state), ...rest, ...patch };
+  const { ignoredShows: _legacyIgnored, groupPlayerUsers: _legacyPlayers, groupAliases: _legacyAliases, ...rest } = state;
+  const next: AppStateFile = {
+    ignoredItems: ignoredItemsFrom(state),
+    partyPlayerUsers: partyPlayerUsersFrom(state),
+    partyAliases: partyAliasesFrom(state),
+    ...rest,
+    ...patch,
+  };
   const tempPath = path.join(dir, `.state-${process.pid}-${Date.now()}.tmp`);
   fs.writeFileSync(tempPath, JSON.stringify(next, null, 2));
   fs.renameSync(tempPath, filePath);
@@ -170,96 +202,96 @@ function writeState(filePath: string, state: AppStateFile, patch: Partial<AppSta
 export class AppState {
   constructor(private readonly filePath: string = STATE_PATH) {}
 
-  // A group's ignore entries, most-recent-first (highest ignoredAt first;
+  // A party's ignore entries, most-recent-first (highest ignoredAt first;
   // migrated legacy entries carry ignoredAt: 0 and so sort last).
-  getIgnoreEntries(groupKey: string): IgnoreEntry[] {
+  getIgnoreEntries(partyKey: string): IgnoreEntry[] {
     const state = readState(this.filePath);
-    return sortMostRecentFirst(ignoredItemsFrom(state)[groupKey] ?? []);
+    return sortMostRecentFirst(ignoredItemsFrom(state)[partyKey] ?? []);
   }
 
   // Upsert an ignore entry: a repeat ignore of the same `key` bumps its
   // ignoredAt to now and refreshes label/matchSeriesId rather than duplicating.
-  // Returns the group's remaining entries, most-recent-first.
+  // Returns the party's remaining entries, most-recent-first.
   ignoreItem(
-    groupKey: string,
+    partyKey: string,
     entry: { key: string; matchSeriesId: boolean; label: string },
   ): IgnoreEntry[] {
     const state = readState(this.filePath);
     const ignoredItems = ignoredItemsFrom(state);
-    const current = (ignoredItems[groupKey] ?? []).filter((existing) => existing.key !== entry.key);
+    const current = (ignoredItems[partyKey] ?? []).filter((existing) => existing.key !== entry.key);
     current.push({ ...entry, ignoredAt: Date.now() });
-    ignoredItems[groupKey] = current;
+    ignoredItems[partyKey] = current;
     writeState(this.filePath, state, { ignoredItems });
-    return sortMostRecentFirst(ignoredItems[groupKey]);
+    return sortMostRecentFirst(ignoredItems[partyKey]);
   }
 
-  // Remove an ignore entry by key, pruning the group when it becomes empty.
-  // Returns the group's remaining entries, most-recent-first.
-  unignoreItem(groupKey: string, key: string): IgnoreEntry[] {
+  // Remove an ignore entry by key, pruning the party when it becomes empty.
+  // Returns the party's remaining entries, most-recent-first.
+  unignoreItem(partyKey: string, key: string): IgnoreEntry[] {
     const state = readState(this.filePath);
     const ignoredItems = ignoredItemsFrom(state);
-    const next = (ignoredItems[groupKey] ?? []).filter((entry) => entry.key !== key);
+    const next = (ignoredItems[partyKey] ?? []).filter((entry) => entry.key !== key);
     if (next.length > 0) {
-      ignoredItems[groupKey] = next;
+      ignoredItems[partyKey] = next;
     } else {
-      delete ignoredItems[groupKey];
+      delete ignoredItems[partyKey];
     }
     writeState(this.filePath, state, { ignoredItems });
     return sortMostRecentFirst(next);
   }
 
-  // The persisted gbx-owned Jellyfin user id for a group, or undefined if none
+  // The persisted gbx-owned Jellyfin user id for a party, or undefined if none
   // has been minted yet.
-  getGroupPlayerUserId(groupKey: string): string | undefined {
+  getPartyPlayerUserId(partyKey: string): string | undefined {
     const state = readState(this.filePath);
-    return normalizeGroupPlayerUsers(state.groupPlayerUsers)[groupKey]?.jellyfinUserId;
+    return partyPlayerUsersFrom(state)[partyKey]?.jellyfinUserId;
   }
 
-  // Persist the group -> {jellyfinUserId, memberIds} mapping (IDs only, never
+  // Persist the party -> {jellyfinUserId, memberIds} mapping (IDs only, never
   // passwords). memberIds are the active viewers' Jellyfin user ids the Stage B
   // poller fans watched-state out to.
-  setGroupPlayerUser(groupKey: string, jellyfinUserId: string, memberIds: string[]): void {
+  setPartyPlayerUser(partyKey: string, jellyfinUserId: string, memberIds: string[]): void {
     const state = readState(this.filePath);
-    const current = normalizeGroupPlayerUsers(state.groupPlayerUsers);
-    const groupPlayerUsers: Record<string, GroupPlayerUser> = {
+    const current = partyPlayerUsersFrom(state);
+    const partyPlayerUsers: Record<string, PartyPlayerUser> = {
       ...current,
-      [groupKey]: { jellyfinUserId, memberIds: [...new Set(memberIds)] },
+      [partyKey]: { jellyfinUserId, memberIds: [...new Set(memberIds)] },
     };
-    writeState(this.filePath, state, { groupPlayerUsers });
+    writeState(this.filePath, state, { partyPlayerUsers });
   }
 
-  // All persisted group player users, normalized. The Stage B poller uses this
-  // to map a Jellyfin session's UserId (a group player user) -> member ids.
-  getGroupPlayerUsers(): Record<string, GroupPlayerUser> {
+  // All persisted party player users, normalized. The Stage B poller uses this
+  // to map a Jellyfin session's UserId (a party player user) -> member ids.
+  getPartyPlayerUsers(): Record<string, PartyPlayerUser> {
     const state = readState(this.filePath);
-    return normalizeGroupPlayerUsers(state.groupPlayerUsers);
+    return partyPlayerUsersFrom(state);
   }
 
-  // The stored human-readable alias for a managed group, or undefined when none
+  // The stored human-readable alias for a managed party, or undefined when none
   // has been persisted (callers derive a fallback from member names on read).
-  getGroupAlias(groupKey: string): string | undefined {
+  getPartyAlias(partyKey: string): string | undefined {
     const state = readState(this.filePath);
-    return normalizeGroupAliases(state.groupAliases)[groupKey];
+    return partyAliasesFrom(state)[partyKey];
   }
 
-  // All persisted group aliases, normalized (groupKey -> alias). IDs/keys only.
-  getGroupAliases(): Record<string, string> {
+  // All persisted party aliases, normalized (partyKey -> alias). IDs/keys only.
+  getPartyAliases(): Record<string, string> {
     const state = readState(this.filePath);
-    return normalizeGroupAliases(state.groupAliases);
+    return partyAliasesFrom(state);
   }
 
-  // Persist a human-readable alias for a managed group. No-op for an empty alias.
-  setGroupAlias(groupKey: string, alias: string): void {
+  // Persist a human-readable alias for a managed party. No-op for an empty alias.
+  setPartyAlias(partyKey: string, alias: string): void {
     const trimmed = alias.trim();
     if (!trimmed) {
       return;
     }
     const state = readState(this.filePath);
-    const groupAliases: Record<string, string> = {
-      ...normalizeGroupAliases(state.groupAliases),
-      [groupKey]: trimmed,
+    const partyAliases: Record<string, string> = {
+      ...partyAliasesFrom(state),
+      [partyKey]: trimmed,
     };
-    writeState(this.filePath, state, { groupAliases });
+    writeState(this.filePath, state, { partyAliases });
   }
 
   // The cached effective config, or undefined when none has been derived yet.

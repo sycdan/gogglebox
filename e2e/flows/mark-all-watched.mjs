@@ -1,4 +1,4 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 import { seedInProgressEpisode, seedPartialCard, seedInteractiveShow, seedStaggeredShow, seedRemovableMovie } from '../lib/seed-inprogress.mjs';
 
 // mark-all-watched flow: proves the per-viewer fully-watched policy on
@@ -20,7 +20,7 @@ import { seedInProgressEpisode, seedPartialCard, seedInteractiveShow, seedStagge
 //      non-final click STAYS on the same episode (k/N -> k+1/N), and the click
 //      that completes N/N ADVANCES the card. Counts derive from the real pill
 //      count (household size), not a hardcoded 3.
-//   6. Stable group anchor (regression for the "episode jumps" bug): the active
+//   6. Stable party anchor (regression for the "episode jumps" bug): the active
 //      household viewers sit on DIFFERENT episodes of one series. The card must
 //      show the EARLIEST episode, and toggling a viewer who is AHEAD of the
 //      anchor must NOT change the displayed episode.
@@ -228,7 +228,7 @@ export async function run(page, ctx) {
     console.warn('[proof] mark-all-watched: staggered-show seeding failed (' + (error?.message ?? error) + '); step 6 will be skipped.');
   }
 
-  await pickEveryoneGroupAndContinue(page, flowName);
+  await pickEveryonePartyAndContinue(page, flowName);
 
   try {
     await rail(page).waitFor({ state: 'visible', timeout: 30000 });
@@ -241,7 +241,7 @@ export async function run(page, ctx) {
     await cards(page).first().waitFor({ state: 'visible', timeout: 12000 });
   } catch {
     await shoot(page, flowName + '-00-empty-rail');
-    fail('mark-all-watched: Continue-watching rail is EMPTY for this group. Seed in-progress movies AND shows in Jellyfin.');
+    fail('mark-all-watched: Continue-watching rail is EMPTY for this party. Seed in-progress movies AND shows in Jellyfin.');
   }
 
   const baseline = await snapshotRail(page);

@@ -104,8 +104,44 @@ test('migrate0to1 carries over playback/recommendations and drops obsolete group
 
   assert.equal(result.playback?.watchedThreshold, 0.8);
   assert.equal(result.recommendations?.count, 12);
-  assert.ok(warnings.some((w) => /groups\[\] presets/.test(w)));
+  assert.ok(warnings.some((w) => /groups\[\]\/parties\[\] presets/.test(w)));
   assert.equal('groups' in result, false);
+});
+
+// ── Party terminology alias (AC3: parties[] is accepted wherever groups[] was) ──
+
+test('migrate0to1 accepts parties[] as an alias for the legacy groups[] preset list', () => {
+  const legacy = {
+    household: { username: 'house', password: 'pw' },
+    parties: [{ id: 'all', name: 'Everyone', memberIds: ['uuid-a', 'uuid-b'] }],
+  };
+
+  const result = migrate0to1(legacy, ctx());
+
+  assert.deepEqual(result.users.map((u) => u.jellyfin_name), ['Alice', 'Bob']);
+});
+
+test('migrate0to1 prefers parties[] over groups[] when both are present', () => {
+  const legacy = {
+    household: { username: 'house', password: 'pw' },
+    parties: [{ memberIds: ['uuid-a'] }],
+    groups: [{ memberIds: ['uuid-b'] }],
+  };
+
+  const result = migrate0to1(legacy, ctx());
+
+  assert.deepEqual(result.users.map((u) => u.jellyfin_name), ['Alice']);
+});
+
+test('migrate0to1 warns about dropped parties[] presets using party terminology', () => {
+  const warnings: string[] = [];
+  const legacy = {
+    household: { username: 'h', password: 'p' },
+    parties: [{ memberIds: ['uuid-a'] }],
+  };
+  migrate0to1(legacy, ctx({ warn: (m) => warnings.push(m) }));
+
+  assert.ok(warnings.some((w) => /groups\[\]\/parties\[\] presets/.test(w) && /parties are now formed/.test(w)));
 });
 
 // ── Migration 1 -> 2 ────────────────────────────────────────────────────────

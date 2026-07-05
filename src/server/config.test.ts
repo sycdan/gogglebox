@@ -150,6 +150,39 @@ test('buildEffectiveConfig auto-migrates a legacy (no schemaVersion) config thro
   }
 });
 
+// AC3: a legacy config spelled with the current "party" terminology
+// (`parties[]` instead of `groups[]`) auto-migrates identically, with no
+// manual migration step.
+test('buildEffectiveConfig auto-migrates a legacy config using parties[] (party terminology alias) through 0 -> 1 -> 2', async () => {
+  const legacy = {
+    household: { username: 'house', password: 'pw' },
+    parties: [{ id: 'all', name: 'Everyone', memberIds: ['id-Alice', 'id-Bob'] }],
+    recommendations: { count: 6 },
+  };
+  const workspace = setupWorkspace(legacy);
+
+  try {
+    process.chdir(workspace);
+    process.env = { ...originalEnv, JELLYFIN_URL: 'https://example.test', JELLYFIN_API_KEY: 'key' };
+
+    const { buildEffectiveConfig: build } = await import('./config.js');
+    const effective = build({ jellyfinUsers: jellyfin('Alice', 'Bob'), warn: () => {} }, '0.0.0');
+
+    assert.equal(effective.schemaVersion, 2);
+    assert.deepEqual(effective.users.map((u) => u.jellyfin_name).sort(), ['Alice', 'Bob']);
+    assert.deepEqual(effective.accounts.house, {
+      primary_users: [],
+      secondary_users: ['Alice', 'Bob'],
+      tertiary_users: [],
+    });
+    assert.deepEqual(effective.accessTokens, { pw: 'house' });
+    assert.equal(effective.recommendationCount, 6);
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 function v2(config: Partial<SchemaV2Config>): SchemaV2Config {
   return { schemaVersion: 2, users: [], accounts: {}, access_tokens: {}, ...config };
 }

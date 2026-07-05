@@ -24,7 +24,7 @@ export function isGuestConfirmDisabled({
   return !leavesSelection || draftIds.some((id) => !draftPins[id]?.trim());
 }
 
-// After the server rejects a group POST for a wrong/missing pin (403), the
+// After the server rejects a party POST for a wrong/missing pin (403), the
 // continue-time pin modal reopens for exactly the submitted guest (tertiary)
 // members so the user can retype. Pure so the reopen state is unit-testable.
 export function guestIdsForPinRetry(
@@ -37,11 +37,11 @@ export function guestIdsForPinRetry(
     .map((viewer) => viewer.id);
 }
 
-// Compute the prospective group submission when the continue-time pin modal is
+// Compute the prospective party submission when the continue-time pin modal is
 // confirmed: the reconciled member ids plus the next pins map (keyed by
-// jellyfinUserId, the group wire contract) — deselected modal guests lose
+// jellyfinUserId, the party wire contract) — deselected modal guests lose
 // their collected pin, drafted guests take their typed one. This is exactly
-// what the confirm click verifies with the server (POST /api/group/verify-pins)
+// what the confirm click verifies with the server (POST /api/party/verify-pins)
 // before the modal may close. Pure so the submission is unit-testable.
 export function buildContinueGuestSubmission({
   selectedViewerIds,

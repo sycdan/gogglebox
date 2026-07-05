@@ -4,7 +4,7 @@ import { selectExactViewersByName, continueFromPicker, viewerCards } from '../li
 // A UAT-safe, player-handoff-style click-through that proves a real Play/Resume
 // click opens the player against a REAL Jellyfin library (criterion 6's UAT
 // half), without assuming any sandbox-only fixture shape:
-//   - `group-alias` hard-codes the sbx two-primary fixture (Alice + Bob); real
+//   - `party-alias` hard-codes the sbx two-primary fixture (Alice + Bob); real
 //     UAT config may have only ONE primary. This flow selects viewer(s)
 //     GENERICALLY: whatever primaries are already preselected (falling back to
 //     the first plain viewer card if none are preselected), never a fixed count
@@ -23,8 +23,8 @@ import { selectExactViewersByName, continueFromPicker, viewerCards } from '../li
 //   PROOF_FLOW=player-uat ./scripts/uat.sh run --rm proof
 export const match = /player-uat|uat-player/i;
 
-async function pickAnyGroupAndContinue(page, label) {
-  const pickHeading = page.getByRole('heading', { name: /pick the group/i });
+async function pickAnyPartyAndContinue(page, label) {
+  const pickHeading = page.getByRole('heading', { name: /pick the party/i });
   if (!(await pickHeading.count().then((n) => n > 0))) {
     console.log(`[proof] ${label}: already in main app (no viewer-selection screen)`);
     return;
@@ -72,7 +72,7 @@ export async function run(page, ctx) {
     );
   }
 
-  await pickAnyGroupAndContinue(page, 'player-uat');
+  await pickAnyPartyAndContinue(page, 'player-uat');
 
   try {
     await page.locator('.media-card').first().waitFor({ state: 'visible', timeout: 30_000 });

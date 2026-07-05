@@ -37,7 +37,7 @@ test('mergeContinueWatching keeps a show resume item when only one viewer has pr
 test('mergeContinueWatching fans out DIFFERENT episodes of the same series into SEPARATE cards', () => {
   // The Ancient-Aliens-style scenario: two viewers on different episodes of one
   // series. The old model collapsed this to ONE anchored card; the new model
-  // must produce TWO cards, one per distinct episode candidate, so the group
+  // must produce TWO cards, one per distinct episode candidate, so the party
   // isn't forced through the earliest unwatched episode when both are fine
   // resuming their own episode.
   const items = mergeContinueWatching([
@@ -337,7 +337,7 @@ test('mergeContinueWatching keeps shows and movies fanned out/collapsed independ
 });
 
 // Shared show base for the ignore-scope tests: an out-of-order show
-// (Ancient Aliens style) where episode order doesn't matter to the group.
+// (Ancient Aliens style) where episode order doesn't matter to the party.
 const anthologyBase = {
   type: 'show' as const,
   overview: '',

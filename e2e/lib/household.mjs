@@ -1,10 +1,10 @@
 // Resolve the HOUSEHOLD viewer set the app actually uses, instead of every
 // Jellyfin user. The seeders must only touch household viewers: stray users
-// (e.g. the sandbox `gogglebox-admin`, who is in no group) are never pills but
+// (e.g. the sandbox `gogglebox-admin`, who is in no party) are never pills but
 // their seeded played-state still drives Jellyfin Resume/NextUp, which desyncs
 // the displayed episode from the fixture. We read the same config.json the
-// server reads (mounted at /app/config.json), pick the largest group (the
-// "Everyone"/all group), and intersect its member GUIDs with the live users.
+// server reads (mounted at /app/config.json) and intersect its configured
+// users[].jellyfin_name entries with the live Jellyfin users.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 

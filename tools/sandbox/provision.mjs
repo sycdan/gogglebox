@@ -44,7 +44,7 @@ const USER_PASS = process.env.SANDBOX_USER_PASS || 'sandbox';
 const API_KEY_NAME = 'GOGGLEBOX_SANDBOX';
 // Stable, obvious access tokens for the two sandbox accounts (config v2 token
 // login). The household token doubles as the .env.sbx ACCESS_TOKEN (auto-login);
-// the visitor token is typed manually by the group-pin proof flow.
+// the visitor token is typed manually by the party-pin proof flow.
 const HOUSEHOLD_TOKEN = 'sbx-household-token';
 const VISITOR_TOKEN = 'sbx-visitor-token';
 // In-container media paths the libraries point at (see generate-fixtures.mjs).
@@ -306,7 +306,7 @@ async function emitArtifacts(apiKey, usersByName) {
         secondary_users: ['Carol', 'Dave'],
         tertiary_users: [],
       },
-      // Manual-login account for the group-pin proof: no primaries, Dave as a
+      // Manual-login account for the party-pin proof: no primaries, Dave as a
       // plain secondary card, Carol ONLY addable as a pin-gated guest.
       visitor: {
         primary_users: [],

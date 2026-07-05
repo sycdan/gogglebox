@@ -1,8 +1,8 @@
-import { pickEveryoneGroupAndContinue } from '../lib/viewer.mjs';
+import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
 // ── ignore-shows flow ──────────────────────────────────────────────────────
-// Proves the per-group "Ignore" feature end-to-end: a card's Ignore button
-// hides that show from the Group-picks grid; the hero "Ignored" modal
+// Proves the per-party "Ignore" feature end-to-end: a card's Ignore button
+// hides that show from the Party-picks grid; the hero "Ignored" modal
 // lists it with an Unignore control; Unignore brings it back into the grid.
 export const match = /ignore/i;
 
@@ -11,33 +11,33 @@ export async function run(page, ctx) {
 
   console.log('[proof] ignore-shows: locating viewer-selection screen');
 
-  // We may be on the viewer-selection screen ("Pick the group"). Pick the
+  // We may be on the viewer-selection screen ("Pick the party"). Pick the
   // "Everyone" preset (same approach as the other flows), then Continue.
-  await pickEveryoneGroupAndContinue(page, 'ignore-shows');
+  await pickEveryonePartyAndContinue(page, 'ignore-shows');
 
-  // Locate the "Group picks" section: the .section-block whose eyebrow text
-  // is "Group picks". The home page hydrates/re-renders after data loads, so
+  // Locate the "Party picks" section: the .section-block whose eyebrow text
+  // is "Party picks". The home page hydrates/re-renders after data loads, so
   // we never hold a resolved handle — `picksSectionLoc()` returns a fresh
   // auto-waiting Locator on every access, and scrolls go through safeScroll().
   const picksSectionLoc = () =>
     page
       .locator('.section-block')
-      .filter({ has: page.locator('.eyebrow', { hasText: /^Group picks$/ }) })
+      .filter({ has: page.locator('.eyebrow', { hasText: /^Party picks$/ }) })
       .first();
   const picksSection = picksSectionLoc();
 
   try {
     await picksSection.waitFor({ state: 'visible', timeout: 30_000 });
   } catch (error) {
-    await shoot(page, `${flowName}-03-no-group-picks`);
-    fail('ignore-shows: "Group picks" section never appeared', error);
+    await shoot(page, `${flowName}-03-no-party-picks`);
+    fail('ignore-shows: "Party picks" section never appeared', error);
   }
 
   // Re-query immediately before scrolling: the section often re-renders
   // (detaching the element above) once recommendations data arrives.
-  await safeScroll('ignore-shows: scroll group-picks', picksSectionLoc);
+  await safeScroll('ignore-shows: scroll party-picks', picksSectionLoc);
 
-  // Reads the card titles within the Group-picks grid. Re-queries the section
+  // Reads the card titles within the Party-picks grid. Re-queries the section
   // each call (it re-renders as ignore/unignore mutate the grid) and swallows
   // a transient detach by returning [] so the polling loops simply retry.
   async function gridTitles() {
@@ -62,7 +62,7 @@ export async function run(page, ctx) {
     await shoot(page, `${flowName}-03-no-cards`);
     const empty = await picksSection.locator('.muted').allInnerTexts().catch(() => []);
     fail(
-      'ignore-shows: no .media-card with an "Ignore" button rendered in the Group-picks section' +
+      'ignore-shows: no .media-card with an "Ignore" button rendered in the Party-picks section' +
         (empty.length ? ` (section message: ${JSON.stringify(empty)})` : ' (data gap?)'),
       error,
     );
@@ -85,7 +85,7 @@ export async function run(page, ctx) {
   }).catch(() => '');
   if (!targetTitle) {
     await shoot(page, `${flowName}-04-no-target-title`);
-    fail('ignore-shows: could not read a target card title from the Group-picks section');
+    fail('ignore-shows: could not read a target card title from the Party-picks section');
   }
   const before = await gridTitles();
   console.log(`[proof] ignore-shows: grid titles before ignore [${before.length}] =`, JSON.stringify(before));
@@ -111,7 +111,7 @@ export async function run(page, ctx) {
   await page.waitForTimeout(300);
   await shoot(page, `${flowName}-04-after-ignore`);
   if (removed) {
-    console.log(`[proof] ignore-shows: PASS — "${targetTitle}" disappeared from the Group-picks grid after Ignore`);
+    console.log(`[proof] ignore-shows: PASS — "${targetTitle}" disappeared from the Party-picks grid after Ignore`);
   } else {
     console.error(`[proof] ignore-shows: FAIL — "${targetTitle}" still present in the grid after clicking Ignore`);
   }
@@ -183,7 +183,7 @@ export async function run(page, ctx) {
   await page.waitForTimeout(300);
   await shoot(page, `${flowName}-06-after-unignore`);
   if (restored) {
-    console.log(`[proof] ignore-shows: PASS — "${targetTitle}" returned to the Group-picks grid after Unignore`);
+    console.log(`[proof] ignore-shows: PASS — "${targetTitle}" returned to the Party-picks grid after Unignore`);
   } else {
     console.warn(
       `[proof] ignore-shows: "${targetTitle}" did not reappear in the grid within timeout after Unignore ` +
