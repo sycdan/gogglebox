@@ -1,0 +1,231 @@
+e2e	Run e2e flow suite	﻿2026-07-05T16:59:00.8579047Z ##[group]Run docker compose -f docker-compose.yml -f docker-compose.sbx.yml run --rm -e PROOF_URL=http://proxy:8080 -e PROOF_FLOW=all proof
+e2e	Run e2e flow suite	2026-07-05T16:59:00.8580655Z [36;1mdocker compose -f docker-compose.yml -f docker-compose.sbx.yml run --rm -e PROOF_URL=http://proxy:8080 -e PROOF_FLOW=all proof[0m
+e2e	Run e2e flow suite	2026-07-05T16:59:00.8631079Z shell: /usr/bin/bash -e {0}
+e2e	Run e2e flow suite	2026-07-05T16:59:00.8631483Z env:
+e2e	Run e2e flow suite	2026-07-05T16:59:00.8631790Z   REGISTRY: ghcr.io
+e2e	Run e2e flow suite	2026-07-05T16:59:00.8632149Z   IMAGE_NAME: sycdan/gogglebox
+e2e	Run e2e flow suite	2026-07-05T16:59:00.8632525Z ##[endgroup]
+e2e	Run e2e flow suite	2026-07-05T16:59:01.0013665Z  Container gogglebox-jellyfin-sandbox-1  Running
+e2e	Run e2e flow suite	2026-07-05T16:59:01.0014234Z  Container gogglebox-client-1  Running
+e2e	Run e2e flow suite	2026-07-05T16:59:01.0014713Z  Container gogglebox-server-1  Running
+e2e	Run e2e flow suite	2026-07-05T16:59:01.0015019Z  Container gogglebox-proxy-1  Running
+e2e	Run e2e flow suite	2026-07-05T16:59:01.0027687Z  Container gogglebox-deps-1  Starting
+e2e	Run e2e flow suite	2026-07-05T16:59:01.1586318Z  Container gogglebox-deps-1  Started
+e2e	Run e2e flow suite	2026-07-05T16:59:01.1587098Z  Container gogglebox-deps-1  Waiting
+e2e	Run e2e flow suite	2026-07-05T16:59:01.1587914Z  Container gogglebox-deps-1  Waiting
+e2e	Run e2e flow suite	2026-07-05T16:59:04.7179675Z  Container gogglebox-deps-1  Exited
+e2e	Run e2e flow suite	2026-07-05T16:59:04.7180245Z  Container gogglebox-deps-1  Exited
+e2e	Run e2e flow suite	2026-07-05T16:59:04.7207129Z  proof Pulling 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9098025Z  7478e0ac0f23 Pulling fs layer 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9098530Z  6e5fea31d25b Pulling fs layer 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9098884Z  1c8503a62744 Pulling fs layer 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9099257Z  512354f423f2 Pulling fs layer 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9099554Z  512354f423f2 Waiting 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9601460Z  1c8503a62744 Downloading [>                                                  ]  31.96kB/2.015MB
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9727499Z  1c8503a62744 Verifying Checksum 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9728087Z  1c8503a62744 Download complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9735369Z  6e5fea31d25b Downloading [>                                                  ]  538.7kB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:04.9756179Z  7478e0ac0f23 Downloading [>                                                  ]  309.4kB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.0218981Z  512354f423f2 Downloading [>                                                  ]  538.7kB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.0762318Z  7478e0ac0f23 Downloading [===================================>               ]  21.79MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.0829105Z  6e5fea31d25b Downloading [=========>                                         ]  18.37MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.1143743Z  7478e0ac0f23 Verifying Checksum 
+e2e	Run e2e flow suite	2026-07-05T16:59:05.1145125Z  7478e0ac0f23 Download complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:05.1225083Z  512354f423f2 Downloading [=>                                                 ]  26.48MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.1652379Z  7478e0ac0f23 Extracting [>                                                  ]  327.7kB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.1840647Z  6e5fea31d25b Downloading [=======================>                           ]  43.78MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.2242344Z  512354f423f2 Downloading [===>                                               ]  52.43MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.2685734Z  7478e0ac0f23 Extracting [======>                                            ]  3.932MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.2855957Z  6e5fea31d25b Downloading [===================================>               ]  66.49MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.3252178Z  512354f423f2 Downloading [=====>                                             ]  78.38MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.3735985Z  7478e0ac0f23 Extracting [===========>                                       ]  6.881MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.3952648Z  6e5fea31d25b Downloading [============================================>      ]  83.25MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.4250729Z  512354f423f2 Downloading [=======>                                           ]  104.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.4451851Z  6e5fea31d25b Verifying Checksum 
+e2e	Run e2e flow suite	2026-07-05T16:59:05.4452373Z  6e5fea31d25b Download complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:05.4737506Z  7478e0ac0f23 Extracting [=============>                                     ]   8.52MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.5255049Z  512354f423f2 Downloading [=========>                                         ]  128.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.5768304Z  7478e0ac0f23 Extracting [===================>                               ]  12.12MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.6264843Z  512354f423f2 Downloading [==========>                                        ]  152.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.6789364Z  7478e0ac0f23 Extracting [===============================>                   ]  19.33MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.7278196Z  512354f423f2 Downloading [============>                                      ]  175.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.7943214Z  7478e0ac0f23 Extracting [==========================================>        ]  25.89MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.8323779Z  512354f423f2 Downloading [==============>                                    ]  201.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.9326622Z  512354f423f2 Downloading [===============>                                   ]  221.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:05.9472028Z  7478e0ac0f23 Extracting [===========================================>       ]  26.54MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.0329358Z  512354f423f2 Downloading [=================>                                 ]  249.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.0863078Z  7478e0ac0f23 Extracting [===============================================>   ]  29.16MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.1394818Z  512354f423f2 Downloading [===================>                               ]    273MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.2211178Z  7478e0ac0f23 Extracting [=================================================> ]  30.15MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.2410259Z  512354f423f2 Downloading [=====================>                             ]  300.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.3068530Z  7478e0ac0f23 Extracting [==================================================>]  30.44MB/30.44MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.3419327Z  512354f423f2 Downloading [======================>                            ]  327.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.3603491Z  7478e0ac0f23 Pull complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:06.4274246Z  6e5fea31d25b Extracting [>                                                  ]  557.1kB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.4428767Z  512354f423f2 Downloading [========================>                          ]    353MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.5378418Z  6e5fea31d25b Extracting [====>                                              ]  8.356MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.5453799Z  512354f423f2 Downloading [==========================>                        ]  378.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.6394144Z  6e5fea31d25b Extracting [========>                                          ]  15.04MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.6458826Z  512354f423f2 Downloading [============================>                      ]  403.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.7431409Z  6e5fea31d25b Extracting [============>                                      ]  22.28MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.7463739Z  512354f423f2 Downloading [==============================>                    ]  428.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.8468578Z  6e5fea31d25b Extracting [===============>                                   ]  27.85MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.8479396Z  512354f423f2 Downloading [===============================>                   ]  455.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.9488104Z  512354f423f2 Downloading [=================================>                 ]  481.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:06.9515716Z  6e5fea31d25b Extracting [===================>                               ]  36.21MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.0516871Z  512354f423f2 Downloading [===================================>               ]  503.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.0588853Z  6e5fea31d25b Extracting [=======================>                           ]  43.45MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.1541623Z  512354f423f2 Downloading [====================================>              ]  525.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.1690455Z  6e5fea31d25b Extracting [==========================>                        ]  49.02MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.2541135Z  512354f423f2 Downloading [======================================>            ]  550.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.3225603Z  6e5fea31d25b Extracting [============================>                      ]  53.48MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.3547101Z  512354f423f2 Downloading [========================================>          ]  574.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.4318657Z  6e5fea31d25b Extracting [=============================>                     ]  54.59MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.4573822Z  512354f423f2 Downloading [=========================================>         ]  598.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.5383088Z  6e5fea31d25b Extracting [==============================>                    ]  55.71MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.5643940Z  512354f423f2 Downloading [===========================================>       ]  620.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.6537544Z  6e5fea31d25b Extracting [==============================>                    ]  56.82MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.6654185Z  512354f423f2 Downloading [=============================================>     ]  646.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.7648037Z  6e5fea31d25b Extracting [===============================>                   ]  57.93MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.7675006Z  512354f423f2 Downloading [===============================================>   ]  671.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.8686970Z  512354f423f2 Downloading [================================================>  ]    692MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.8745786Z  6e5fea31d25b Extracting [===============================>                   ]  59.05MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:07.9588514Z  512354f423f2 Verifying Checksum 
+e2e	Run e2e flow suite	2026-07-05T16:59:07.9589354Z  512354f423f2 Download complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:07.9812878Z  6e5fea31d25b Extracting [================================>                  ]  60.16MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:08.1111624Z  6e5fea31d25b Extracting [=================================>                 ]  61.28MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:08.2115400Z  6e5fea31d25b Extracting [===================================>               ]  66.29MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:08.4563588Z  6e5fea31d25b Extracting [====================================>              ]   67.4MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:08.6142643Z  6e5fea31d25b Extracting [====================================>              ]  68.52MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:08.8158357Z  6e5fea31d25b Extracting [=====================================>             ]  69.07MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:08.9207754Z  6e5fea31d25b Extracting [=======================================>           ]  72.42MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.0359326Z  6e5fea31d25b Extracting [=======================================>           ]  73.53MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.1528107Z  6e5fea31d25b Extracting [=========================================>         ]  76.32MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.2578934Z  6e5fea31d25b Extracting [===========================================>       ]  81.33MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.3638540Z  6e5fea31d25b Extracting [=============================================>     ]  84.12MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.5482723Z  6e5fea31d25b Extracting [===============================================>   ]  87.46MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.6674880Z  6e5fea31d25b Extracting [================================================>  ]  89.69MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.7756123Z  6e5fea31d25b Extracting [=================================================> ]  91.36MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:09.8898640Z  6e5fea31d25b Extracting [=================================================> ]  91.91MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:10.0104159Z  6e5fea31d25b Extracting [==================================================>]  92.73MB/92.73MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.2897759Z  6e5fea31d25b Pull complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:12.2907269Z  1c8503a62744 Extracting [>                                                  ]  32.77kB/2.015MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.3031798Z  1c8503a62744 Extracting [==================================================>]  2.015MB/2.015MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.3093426Z  1c8503a62744 Pull complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:12.3622518Z  512354f423f2 Extracting [>                                                  ]  557.1kB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.4664470Z  512354f423f2 Extracting [>                                                  ]  6.128MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.5686847Z  512354f423f2 Extracting [=>                                                 ]  16.15MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.6709250Z  512354f423f2 Extracting [=>                                                 ]  25.07MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.7725921Z  512354f423f2 Extracting [==>                                                ]  33.98MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.8751161Z  512354f423f2 Extracting [===>                                               ]  42.89MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:12.9817307Z  512354f423f2 Extracting [===>                                               ]  51.81MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.0831873Z  512354f423f2 Extracting [====>                                              ]  60.16MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.1883317Z  512354f423f2 Extracting [====>                                              ]  69.07MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.2906369Z  512354f423f2 Extracting [=====>                                             ]  77.99MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.3966838Z  512354f423f2 Extracting [======>                                            ]   86.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.5029935Z  512354f423f2 Extracting [======>                                            ]  95.81MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.6093433Z  512354f423f2 Extracting [=======>                                           ]  103.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.7113053Z  512354f423f2 Extracting [=======>                                           ]  109.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.8131821Z  512354f423f2 Extracting [========>                                          ]  114.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:13.9182904Z  512354f423f2 Extracting [========>                                          ]  118.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.0271445Z  512354f423f2 Extracting [========>                                          ]  122.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.1293468Z  512354f423f2 Extracting [========>                                          ]  126.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.2394967Z  512354f423f2 Extracting [=========>                                         ]  129.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.3422867Z  512354f423f2 Extracting [=========>                                         ]  138.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.4467042Z  512354f423f2 Extracting [==========>                                        ]  145.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.5565263Z  512354f423f2 Extracting [==========>                                        ]    151MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.6598520Z  512354f423f2 Extracting [==========>                                        ]    156MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.7647218Z  512354f423f2 Extracting [===========>                                       ]    161MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.8658118Z  512354f423f2 Extracting [============>                                      ]    176MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:14.9703813Z  512354f423f2 Extracting [=============>                                     ]  185.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.0730349Z  512354f423f2 Extracting [=============>                                     ]  194.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.1750993Z  512354f423f2 Extracting [==============>                                    ]  203.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.2761564Z  512354f423f2 Extracting [==============>                                    ]  212.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.3784268Z  512354f423f2 Extracting [===============>                                   ]  220.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.4810888Z  512354f423f2 Extracting [================>                                  ]  228.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.5845570Z  512354f423f2 Extracting [================>                                  ]  237.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.6898601Z  512354f423f2 Extracting [=================>                                 ]  246.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.7899946Z  512354f423f2 Extracting [=================>                                 ]  252.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:15.8914196Z  512354f423f2 Extracting [==================>                                ]    259MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.0011594Z  512354f423f2 Extracting [==================>                                ]  262.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.1076958Z  512354f423f2 Extracting [==================>                                ]  266.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.2099794Z  512354f423f2 Extracting [==================>                                ]  270.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.3101501Z  512354f423f2 Extracting [===================>                               ]  279.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.4154223Z  512354f423f2 Extracting [====================>                              ]  286.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.5257241Z  512354f423f2 Extracting [====================>                              ]    293MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.6322170Z  512354f423f2 Extracting [=====================>                             ]  301.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.7357176Z  512354f423f2 Extracting [=====================>                             ]  310.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.8358363Z  512354f423f2 Extracting [======================>                            ]  319.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:16.9379593Z  512354f423f2 Extracting [=======================>                           ]  328.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.0437785Z  512354f423f2 Extracting [=======================>                           ]  336.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.1460301Z  512354f423f2 Extracting [========================>                          ]  344.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.2491981Z  512354f423f2 Extracting [========================>                          ]  353.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.3517856Z  512354f423f2 Extracting [=========================>                         ]  361.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.4544478Z  512354f423f2 Extracting [=========================>                         ]  369.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.5597429Z  512354f423f2 Extracting [==========================>                        ]  377.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.6651887Z  512354f423f2 Extracting [==========================>                        ]  384.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.7681373Z  512354f423f2 Extracting [===========================>                       ]  392.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.8683855Z  512354f423f2 Extracting [============================>                      ]    400MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:17.9712798Z  512354f423f2 Extracting [============================>                      ]  408.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.0738824Z  512354f423f2 Extracting [=============================>                     ]  416.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.1768132Z  512354f423f2 Extracting [=============================>                     ]  426.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.2820846Z  512354f423f2 Extracting [==============================>                    ]  433.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.3888027Z  512354f423f2 Extracting [===============================>                   ]  442.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.4888392Z  512354f423f2 Extracting [===============================>                   ]  450.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.5910190Z  512354f423f2 Extracting [================================>                  ]  458.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.6948557Z  512354f423f2 Extracting [================================>                  ]  466.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.8005884Z  512354f423f2 Extracting [=================================>                 ]  475.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:18.9022998Z  512354f423f2 Extracting [=================================>                 ]  481.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.0382445Z  512354f423f2 Extracting [==================================>                ]  485.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.1438498Z  512354f423f2 Extracting [==================================>                ]  490.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.2512540Z  512354f423f2 Extracting [==================================>                ]    498MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.3596160Z  512354f423f2 Extracting [===================================>               ]  504.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.4638447Z  512354f423f2 Extracting [===================================>               ]  510.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.5671661Z  512354f423f2 Extracting [====================================>              ]  516.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.6719558Z  512354f423f2 Extracting [====================================>              ]  525.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.7772584Z  512354f423f2 Extracting [=====================================>             ]  533.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.8904132Z  512354f423f2 Extracting [=====================================>             ]  541.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:19.9913027Z  512354f423f2 Extracting [======================================>            ]  546.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.1056381Z  512354f423f2 Extracting [======================================>            ]  552.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.2071979Z  512354f423f2 Extracting [=======================================>           ]  560.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.3108168Z  512354f423f2 Extracting [=======================================>           ]  568.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.4155122Z  512354f423f2 Extracting [========================================>          ]  578.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.5166528Z  512354f423f2 Extracting [=========================================>         ]  587.7MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.6229952Z  512354f423f2 Extracting [=========================================>         ]  598.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.7255917Z  512354f423f2 Extracting [==========================================>        ]  606.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.8306293Z  512354f423f2 Extracting [===========================================>       ]  615.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:20.9324376Z  512354f423f2 Extracting [===========================================>       ]  622.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.0355822Z  512354f423f2 Extracting [============================================>      ]  629.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.1398094Z  512354f423f2 Extracting [============================================>      ]  638.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.2403293Z  512354f423f2 Extracting [=============================================>     ]  645.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.3471421Z  512354f423f2 Extracting [=============================================>     ]  651.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.4521832Z  512354f423f2 Extracting [=============================================>     ]  655.1MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.6469610Z  512354f423f2 Extracting [==============================================>    ]  656.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.8118974Z  512354f423f2 Extracting [==============================================>    ]  657.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:21.9124020Z  512354f423f2 Extracting [==============================================>    ]  664.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:22.0146634Z  512354f423f2 Extracting [===============================================>   ]  677.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:22.1174296Z  512354f423f2 Extracting [================================================>  ]  687.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:22.2358548Z  512354f423f2 Extracting [================================================>  ]  696.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:22.3666065Z  512354f423f2 Extracting [================================================>  ]  697.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:22.5278004Z  512354f423f2 Extracting [=================================================> ]  700.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:22.9448978Z  512354f423f2 Extracting [=================================================> ]  700.8MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:23.2052219Z  512354f423f2 Extracting [=================================================> ]  701.3MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:23.3425930Z  512354f423f2 Extracting [=================================================> ]  701.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:23.6030441Z  512354f423f2 Extracting [=================================================> ]  702.4MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:23.9253530Z  512354f423f2 Extracting [=================================================> ]    703MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:24.6641698Z  512354f423f2 Extracting [=================================================> ]  703.6MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:24.8753619Z  512354f423f2 Extracting [=================================================> ]  705.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:24.9906640Z  512354f423f2 Extracting [=================================================> ]  711.9MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:25.1220113Z  512354f423f2 Extracting [=================================================> ]  712.5MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:25.3872614Z  512354f423f2 Extracting [=================================================> ]    713MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:25.4000857Z  512354f423f2 Extracting [==================================================>]  713.2MB/713.2MB
+e2e	Run e2e flow suite	2026-07-05T16:59:28.4841556Z  512354f423f2 Pull complete 
+e2e	Run e2e flow suite	2026-07-05T16:59:28.4890571Z  proof Pulled 
+e2e	Run e2e flow suite	2026-07-05T16:59:29.3768356Z [proof] all-flows: running 15 flow(s) in dispatch order
+e2e	Run e2e flow suite	2026-07-05T16:59:29.3817810Z [proof] all-flows: -- starting "group-alias" --
+e2e	Run e2e flow suite	2026-07-05T16:59:29.5707091Z [proof] navigating to http://proxy:8080
+e2e	Run e2e flow suite	2026-07-05T16:59:30.3917997Z [proof] app auto-login enabled = true
+e2e	Run e2e flow suite	2026-07-05T16:59:30.5163028Z [proof] screenshot: /app/artifacts/2026-07-05T16-59-29-372Z-all/group-alias/group-alias-02-authenticated.png
+e2e	Run e2e flow suite	2026-07-05T16:59:30.5167949Z [proof] FAIL: DELIBERATE scratch/e2e-gate-live-proof failure — proving AC4/AC7 artifact-upload + publish-skip against a real Actions run. Revert before merge.
+e2e	Run e2e flow suite	2026-07-05T16:59:30.6069928Z 
+e2e	Run e2e flow suite	2026-07-05T16:59:30.6125350Z ##[error]Process completed with exit code 1.
