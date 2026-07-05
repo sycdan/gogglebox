@@ -178,8 +178,9 @@ PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
 PROOF_FLOW=continue-watching ./scripts/uat.sh run --rm proof
 ```
 
-See [`AGENTS.md`](./AGENTS.md) for the agent workflow and the Docker-specific
-rules that keep local development consistent.
+See the [agent guide](kb/00000000-0000-0000-0000-000000000000.md)
+for the agent workflow and the Docker-specific rules that keep local
+development consistent.
 
 ## Releases
 

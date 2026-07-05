@@ -2,10 +2,10 @@
 
 ## Goals
 
-- Read the [agent guide](kb/00000000-0000-0000-0000-000000000000.md) immediately
+- Read the [agent guide](../kb/00000000-0000-0000-0000-000000000000.md) immediately
   before making any other tool calls or responding to prompts. That file is the
   actual agent guide; this file is only a pointer for tools that hardcode
-  `AGENTS.md` lookup.
+  `.github/copilot-instructions.md` lookup.
 
 ## Nongoals
 
