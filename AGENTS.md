@@ -103,9 +103,17 @@ is the slash-separated effort directory under `efforts/`, such as
 `auth-refactor` or `auth-refactor/guest-pin-rework`. This keeps `main`
 phase-oriented while letting session branches contain any number of local
 progress commits or none at all. After the squash lands successfully on `main`,
-the orchestrator removes the temporary `base_tag` and the session worktree and
-branch: `git worktree remove ./sessions/<session_name>` then
-`git branch -d <session_name>`.
+the orchestrator removes the temporary `base_tag`, then tears the session down
+with `scripts/teardown-session.sh <session_name>` — never bare
+`git worktree remove` — since a subagent's `docker compose run --rm
+check/test/...` leaves its `deps` dependency container (the one-shot `npm ci`
+service other services `depends_on`) exited but not removed, and on Windows an
+exited container can still hold the bind-mounted worktree open and make plain
+`git worktree remove` fail with a permission/busy error. The script's
+`docker compose down -v --remove-orphans` (run from inside the worktree, so the
+project name matches whatever the subagent's un-prefixed `docker compose ...`
+commands auto-derived) clears that before removing the worktree and deleting
+the branch.
 
 After `gogglebox-verifier` reports successful static verification, the
 orchestrator must land the verified session-branch state on `main` using the same
