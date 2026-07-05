@@ -43,12 +43,13 @@ import * as movieLeastWatched from './flows/movie-least-watched.mjs';
 import * as showCrossEpisode from './flows/show-cross-episode.mjs';
 import * as railPagination from './flows/rail-pagination.mjs';
 import * as playerHandoff from './flows/player-handoff.mjs';
+import * as playerUat from './flows/player-uat.mjs';
 import * as groupPin from './flows/group-pin.mjs';
 import * as groupAlias from './flows/group-alias.mjs';
 
 // Flow dispatch order — preserved from the original single-file script. Each
 // flow whose `match` matches the flowName runs; multiple may fire for one name.
-const flows = [groupAlias, groupPin, playerHandoff, playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode, railPagination];
+const flows = [groupAlias, groupPin, playerHandoff, playerUat, playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode, railPagination];
 
 const url = process.env.PROOF_URL ?? 'http://client:5173';
 const accessToken = process.env.ACCESS_TOKEN ?? '';

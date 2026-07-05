@@ -99,6 +99,57 @@ export async function run(page, ctx) {
   }
   await shoot(page, 'group-pin-login');
 
+  // ── 1a. Deliberately invalid access token -> 401 rejection, form persists ──
+  // Proves the login form REJECTS a bogus token with a clear error and does
+  // NOT persist a token (still on the login form afterwards) before we try the
+  // real visitor login below.
+  {
+    const invalidResponsePromise = page
+      .waitForResponse(
+        (response) =>
+          response.url().includes('/api/auth/login') && response.request().method() === 'POST',
+        { timeout: 15_000 },
+      )
+      .catch(() => null);
+    const invalidTokenInput = loginForm.locator('input[type="password"]').first();
+    await invalidTokenInput.fill('not-a-real-token');
+    await loginForm.locator('button[type="submit"]').click();
+    const invalidResponse = await invalidResponsePromise;
+    if (!invalidResponse) {
+      await shoot(page, `${flowName}-invalid-token-NO-RESPONSE`);
+      fail('group-pin: submitting an invalid access token never hit POST /api/auth/login');
+    }
+    if (invalidResponse.status() < 400 || invalidResponse.status() >= 500) {
+      await shoot(page, `${flowName}-invalid-token-WRONG-STATUS`);
+      fail(`group-pin: invalid access token should be rejected 4xx (got ${invalidResponse.status()})`);
+    }
+    // `.error` renders as a SIBLING of form.stack (both under .auth-panel), not
+    // nested inside the form — scope to the panel, not the form itself.
+    const loginError = page.locator('.auth-panel .error').first();
+    try {
+      await loginError.waitFor({ state: 'visible', timeout: 10_000 });
+    } catch (error) {
+      await shoot(page, `${flowName}-invalid-token-NO-ERROR`);
+      fail('group-pin: an invalid access token did not surface a visible error on the login form', error);
+    }
+    const invalidErrorText = ((await loginError.textContent().catch(() => '')) ?? '').trim();
+    console.log('[proof] group-pin: invalid-token login error =', JSON.stringify(invalidErrorText));
+    if (!invalidErrorText) {
+      fail('group-pin: the invalid-token error text was empty');
+    }
+    // The login form must still be showing (nothing authenticated/persisted).
+    if (!(await loginForm.isVisible().catch(() => false))) {
+      await shoot(page, `${flowName}-invalid-token-FORM-GONE`);
+      fail('group-pin: the login form disappeared after an invalid token — it must persist for retry');
+    }
+    const storedToken = await page.evaluate(() => window.localStorage.getItem('gogglebox.accessToken'));
+    if (storedToken) {
+      fail('group-pin: an invalid access token must not be persisted to localStorage');
+    }
+    await shoot(page, 'group-pin-invalid-token');
+    console.log('[proof] group-pin: PASS — invalid access token rejected (4xx + visible error), login form persists, no token stored');
+  }
+
   // ── 1b. Submit the visitor access token (deterministic) ──────────────────
   // Auto-login is disabled via the patched /api/session above, so there is no
   // implicit-login storm to race. We still gate success on the EXPLICIT login
@@ -279,6 +330,9 @@ export async function run(page, ctx) {
       await shoot(page, `${flowName}-mixed-modal-MISSING`);
       fail('group-pin: the mixed-group confirmation modal did not appear before the group POST', error);
     }
+    // Human-readable proof of the warning ITSELF (not just a DOM assertion) —
+    // screenshot before dismissing it.
+    await shoot(page, 'group-pin-mixed-warning');
     await confirmModal.getByRole('button', { name: /^Confirm$/ }).click();
   };
 
