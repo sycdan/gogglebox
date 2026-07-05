@@ -9,7 +9,10 @@
 // Env:
 //   PROOF_URL         target client URL (default http://client:5173)
 //   PROOF_FLOW        flow name prefixing screenshot files (default "app";
-//                     falls back to the first CLI arg if unset)
+//                     falls back to the first CLI arg if unset). The reserved
+//                     value "all" runs every flow in `flows` below, in order,
+//                     bypassing each flow's `match` regex filter — see
+//                     ALL_FLOWS_TOKEN.
 //   PROOF_RUN_ID      optional batch id; groups multiple proof invocations under
 //                     ./artifacts/<PROOF_RUN_ID>/<timestamp-flow>/
 //   ACCESS_TOKEN      account access token (used when the app does not auto-login)
@@ -20,11 +23,21 @@
 // the token form.
 //
 // Exits non-zero on navigation/login failure so agents detect breakage.
+// fail() (lib/harness.mjs) calls process.exit(1) directly, so any flow
+// assertion failure already propagates as a non-zero process exit with no
+// extra plumbing in this file.
 //
-// Structure: this entry point owns env + outDir + login, then dispatches each
-// flow module whose `match` regex tests true against the flow name (in the
-// order listed in `flows` below). Shared helpers live under lib/, flow bodies
-// under flows/.
+// Structure: this entry point owns env + outDir, then either:
+//   - single-flow mode (PROOF_FLOW=<name>, the default): logs in ONCE, then
+//     dispatches every flow module whose `match` regex tests true against the
+//     flow name (in the order listed in `flows` below) against that one
+//     session/page — unchanged from the original behavior.
+//   - all-flows mode (PROOF_FLOW=all): runs every flow in `flows` order,
+//     each against its OWN fresh browser context/page (a fresh login +ctx) and
+//     its own screenshot subdirectory, so route interception, localStorage/
+//     session state, selected account, and per-flow mutations from one flow
+//     cannot leak into the next (see runAllFlows below).
+// Shared helpers live under lib/, flow bodies under flows/.
 
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,14 +62,36 @@ import * as groupAlias from './flows/group-alias.mjs';
 
 // Flow dispatch order — preserved from the original single-file script. Each
 // flow whose `match` matches the flowName runs; multiple may fire for one name.
-const flows = [groupAlias, groupPin, playerHandoff, playerUat, playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode, railPagination];
+// `name` is the canonical id used ONLY by all-flows mode (PROOF_FLOW=all) to
+// pick a per-flow screenshot subdirectory and login flowName — single-flow
+// invocations still key entirely off the PROOF_FLOW string against `match`.
+const flows = [
+  { name: 'group-alias', mod: groupAlias },
+  { name: 'group-pin', mod: groupPin },
+  { name: 'player-handoff', mod: playerHandoff },
+  { name: 'player-uat', mod: playerUat },
+  { name: 'player-focus', mod: playerFocus },
+  { name: 'continue-watching', mod: continueWatching },
+  { name: 'recommendations', mod: recommendations },
+  { name: 'ignore-shows', mod: ignoreShows },
+  { name: 'search', mod: search },
+  { name: 'viewer-watched', mod: viewerWatched },
+  { name: 'mark-all-watched', mod: markAllWatched },
+  { name: 'card-order', mod: cardOrder },
+  { name: 'movie-least-watched', mod: movieLeastWatched },
+  { name: 'show-cross-episode', mod: showCrossEpisode },
+  { name: 'rail-pagination', mod: railPagination },
+];
+
+// Reserved PROOF_FLOW value that runs every flow in one invocation. Chosen
+// because it can never collide with a real flow name/match (none of the 14
+// `match` regexes match the literal "all") and reads clearly in CI logs.
+const ALL_FLOWS_TOKEN = 'all';
 
 const url = process.env.PROOF_URL ?? 'http://client:5173';
 const accessToken = process.env.ACCESS_TOKEN ?? '';
-const flowName = (process.env.PROOF_FLOW || process.argv[2] || 'app').replace(
-  /[^a-zA-Z0-9_-]/g,
-  '-',
-);
+const rawFlowName = process.env.PROOF_FLOW || process.argv[2] || 'app';
+const flowName = rawFlowName.replace(/[^a-zA-Z0-9_-]/g, '-');
 const proofRunId = (process.env.PROOF_RUN_ID ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '-');
 
 // Keep only the newest N top-level artifact entries so stale runs don't pile up.
@@ -97,34 +132,103 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const topLevel = proofRunId || stamp;
 await pruneArtifacts(topLevel);
 
-const outDir = proofRunId
-  ? path.join(artifactsRoot, proofRunId, `${stamp}-${flowName}`)
-  : path.join(artifactsRoot, stamp);
+const isAllFlows = flowName === ALL_FLOWS_TOKEN;
 
-const ctx = createHarness(outDir);
-ctx.flowName = flowName;
-const { fail, shoot } = ctx;
+if (isAllFlows) {
+  await runAllFlows();
+} else {
+  await runSingleFlowInvocation();
+}
 
-await mkdir(outDir, { recursive: true });
+// ── Single-flow mode (unchanged behavior) ───────────────────────────────────
+// One outDir, one login, one page; every flow whose `match` tests true against
+// flowName runs against that shared page/session, exactly as before this
+// effort.
+async function runSingleFlowInvocation() {
+  const outDir = proofRunId
+    ? path.join(artifactsRoot, proofRunId, `${stamp}-${flowName}`)
+    : path.join(artifactsRoot, stamp);
 
-const { browser, page } = await startSession({
-  url,
-  accessToken,
-  flowName,
-  shoot,
-  fail,
-});
+  const ctx = createHarness(outDir);
+  ctx.flowName = flowName;
+  const { fail, shoot } = ctx;
 
-try {
+  await mkdir(outDir, { recursive: true });
+
+  const { browser, page } = await startSession({
+    url,
+    accessToken,
+    flowName,
+    shoot,
+    fail,
+  });
+
+  try {
+    for (const flow of flows) {
+      if (flow.mod.match.test(flowName)) {
+        await flow.mod.run(page, ctx);
+      }
+    }
+
+    console.log('[proof] OK');
+  } catch (error) {
+    fail('unexpected error during proof run', error);
+  } finally {
+    await browser.close();
+  }
+}
+
+// ── All-flows mode (PROOF_FLOW=all) ─────────────────────────────────────────
+// Runs every flow in `flows` order, in ONE process invocation, but isolates
+// each flow with its OWN fresh browser (a fresh startSession() launch + login)
+// rather than sharing one page/session across flows. So route interception
+// (group-pin's /api/session patch), localStorage/session state
+// (player-handoff's seeded jellyfin_credentials), the selected account
+// (group-pin logs in as a different user), and any other per-flow mutation
+// from one flow cannot leak into the next — each flow starts from the exact
+// same clean logged-in state single-flow mode starts from today. Each flow
+// also gets its own screenshot subdirectory (keyed by the flow's own canonical
+// name — exactly the flowName that flow would get in single-flow mode) so
+// hardcoded and `${flowName}-...` screenshot names never collide across flows
+// sharing one batch.
+async function runAllFlows() {
+  const batchDir = proofRunId
+    ? path.join(artifactsRoot, proofRunId, `${stamp}-all`)
+    : path.join(artifactsRoot, `${stamp}-all`);
+
+  console.log(`[proof] all-flows: running ${flows.length} flow(s) in dispatch order`);
+
   for (const flow of flows) {
-    if (flow.match.test(flowName)) {
-      await flow.run(page, ctx);
+    const perFlowName = flow.name;
+    const outDir = path.join(batchDir, perFlowName);
+    await mkdir(outDir, { recursive: true });
+
+    const ctx = createHarness(outDir);
+    ctx.flowName = perFlowName;
+    const { fail, shoot } = ctx;
+
+    console.log(`[proof] all-flows: -- starting "${perFlowName}" --`);
+
+    // A brand-new browser (and therefore a brand-new default context/page) per
+    // flow: cookies, localStorage, and any page.route() interceptors installed
+    // by the previous flow cannot leak into this one.
+    const { browser, page } = await startSession({
+      url,
+      accessToken,
+      flowName: perFlowName,
+      shoot,
+      fail,
+    });
+
+    try {
+      await flow.mod.run(page, ctx);
+      console.log(`[proof] all-flows: -- "${perFlowName}" OK --`);
+    } catch (error) {
+      fail(`all-flows: "${perFlowName}" failed unexpectedly`, error);
+    } finally {
+      await browser.close().catch(() => {});
     }
   }
 
-  console.log('[proof] OK');
-} catch (error) {
-  fail('unexpected error during proof run', error);
-} finally {
-  await browser.close();
+  console.log('[proof] OK — all flows passed');
 }
