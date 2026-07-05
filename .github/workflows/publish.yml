@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     # Initial tunable value, not a measured permanent constant: covers sandbox
     # bootstrap (Jellyfin first-run wizard + fixture generation/provisioning)
-    # plus 14 sequential Playwright flows against the sandbox stack. Tighten or
+    # plus all sequential Playwright flows against the sandbox stack. Tighten or
     # raise once real CI timing is known.
     timeout-minutes: 60
     steps:
