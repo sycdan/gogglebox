@@ -16,6 +16,7 @@
     "test:e2e:real": "RUN_REAL_E2E=1 tsx --test src/server/*.real.e2e.test.ts",
     "test:all": "npm run test && npm run test:e2e:real",
     "gen:config-example": "tsx scripts/gen-config-example.mjs",
+    "gen:uuid7": "tsx scripts/gen-uuid7.mjs",
     "start": "node dist/server/server.js"
   },
   "keywords": [],
@@ -26,17 +27,18 @@
     "express": "^5.2.1",
     "express-session": "^1.19.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "uuidv7": "^1.2.1"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1",
-    "playwright": "1.49.0",
     "@types/express": "^5.0.6",
     "@types/express-session": "^1.19.0",
     "@types/node": "^26.0.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.1",
+    "playwright": "1.49.0",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^5.4.19"

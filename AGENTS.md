@@ -5,6 +5,13 @@ client, TypeScript throughout. Backend entry `src/server/server.ts`, client
 `src/client/App.tsx`, config `src/server/config.ts`, Jellyfin client
 `src/server/jellyfin.ts`.
 
+## Generating a UUIDv7
+
+Whenever any workflow step below calls for a fresh UUIDv7 (e.g. `prompt_id`,
+a proof-link filename, etc.), generate it with
+`docker compose run --rm check npm run gen:uuid7 --silent` — never hand-pick
+or reuse one.
+
 ## Orchestration protocol (read first)
 
 The main session is the **orchestrator**. It plans and delegates — it does
