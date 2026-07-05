@@ -28,6 +28,11 @@ the evidence is sufficient.
   checking the parent criterion.
 - If proof is incomplete, ambiguous, stale, or only asserted in chat, leave the
   criterion unchecked and explain what evidence is missing.
+- A proof doc whose cited screenshot path resolves outside its own
+  `.proofs/` directory (most commonly still pointing at gitignored
+  `./artifacts/...`) is insufficient — that evidence will not survive the
+  producing session's worktree being torn down. Leave the criterion unchecked
+  and say so explicitly.
 - Checked acceptance criteria become canonical only after the orchestrator
   consumes your handoff onto `main`.
 

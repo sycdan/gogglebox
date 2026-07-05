@@ -93,8 +93,16 @@ the commit named by that tag, and the declared `output_path` exists inside that
 worktree. This is also the check that catches a subagent that ignored the
 prompt's `cd` instruction and worked somewhere else despite it — the branch
 will be missing the expected commits or the output file won't be where it's
-declared, and the orchestrator must not advance the effort in that case. If the
-worktree has uncommitted changes, the orchestrator stages them and makes a
+declared, and the orchestrator must not advance the effort in that case. For a
+`gogglebox-prover` handoff specifically, the orchestrator also greps every
+`.proofs/*.md` file touched in that worktree for a `./artifacts` or bare
+`artifacts/` reference before squashing or tearing anything down; `./artifacts`
+is gitignored and the worktree is about to be deleted, so a proof doc still
+pointing there is not durable evidence and will be silently unrecoverable once
+the session is torn down. If any is found, the orchestrator does not
+squash/teardown — it re-prompts the same prover session to copy the missing
+evidence into `.proofs/` first. If the worktree has uncommitted changes, the
+orchestrator stages them and makes a
 mechanical snapshot commit in the session branch so the range can be consumed.
 The orchestrator then squashes exactly the commits in `base_tag..<session-branch-head>`
 into one commit on `main` with this message:
@@ -169,8 +177,11 @@ and link the subeffort slug in the sentence, for example:
 ```
 
 Acceptance criteria do not have to be subeffort dependencies; any provable
-criterion is valid. Proof is required for each criterion and may copy evidence
-from root `./artifacts` into the effort's `.proofs/` directory. Only an approver
+criterion is valid. Proof is required for each criterion; any screenshot
+evidence must be copied from root `./artifacts` into the effort's `.proofs/`
+directory (`./artifacts` is gitignored and does not survive a session's
+worktree being torn down, `.proofs/` is not) — a proof doc that still
+references `./artifacts` is not sufficient proof. Only an approver
 who has loaded the whole effort context, including parent effort specs for
 nested efforts, may mark acceptance criteria checked. When asked whether an
 effort is done, the approver checks each criterion, reads any linked proof,
