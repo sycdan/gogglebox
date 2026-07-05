@@ -42,6 +42,11 @@ const ADMIN_USER = process.env.SANDBOX_ADMIN_USER || 'gogglebox-admin';
 const ADMIN_PASS = process.env.SANDBOX_ADMIN_PASS || 'gogglebox-sandbox';
 const USER_PASS = process.env.SANDBOX_USER_PASS || 'sandbox';
 const API_KEY_NAME = 'GOGGLEBOX_SANDBOX';
+// Stable, obvious access tokens for the two sandbox accounts (config v2 token
+// login). The household token doubles as the .env.sbx ACCESS_TOKEN (auto-login);
+// the visitor token is typed manually by the group-pin proof flow.
+const HOUSEHOLD_TOKEN = 'sbx-household-token';
+const VISITOR_TOKEN = 'sbx-visitor-token';
 // In-container media paths the libraries point at (see generate-fixtures.mjs).
 const MEDIA_ROOT = process.env.SANDBOX_MEDIA_ROOT || '/media';
 const SHOWS_PATH = path.posix.join(MEDIA_ROOT, 'shows');
@@ -268,22 +273,22 @@ async function emitArtifacts(apiKey, usersByName) {
     // under /player for the browser.
     `JELLYFIN_URL=http://jellyfin-sandbox:8096`,
     `JELLYFIN_API_KEY=${apiKey}`,
-    // PORTAL_* must match the gogglebox-admin account below so admin auto-login
-    // still works (the app auto-logs-in when these match an accounts[] entry).
-    `PORTAL_USERNAME=${ADMIN_USER}`,
-    `PORTAL_PASSWORD=${ADMIN_PASS}`,
+    // ACCESS_TOKEN must match an access_tokens key in config.sbx.json below so
+    // auto-login works (the app auto-logs-in with an empty body when this env
+    // token resolves to an account).
+    `ACCESS_TOKEN=${HOUSEHOLD_TOKEN}`,
     '',
   ].join('\n');
   await writeFile(envPath, envBody, 'utf8');
 
-  // schemaVersion 1: name-based users[] + accounts[]; no UUIDs, no groups[], no
-  // household. Carol carries a pin so the visitor account can pin_required her.
-  // SANDBOX_USERS is [Alice, Bob, Carol, Dave]; the proof + auto-login flows
-  // depend on BOTH accounts emitted here, so this stays in lockstep with the
-  // committed config.sbx.json.
+  // schemaVersion 2: name-based users[] (pin registry) + tiered accounts keyed
+  // by account_key + token-only access_tokens. Carol carries a pin so the
+  // visitor account can guest-gate her (tertiary => pin-gated). SANDBOX_USERS is
+  // [Alice, Bob, Carol, Dave]; the proof + auto-login flows depend on BOTH
+  // accounts emitted here, so this stays in lockstep with the e2e flows.
   const configPath = path.join(OUT_DIR, 'config.sbx.json');
   const config = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     playback: { watchedThreshold: 0.9 },
     recommendations: { count: 4 },
     users: [
@@ -292,31 +297,32 @@ async function emitArtifacts(apiKey, usersByName) {
       { jellyfin_name: 'Carol', pin: '5678' },
       { jellyfin_name: 'Dave' },
     ],
-    accounts: [
-      {
-        username: ADMIN_USER,
-        password: ADMIN_PASS,
-        visible_users: [
-          { jellyfin_name: 'Alice' },
-          { jellyfin_name: 'Bob' },
-          { jellyfin_name: 'Carol' },
-          { jellyfin_name: 'Dave' },
-        ],
+    accounts: {
+      // Auto-login account (matches .env.sbx ACCESS_TOKEN): Alice + Bob are
+      // preselected primaries; Carol + Dave are listed-but-unselected
+      // secondaries; no guests.
+      household: {
+        primary_users: ['Alice', 'Bob'],
+        secondary_users: ['Carol', 'Dave'],
+        tertiary_users: [],
       },
-      {
-        username: 'visitor',
-        password: 'visitor-pass',
-        visible_users: [
-          { jellyfin_name: 'Carol', pin_required: true },
-          { jellyfin_name: 'Dave' },
-        ],
+      // Manual-login account for the group-pin proof: no primaries, Dave as a
+      // plain secondary card, Carol ONLY addable as a pin-gated guest.
+      visitor: {
+        primary_users: [],
+        secondary_users: ['Dave'],
+        tertiary_users: ['Carol'],
       },
-    ],
+    },
+    access_tokens: {
+      [HOUSEHOLD_TOKEN]: 'household',
+      [VISITOR_TOKEN]: 'visitor',
+    },
   };
   await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 
   console.log(`[provision] wrote ${envPath}`);
-  console.log(`[provision] wrote ${configPath} (schemaVersion 1)`);
+  console.log(`[provision] wrote ${configPath} (schemaVersion 2)`);
   console.log('[provision] sandbox user GUIDs (diagnostic; not written to config):');
   for (const name of SANDBOX_USERS) {
     console.log(`           ${name} = ${usersByName.get(name)?.Id ?? '(missing)'}`);

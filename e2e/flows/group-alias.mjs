@@ -1,9 +1,10 @@
 // ── group-alias flow ───────────────────────────────────────────────────────
 // Proves the managed-group create/reuse + alias path end-to-end against sbx.
 //
-// The sbx admin account (auto-login) sees Alice, Bob, Carol, Dave (no pins), so
-// it cleanly shows multiple selectable users with no PIN prompts to fight. This
-// flow drives:
+// The sbx household account (auto-login) sees Alice + Bob as PRESELECTED
+// primaries and Carol + Dave as secondaries — no guests, so no PIN prompts to
+// fight. selectExactViewersByName handles the preselection (deselects anything
+// outside Alice + Bob). This flow drives:
 //   1. picker (viewer grid; "Saved groups" absent on first run) -> group-alias-picker.png
 //   2. select Alice + Bob, Continue -> app renders               -> group-alias-created.png
 //   3. "Change viewers" -> picker now lists a "Saved groups" card
@@ -14,11 +15,14 @@
 // Run it with:
 //   PROOF_FLOW=group-alias ./scripts/sbx.sh run --rm proof
 //
-// NOTE on auto-login: run.mjs logs in (auto-login admin in sbx) BEFORE flows.
-// We do NOT log out here — admin is exactly the account we want. We never stub
-// the login POST (see group-pin.mjs / lib/session.mjs). If a manual login were
-// needed we'd patch GET /api/session to set portalAutoLoginEnabled=false and
-// gate on the explicit credentialed POST 200 — not needed for this flow.
+// NOTE on auto-login: run.mjs logs in (auto-login household in sbx) BEFORE
+// flows. We do NOT log out here — household is exactly the account we want. We
+// never stub the login POST (see group-pin.mjs / lib/session.mjs). If a manual
+// login were needed we'd patch GET /api/session to set
+// portalAutoLoginEnabled=false and gate on the explicit token POST 200 — not
+// needed for this flow.
+import { continueFromPicker, selectExactViewersByName, viewerCards } from '../lib/viewer.mjs';
+
 export const match = /group-alias|alias/i;
 
 const MEMBER_A = 'Alice';
@@ -56,7 +60,7 @@ export async function run(page, ctx) {
     fail('group-alias: "Pick the group" screen did not appear', error);
   }
 
-  const cards = page.locator('button.viewer-card:not(.saved-group-card)');
+  const cards = viewerCards(page);
   const names = (await cards.locator('strong').allTextContents()).map((s) => s.trim());
   console.log('[proof] group-alias: visible viewer cards =', JSON.stringify(names));
   if (!names.includes(MEMBER_A) || !names.includes(MEMBER_B)) {
@@ -64,12 +68,15 @@ export async function run(page, ctx) {
   }
   await shoot(page, 'group-alias-picker');
 
-  // ── 2. Select Alice + Bob -> Continue -> app renders ───────────────────────
-  await cards.filter({ hasText: MEMBER_A }).first().click();
-  await cards.filter({ hasText: MEMBER_B }).first().click();
+  // ── 2. Select EXACTLY Alice + Bob -> Continue -> app renders ───────────────
+  // Alice + Bob are the household primaries and arrive preselected; the helper
+  // makes the selection exact either way (and would deselect any extras).
+  const { missing } = await selectExactViewersByName(page, [MEMBER_A, MEMBER_B]);
+  if (missing.length > 0) {
+    fail(`group-alias: viewer card(s) missing for [${missing.join(', ')}]`);
+  }
 
-  const continueBtn = page.getByRole('button', { name: /^Continue$/ }).first();
-  await continueBtn.click();
+  await continueFromPicker(page, 'group-alias');
   try {
     await pickHeading.waitFor({ state: 'detached', timeout: 20_000 });
   } catch (error) {
@@ -124,7 +131,7 @@ export async function run(page, ctx) {
 
   // ── 4. Select the saved group -> Continue -> NO duplicate group ────────────
   await savedCard.click();
-  await page.getByRole('button', { name: /^Continue$/ }).first().click();
+  await continueFromPicker(page, 'group-alias');
   try {
     await pickHeading.waitFor({ state: 'detached', timeout: 20_000 });
   } catch (error) {

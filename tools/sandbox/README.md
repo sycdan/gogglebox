@@ -18,8 +18,8 @@ only the **mutable** per-user played-state is reset between tests.
 | --- | --- |
 | `fixtures.mjs` — the library/users spec | `tools/sandbox/media/` and the `sandbox_media` volume (tiny .webm stubs + .nfo) |
 | `generate-fixtures.mjs`, `provision.mjs`, `reset.mjs` | `sandbox_config` / `sandbox_cache` volumes (Jellyfin state) |
-| `Dockerfile` (Node + ffmpeg tooling image) | `.env.sbx` (overrides-only: minted API key + URL + admin creds) |
-| this `README.md` | `config.sbx.json` (schemaVersion 1: name-based `users[]` + `accounts[]`) |
+| `Dockerfile` (Node + ffmpeg tooling image) | `.env.sbx` (overrides-only: minted API key + URL + auto-login `ACCESS_TOKEN`) |
+| this `README.md` | `config.sbx.json` (schemaVersion 2: `users[]` + tiered `accounts` + `access_tokens`) |
 
 ## Bring it up (zero manual steps)
 
@@ -40,19 +40,22 @@ After step 3 you have, at the project root:
 - `.env.sbx` — the **overrides-only** env file layered on top of the shared
   `.env` (later file wins). It carries only per-env override keys:
   `JELLYFIN_URL=http://jellyfin-sandbox:8096`, the minted `JELLYFIN_API_KEY`, and
-  the admin `PORTAL_USERNAME`/`PORTAL_PASSWORD`. (Auto-login is implicit: with
-  those PORTAL creds set and matching the `gogglebox-admin` account, the app logs
-  in automatically — there is no separate auto-login env var.) Shared keys (e.g.
-  `WATCHED_THRESHOLD`, `JELLYFIN_DEBUG`) stay in `.env`.
-- `config.sbx.json` — **schemaVersion 1** (`schemaVersion: 1`): name-based `users[]`
-  (Alice/Bob/Carol/Dave, with Carol carrying `pin: "5678"`) and two `accounts[]`:
-  - `gogglebox-admin` / `gogglebox-sandbox` — sees all four users, none
-    pin-gated. Matches the `.env.sbx` `PORTAL_*` so admin auto-login works.
-  - `visitor` / `visitor-pass` — sees Carol (`pin_required: true`) + Dave, for
-    the PIN-gated group proof (`PROOF_FLOW=group-pin`).
+  `ACCESS_TOKEN=sbx-household-token`. (Auto-login is implicit: with that token
+  set and matching an `access_tokens` entry, the app logs in automatically as
+  the `household` account — there is no separate auto-login env var.) Shared
+  keys (e.g. `WATCHED_THRESHOLD`, `JELLYFIN_DEBUG`) stay in `.env`.
+- `config.sbx.json` — **schemaVersion 2** (`schemaVersion: 2`): name-based
+  `users[]` (Alice/Bob/Carol/Dave, with Carol carrying `pin: "5678"`), two
+  tiered accounts, and their access tokens:
+  - `household` (token `sbx-household-token`) — Alice + Bob as PRESELECTED
+    primaries, Carol + Dave as secondaries, no guests. Matches the `.env.sbx`
+    `ACCESS_TOKEN` so auto-login works.
+  - `visitor` (token `sbx-visitor-token`) — no primaries, Dave as a secondary,
+    Carol as a TERTIARY guest (addable only via the "+ Add guest" modal with
+    her pin), for the guest-PIN group proof (`PROOF_FLOW=group-pin`).
 
   The server resolves these names → Jellyfin ids at startup (`fetchUsers`); no
-  UUIDs, `groups[]`, or `household` are written.
+  UUIDs, `groups[]`, or `household`/password creds are written.
 
 Sandbox volumes are disposable. If provisioning or proof ever looks wedged from
 old Jellyfin state, reset from scratch instead of migrating it:

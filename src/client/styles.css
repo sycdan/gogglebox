@@ -230,6 +230,25 @@ h3 {
   font-size: 1.4rem;
 }
 
+/* "Add guest" affordance on the picker: reuses .viewer-card so it renders the
+   SAME SIZE as an avatar viewer card; the plus glyph reuses the avatar circle. */
+.add-guest-plus {
+  background: rgba(255, 255, 255, 0.1);
+  color: #f4efe8;
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+/* Guest modal rows: full-width selectable guest card with its PIN field below. */
+.guest-row {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.guest-card {
+  width: 100%;
+}
+
 /* Saved (managed) groups on the picker: alias-first selectable cards, and the
    active-group alias label in the hero. Cards reuse .viewer-card layout. */
 .saved-groups {

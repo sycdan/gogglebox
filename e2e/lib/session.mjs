@@ -4,10 +4,11 @@
 import { chromium } from 'playwright';
 
 // Read the running app's OWN auto-login decision from GET /api/session
-// (portalAutoLoginEnabled). The app derives this from whether PORTAL creds are
-// set (server.ts: Boolean(config.portalCredentials)), so the harness drives off
-// real app state instead of a separate PORTAL_AUTO_LOGIN env var. Best-effort: a
-// failed read falls back to false (drive the manual login form), always safe.
+// (portalAutoLoginEnabled — field name kept from the portal-credentials era).
+// The app derives this from whether the ACCESS_TOKEN env var is set (server.ts:
+// Boolean(config.envAccessToken)), so the harness drives off real app state
+// instead of a separate auto-login env var. Best-effort: a failed read falls
+// back to false (drive the manual login form), always safe.
 async function readAutoLoginEnabled(page) {
   try {
     const session = await page.evaluate(async () => {
@@ -21,7 +22,7 @@ async function readAutoLoginEnabled(page) {
   }
 }
 
-export async function startSession({ url, username, password, flowName, shoot, fail }) {
+export async function startSession({ url, accessToken, flowName, shoot, fail }) {
   const browser = await chromium.launch({
     // New headless ("--headless=new") is far more likely to honour the
     // Fullscreen API than the legacy headless shell. We also allow auto-grant
@@ -66,12 +67,13 @@ export async function startSession({ url, username, password, flowName, shoot, f
   const needsLogin = await loginForm.count().then((n) => n > 0);
 
   if (needsLogin && !autoLogin) {
-    if (!username || !password) {
-      fail('login form present but PORTAL_USERNAME/PORTAL_PASSWORD not set');
+    if (!accessToken) {
+      fail('login form present but ACCESS_TOKEN not set');
     }
     console.log('[proof] logging in');
-    await loginForm.locator('input:not([type="password"])').first().fill(username);
-    await loginForm.locator('input[type="password"]').first().fill(password);
+    // Token-only login: the access-token field is the ONLY input in form.stack
+    // (type password).
+    await loginForm.locator('input[type="password"]').first().fill(accessToken);
     await shoot(page, `${flowName}-01-login`);
     await Promise.all([
       page.waitForLoadState('networkidle'),

@@ -11,11 +11,12 @@ import { deriveGroupKey } from './groupKey';
 import { GroupPlayerUser } from './appState';
 import { VisibleViewer } from './accounts';
 
-// Visible users for an account, in the account's visible-user order.
+// Visible viewers for an account, in the account's visible-viewer order
+// (primaries, then secondaries, then tertiary guest candidates).
 const visible: VisibleViewer[] = [
-  { id: 'a', jellyfinUserId: 'a', name: 'Alice', avatarUrl: null, pinRequired: false },
-  { id: 'b', jellyfinUserId: 'b', name: 'Bob', avatarUrl: null, pinRequired: false },
-  { id: 'c', jellyfinUserId: 'c', name: 'Carol', avatarUrl: null, pinRequired: true },
+  { id: 'a', jellyfinUserId: 'a', name: 'Alice', avatarUrl: null, tier: 'primary', pinRequired: false },
+  { id: 'b', jellyfinUserId: 'b', name: 'Bob', avatarUrl: null, tier: 'secondary', pinRequired: false },
+  { id: 'c', jellyfinUserId: 'c', name: 'Carol', avatarUrl: null, tier: 'tertiary', pinRequired: true },
 ];
 
 test('buildGroupAlias joins member names with " + " in account visible order', () => {

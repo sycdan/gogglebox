@@ -12,21 +12,48 @@
 
 import crypto from 'node:crypto';
 
-import { ConfigAccount, ConfigUser, VisibleUser } from './types';
+import { AccountV2, ConfigUser } from './types';
 
 // The highest schemaVersion this image understands. The migration chain stops
 // here; a source declaring a higher version can't be migrated DOWN, so we fail
 // fast (the user must run a newer image).
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
-// The current (schemaVersion 1) config-file shape: users/accounts + playback/
-// recommendations. This is the shape the running app consumes.
+// ── Historical (schemaVersion 1) shapes ─────────────────────────────────────
+// Kept here (not types.ts) because only the migration chain consumes them: the
+// running app is v2-shaped. v1 authenticated with username/password and gated
+// pins per visible user via pin_required.
+export interface VisibleUserV1 {
+  jellyfin_name: string;
+  pin_required?: boolean;
+}
+
+export interface ConfigAccountV1 {
+  username: string;
+  password: string;
+  visible_users: VisibleUserV1[];
+}
+
+// The schemaVersion-1 config-file shape: users + credentialed accounts[].
 export interface SchemaV1Config {
   schemaVersion: 1;
   playback?: { watchedThreshold?: number };
   recommendations?: { count?: number };
   users: ConfigUser[];
-  accounts: ConfigAccount[];
+  accounts: ConfigAccountV1[];
+}
+
+// The current (schemaVersion 2) config-file shape: token-only login + tiered
+// accounts. This is the shape the running app consumes.
+export interface SchemaV2Config {
+  schemaVersion: 2;
+  playback?: { watchedThreshold?: number };
+  recommendations?: { count?: number };
+  users: ConfigUser[];
+  // account_key -> tiered account config (see AccountV2 in types.ts).
+  accounts: Record<string, AccountV2>;
+  // access token -> account_key. The token is the ONLY login credential.
+  access_tokens: Record<string, string>;
 }
 
 // Context a migration may need. ctx.jellyfinUsers lets migrate0to1 map legacy
@@ -106,7 +133,7 @@ export function migrate0to1(
 
   // Visible to the synthesized account: all resolved users, none pin_required
   // (no pins existed in the legacy model).
-  const visibleUsers: VisibleUser[] = resolvedNames.map((name) => ({ jellyfin_name: name }));
+  const visibleUsers: VisibleUserV1[] = resolvedNames.map((name) => ({ jellyfin_name: name }));
 
   // Account creds: prefer the legacy household, else PORTAL_* env, else a
   // sensible default (warn).
@@ -130,7 +157,7 @@ export function migrate0to1(
     );
   }
 
-  const accounts: ConfigAccount[] = [{ username, password, visible_users: visibleUsers }];
+  const accounts: ConfigAccountV1[] = [{ username, password, visible_users: visibleUsers }];
 
   if ((legacy.groups?.length ?? 0) > 0) {
     warnWith(ctx, 'dropped obsolete legacy groups[] presets (groups are now formed live in the UI).');
@@ -145,9 +172,88 @@ export function migrate0to1(
   };
 }
 
+// ── Migration 1 -> 2: credentialed accounts[] -> token-only tiered accounts ──
+// Pure. Per v1 account: account_key = username; access token = password (the
+// password was already the shared household secret, so it becomes the token).
+// A password duplicating an earlier account's token gets `${password}-${username}`
+// (tokens must be unique) with a warning. visible_users map by pin rule:
+// pin_required => tertiary (guest, pin-gated), otherwise secondary;
+// primary_users = []. All THREE tier lists are written EXPLICITLY (never
+// omitted) so the v2 wildcard semantics can never widen visibility beyond what
+// the v1 config granted. users/playback/recommendations carry through unchanged.
+export function migrate1to2(
+  rawConfig: Record<string, unknown>,
+  ctx: MigrationContext,
+): SchemaV2Config {
+  const v1 = rawConfig as unknown as SchemaV1Config;
+
+  const accounts: Record<string, AccountV2> = {};
+  const accessTokens: Record<string, string> = {};
+  const usedTokens = new Set<string>();
+
+  for (const account of Array.isArray(v1.accounts) ? v1.accounts : []) {
+    const username = typeof account?.username === 'string' ? account.username.trim() : '';
+    const password = typeof account?.password === 'string' ? account.password : '';
+    if (!username || !password) {
+      warnWith(ctx, 'skipped a v1 account missing username or password.');
+      continue;
+    }
+    if (accounts[username]) {
+      warnWith(ctx, `skipped a duplicate v1 account "${username}".`);
+      continue;
+    }
+
+    const originalToken = password;
+    let token = originalToken;
+    if (usedTokens.has(token)) {
+      const fallbackBase = `${originalToken}-${username}`;
+      token = fallbackBase;
+      let suffix = 2;
+      while (usedTokens.has(token)) {
+        token = `${fallbackBase}-${suffix}`;
+        suffix += 1;
+      }
+      warnWith(
+        ctx,
+        `account "${username}": password duplicates another account's access token; ` +
+        `derived a unique token "${token}" from fallback "${fallbackBase}" - ` +
+        'share this new token with the account holder.',
+      );
+    }
+    usedTokens.add(token);
+
+    const secondary: string[] = [];
+    const tertiary: string[] = [];
+    for (const visible of Array.isArray(account.visible_users) ? account.visible_users : []) {
+      const name = typeof visible?.jellyfin_name === 'string' ? visible.jellyfin_name.trim() : '';
+      if (!name) {
+        continue;
+      }
+      (visible.pin_required === true ? tertiary : secondary).push(name);
+    }
+
+    accounts[username] = {
+      primary_users: [],
+      secondary_users: secondary,
+      tertiary_users: tertiary,
+    };
+    accessTokens[token] = username;
+  }
+
+  return {
+    schemaVersion: 2,
+    playback: v1.playback ? { watchedThreshold: v1.playback.watchedThreshold } : undefined,
+    recommendations: v1.recommendations ? { count: v1.recommendations.count } : undefined,
+    users: Array.isArray(v1.users) ? v1.users : [],
+    accounts,
+    access_tokens: accessTokens,
+  };
+}
+
 // The ordered migration registry, keyed by the version each entry upgrades FROM.
 export const MIGRATIONS: Migration[] = [
   { from: 0, migrate: (config, ctx) => migrate0to1(config, ctx) as unknown as Record<string, unknown> },
+  { from: 1, migrate: (config, ctx) => migrate1to2(config, ctx) as unknown as Record<string, unknown> },
 ];
 
 // The declared schemaVersion of a raw config object. Missing/invalid => 0 (the
@@ -164,7 +270,7 @@ export function detectSchemaVersion(rawConfig: Record<string, unknown>): number 
 export function runMigrationChain(
   rawConfig: Record<string, unknown>,
   ctx: MigrationContext,
-): SchemaV1Config {
+): SchemaV2Config {
   const sourceVersion = detectSchemaVersion(rawConfig);
   if (sourceVersion > CURRENT_SCHEMA_VERSION) {
     throw new Error(
@@ -197,7 +303,7 @@ export function runMigrationChain(
     }
   }
 
-  return { ...(current as unknown as SchemaV1Config), schemaVersion: CURRENT_SCHEMA_VERSION as 1 };
+  return { ...(current as unknown as SchemaV2Config), schemaVersion: CURRENT_SCHEMA_VERSION as 2 };
 }
 
 // A stable hash of the raw config source, used as a cache-invalidation key for

@@ -104,11 +104,10 @@ if only_docs_or_efforts_changed; then
 fi
 
 echo "[pre-push] 3/5 typecheck (lint)…"
-# `check`/`test` need no Jellyfin/portal creds, but compose parses the whole file
+# `check`/`test` need no Jellyfin/token, but compose parses the whole file
 # and some services declare required (:?) vars — stub them so interpolation
 # doesn't abort the run.
-export PORTAL_USERNAME="${PORTAL_USERNAME:-prepush}"
-export PORTAL_PASSWORD="${PORTAL_PASSWORD:-prepush}"
+export ACCESS_TOKEN="${ACCESS_TOKEN:-prepush}"
 $compose run --rm check
 
 echo "[pre-push] 4/5 unit tests…"

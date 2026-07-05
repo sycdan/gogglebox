@@ -2,12 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 
-import { AppConfig, ConfigAccount, ConfigUser, FamilyMember, VisibleUser } from './types';
+import { resolveAccountTiers } from './accounts';
+import { AccountV2, AppConfig, ConfigUser, FamilyMember } from './types';
 import { CONFIG_DEFAULTS } from './configDefaults';
 import {
   CURRENT_SCHEMA_VERSION,
   MigrationContext,
-  SchemaV1Config,
+  SchemaV2Config,
   deepMergeConfig,
   hashRawConfig,
   runMigrationChain,
@@ -17,13 +18,14 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 // The raw config file shape, before migration/validation/normalization. Any
 // schemaVersion (or none) is accepted here; the migration chain forwards it to
-// the current shape.
+// the current shape (accounts may be a v1 array or a v2 record, hence unknown).
 interface RawConfigFile {
   schemaVersion?: number;
   playback?: { watchedThreshold?: number };
   recommendations?: { count?: number };
   users?: ConfigUser[];
-  accounts?: ConfigAccount[];
+  accounts?: unknown;
+  access_tokens?: unknown;
   [key: string]: unknown;
 }
 
@@ -31,10 +33,11 @@ interface RawConfigFile {
 // CONFIG_DEFAULTS (the single source of truth in ./configDefaults), then the
 // migrated user overrides are layered on top. Bundled as a constant (not a
 // file) because the Docker runtime image does not copy config.example.json.
-const BUNDLED_EXAMPLE: SchemaV1Config = {
+const BUNDLED_EXAMPLE: SchemaV2Config = {
   ...CONFIG_DEFAULTS,
   users: [],
-  accounts: [],
+  accounts: {},
+  access_tokens: {},
 };
 
 function readRequiredJsonFile<T>(filePath: string): { value: T; raw: string } {
@@ -74,23 +77,31 @@ function defaultWarn(message: string): void {
   console.warn(`[config] ${message}`);
 }
 
-// Normalize + skip+warn validate a migrated/merged config against the live
-// Jellyfin user list. Unlike the old fail-fast rules, an unresolved reference is
-// DROPPED with a warning rather than crashing startup:
-//   - a users[] entry whose name has no Jellyfin match is dropped, and cascade-
-//     removed from every account's visible_users (warn);
-//   - an account left with no visible users is dropped (warn).
-// Fails fast ONLY when the result is unusable: zero users OR zero accounts.
-// Returns the cleaned users/accounts on success.
+// Normalize + skip+warn validate a migrated/merged v2 config against the live
+// Jellyfin user list. An unresolved reference is DROPPED with a warning rather
+// than crashing startup:
+//   - a users[] entry whose name has no Jellyfin match is dropped (warn);
+//   - an unknown Jellyfin name in an explicit tier list is dropped (warn);
+//   - a name claimed by multiple explicit tiers keeps the highest tier
+//     (primary > secondary > tertiary) with a warning;
+//   - an EXPLICIT tertiary (guest) with no configured pin warns (they can
+//     never be added — the runtime pin-filter excludes them);
+//   - an account whose RESOLVED tiers are all empty is dropped (warn);
+//   - an access_tokens entry pointing at a missing account is dropped (warn);
+//   - an account with no surviving token warns (unreachable) but is kept.
+// Fails fast ONLY when the result is unusable: zero accounts OR zero access
+// tokens survive. Returns the cleaned users/accounts/accessTokens on success.
 export function validateAndResolveConfig(
-  config: SchemaV1Config,
+  config: SchemaV2Config,
   jellyfinUsers: FamilyMember[],
   warn: (message: string) => void = defaultWarn,
-): { users: ConfigUser[]; accounts: ConfigAccount[] } {
+): { users: ConfigUser[]; accounts: Record<string, AccountV2>; accessTokens: Record<string, string> } {
   const jellyfinNames = new Set(jellyfinUsers.map((user) => user.name));
+  const allJellyfinNames = jellyfinUsers.map((user) => user.name);
 
-  // Normalize users[]: trim, drop blank names, de-dupe, drop names with no
-  // Jellyfin match (warn each).
+  // Normalize users[] (the pin registry): trim, drop blank names, de-dupe,
+  // drop names with no Jellyfin match (warn each). The viewer universe is ALL
+  // live Jellyfin users, so an empty users[] is fine — it only means no pins.
   const usersByName = new Map<string, ConfigUser>();
   for (const user of Array.isArray(config.users) ? config.users : []) {
     const name = typeof user?.jellyfin_name === 'string' ? user.jellyfin_name.trim() : '';
@@ -112,105 +123,160 @@ export function validateAndResolveConfig(
     });
   }
 
-  const keptNames = new Set(usersByName.keys());
-
-  // Normalize accounts[]: trim creds, drop accounts missing creds, cascade-drop
-  // visible_users referencing a dropped/unknown user, drop accounts left empty.
-  const accounts: ConfigAccount[] = [];
-  const accountUsernames = new Set<string>();
-  for (const account of Array.isArray(config.accounts) ? config.accounts : []) {
-    const username = typeof account?.username === 'string' ? account.username.trim() : '';
-    const password = typeof account?.password === 'string' ? account.password : '';
-    if (!username || !password) {
-      warn('dropped an account missing username or password.');
-      continue;
-    }
-    if (accountUsernames.has(username)) {
-      warn(`dropped a duplicate account "${username}".`);
-      continue;
-    }
-
-    const rawVisible = Array.isArray(account.visible_users) ? account.visible_users : [];
-    const visibleUsers: VisibleUser[] = [];
-    for (const visible of rawVisible) {
-      const name = typeof visible?.jellyfin_name === 'string' ? visible.jellyfin_name.trim() : '';
-      if (!name) {
-        warn(`account "${username}": dropped a visible_users entry with no jellyfin_name.`);
-        continue;
-      }
-      if (!keptNames.has(name)) {
-        warn(`account "${username}": dropped visible user "${name}" (not a resolvable top-level user).`);
-        continue;
-      }
-      // A user marked pin_required must have a pin; if not, downgrade to not
-      // required (warn) rather than fail.
-      let pinRequired = visible.pin_required === true;
-      if (pinRequired && !usersByName.get(name)?.pin) {
-        warn(`account "${username}": user "${name}" marked pin_required but has no pin; treating as not required.`);
-        pinRequired = false;
-      }
-      visibleUsers.push({ jellyfin_name: name, pin_required: pinRequired });
-    }
-
-    if (visibleUsers.length === 0) {
-      warn(`dropped account "${username}": no visible users remain after resolution.`);
-      continue;
-    }
-
-    accountUsernames.add(username);
-    accounts.push({ username, password, visible_users: visibleUsers });
-  }
-
-  // Only users actually referenced by a surviving account matter; but keep all
-  // resolved users (they may be referenced by future accounts). Fail fast only
-  // when the result is unusable.
   const users = [...usersByName.values()];
-  if (users.length === 0) {
+
+  // Normalize accounts: clean each explicit tier list (null/omitted stays null
+  // — a WILDCARD resolved live at request time), enforce tier precedence
+  // across explicit lists, and drop accounts whose resolved tiers are all empty.
+  const accounts: Record<string, AccountV2> = {};
+  for (const [rawKey, rawAccount] of Object.entries(config.accounts ?? {})) {
+    const accountKey = rawKey.trim();
+    if (!accountKey || !rawAccount || typeof rawAccount !== 'object') {
+      warn('dropped a malformed accounts entry (blank key or non-object value).');
+      continue;
+    }
+
+    // Clean one explicit list: trim names, drop blanks/dupes/unknown Jellyfin
+    // names (warn). null/undefined passes through as null (wildcard semantics).
+    const cleanList = (list: string[] | null | undefined, label: string): string[] | null => {
+      if (list === undefined || list === null) {
+        return null;
+      }
+      if (!Array.isArray(list)) {
+        warn(`account "${accountKey}": ${label} must be a list of Jellyfin names; treating as omitted.`);
+        return null;
+      }
+      const out: string[] = [];
+      for (const entry of list) {
+        const name = typeof entry === 'string' ? entry.trim() : '';
+        if (!name) {
+          warn(`account "${accountKey}": dropped a blank ${label} entry.`);
+          continue;
+        }
+        if (out.includes(name)) {
+          warn(`account "${accountKey}": dropped a duplicate ${label} entry "${name}".`);
+          continue;
+        }
+        if (!jellyfinNames.has(name)) {
+          warn(`account "${accountKey}": dropped ${label} "${name}" (no matching Jellyfin user).`);
+          continue;
+        }
+        out.push(name);
+      }
+      return out;
+    };
+
+    const primary = cleanList(rawAccount.primary_users, 'primary_users');
+    let secondary = cleanList(rawAccount.secondary_users, 'secondary_users');
+    let tertiary = cleanList(rawAccount.tertiary_users, 'tertiary_users');
+
+    // Precedence across EXPLICIT lists: primary > secondary > tertiary. Keep
+    // the highest tier, warn about the shadowed entries. (Wildcard lists
+    // subtract higher tiers by definition — see resolveAccountTiers.)
+    const primarySet = new Set(primary ?? []);
+    if (secondary) {
+      secondary = secondary.filter((name) => {
+        if (primarySet.has(name)) {
+          warn(`account "${accountKey}": "${name}" is listed as both primary and secondary; keeping primary.`);
+          return false;
+        }
+        return true;
+      });
+    }
+    if (tertiary) {
+      const secondarySet = new Set(secondary ?? []);
+      tertiary = tertiary.filter((name) => {
+        if (primarySet.has(name) || secondarySet.has(name)) {
+          warn(`account "${accountKey}": "${name}" is listed in multiple tiers; keeping the higher tier.`);
+          return false;
+        }
+        return true;
+      });
+      // An explicitly-listed guest with no configured pin can never be added
+      // (the guest flow requires their pin) — warn, the pin-filter excludes them.
+      for (const name of tertiary) {
+        if (!usersByName.get(name)?.pin) {
+          warn(
+            `account "${accountKey}": tertiary user "${name}" has no pin in users[] ` +
+            'and can never be added as a guest — configure a pin for them.',
+          );
+        }
+      }
+    }
+
+    const cleaned: AccountV2 = {
+      primary_users: primary,
+      secondary_users: secondary,
+      tertiary_users: tertiary,
+    };
+
+    // Drop an account whose resolved tiers are ALL empty — it could log in but
+    // never see a single viewer.
+    const resolved = resolveAccountTiers(cleaned, allJellyfinNames, users);
+    if (resolved.primary.length + resolved.secondary.length + resolved.tertiary.length === 0) {
+      warn(`dropped account "${accountKey}": no viewers remain after tier resolution.`);
+      continue;
+    }
+
+    accounts[accountKey] = cleaned;
+  }
+
+  // Normalize access_tokens: token -> account_key. Drop blanks and tokens
+  // pointing at a missing (or dropped) account.
+  const accessTokens: Record<string, string> = {};
+  for (const [rawToken, rawAccountKey] of Object.entries(config.access_tokens ?? {})) {
+    const token = rawToken.trim();
+    const accountKey = typeof rawAccountKey === 'string' ? rawAccountKey.trim() : '';
+    if (!token || !accountKey) {
+      warn('dropped a malformed access_tokens entry (blank token or account key).');
+      continue;
+    }
+    if (!accounts[accountKey]) {
+      warn(`dropped an access token for unknown account "${accountKey}".`);
+      continue;
+    }
+    accessTokens[token] = accountKey;
+  }
+
+  // An account without a token is unreachable — warn but keep it (the deployer
+  // may add a token without touching the account definition).
+  const tokenedAccounts = new Set(Object.values(accessTokens));
+  for (const accountKey of Object.keys(accounts)) {
+    if (!tokenedAccounts.has(accountKey)) {
+      warn(`account "${accountKey}" has no access token and cannot be logged into.`);
+    }
+  }
+
+  // Fail fast only when the result is unusable.
+  if (Object.keys(accounts).length === 0) {
     throw new Error(
-      'Config is unusable after auto-migration: no users resolved to a Jellyfin account. ' +
-      'Check your users[] jellyfin_name values against Jellyfin admin -> Users.',
+      'Config is unusable after auto-migration: no accounts remain. ' +
+      'Check your accounts tier lists against Jellyfin admin -> Users.',
     );
   }
-  if (accounts.length === 0) {
+  if (Object.keys(accessTokens).length === 0) {
     throw new Error(
-      'Config is unusable after auto-migration: no login accounts remain. ' +
-      'Check your accounts[] credentials and visible_users.',
+      'Config is unusable after auto-migration: no access tokens remain. ' +
+      'Check that access_tokens entries point at existing account keys.',
     );
   }
 
-  return { users, accounts };
+  return { users, accounts, accessTokens };
 }
 
-// Resolve configured user names to Jellyfin viewers (id/avatar). Returns a
-// name -> viewer map the app keeps in its own writable state (the read-only
-// config never holds ids). Names are expected to already be resolvable
-// (validateAndResolveConfig dropped any that weren't); an unexpected miss is
-// skipped defensively.
-export function resolveViewers(
-  users: ConfigUser[],
-  jellyfinUsers: FamilyMember[],
-): Record<string, FamilyMember> {
-  const byName = new Map(jellyfinUsers.map((user) => [user.name, user]));
+// Resolve ALL live Jellyfin users to a name -> viewer map the app keeps in its
+// own writable state (the read-only config never holds ids). The whole live
+// list — not just users[] — because v2 wildcard tiers can include unconfigured
+// users (pins still only come from users[]). Insertion order == Jellyfin list
+// order, which wildcard tier resolution preserves.
+export function resolveViewers(jellyfinUsers: FamilyMember[]): Record<string, FamilyMember> {
   const viewersByName: Record<string, FamilyMember> = {};
 
-  for (const user of users) {
-    const match = byName.get(user.jellyfin_name);
-    if (match) {
-      viewersByName[user.jellyfin_name] = match;
-    }
+  for (const user of jellyfinUsers) {
+    viewersByName[user.name] = user;
   }
 
   return viewersByName;
-}
-
-function readPortalCredentials(): AppConfig['portalCredentials'] {
-  const username = process.env.PORTAL_USERNAME?.trim();
-  const password = process.env.PORTAL_PASSWORD?.trim();
-  if (!username || !password) {
-    return null;
-  }
-
-  return { username, password };
 }
 
 // The provenance stamped onto the cached effective config in /data.
@@ -220,11 +286,13 @@ export interface EffectiveConfigProvenance {
   sourceHash: string;
 }
 
-// The cached effective config: the validated users/accounts plus the playback/
-// recommendations the migrated+merged config resolved to, with provenance.
+// The cached effective config: the validated users/accounts/accessTokens plus
+// the playback/recommendations the migrated+merged config resolved to, with
+// provenance.
 export interface EffectiveConfig extends EffectiveConfigProvenance {
   users: ConfigUser[];
-  accounts: ConfigAccount[];
+  accounts: Record<string, AccountV2>;
+  accessTokens: Record<string, string>;
   watchedThreshold: number;
   recommendationCount: number;
 }
@@ -257,6 +325,9 @@ export function buildEffectiveConfig(
 
   const migrationContext: MigrationContext = {
     jellyfinUsers: ctx.jellyfinUsers.map((user) => ({ id: user.jellyfinUserId, name: user.name })),
+    // Legacy PORTAL_* creds are consulted ONLY by the 0 -> 1 migration step (to
+    // synthesize a v1 account for a pre-versioned config); the running app's
+    // auto-login is the ACCESS_TOKEN env var (see loadConfig).
     portalUsername: process.env.PORTAL_USERNAME?.trim(),
     portalPassword: process.env.PORTAL_PASSWORD?.trim(),
     warn: (message) => warn(message),
@@ -265,7 +336,7 @@ export function buildEffectiveConfig(
   const migrated = runMigrationChain(rawConfig as Record<string, unknown>, migrationContext);
   const merged = deepMergeConfig(BUNDLED_EXAMPLE, migrated);
 
-  const { users, accounts } = validateAndResolveConfig(merged, ctx.jellyfinUsers, warn);
+  const { users, accounts, accessTokens } = validateAndResolveConfig(merged, ctx.jellyfinUsers, warn);
 
   return {
     schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -273,6 +344,7 @@ export function buildEffectiveConfig(
     sourceHash,
     users,
     accounts,
+    accessTokens,
     watchedThreshold: clampThreshold(
       Number(process.env.WATCHED_THRESHOLD ?? merged.playback?.watchedThreshold ?? 0.9),
     ),
@@ -281,9 +353,9 @@ export function buildEffectiveConfig(
 }
 
 // Load the static, Jellyfin-free part of the app config from env. The
-// users/accounts/viewersByName + recommendation/threshold derived values are
-// filled in later by the async effective-config build at startup (which needs
-// the Jellyfin user list).
+// users/accounts/accessTokens/viewersByName + recommendation/threshold derived
+// values are filled in later by the async effective-config build at startup
+// (which needs the Jellyfin user list).
 export function loadConfig(): AppConfig {
   const jellyfinUrl = process.env.JELLYFIN_URL?.trim();
   const jellyfinApiKey = process.env.JELLYFIN_API_KEY?.trim();
@@ -297,12 +369,14 @@ export function loadConfig(): AppConfig {
     port: Number(process.env.PORT ?? 3000),
     sessionSecret: process.env.SESSION_SECRET ?? 'gogglebox-dev-session-secret',
     watchedThreshold: clampThreshold(Number(process.env.WATCHED_THRESHOLD ?? 0.9)),
-    portalCredentials: readPortalCredentials(),
+    // Auto-login token: an empty login body falls back to this (see server.ts).
+    envAccessToken: process.env.ACCESS_TOKEN?.trim() || null,
     jellyfinUrl: jellyfinUrl.replace(/\/$/, ''),
     jellyfinApiKey,
     recommendations: { count: 8 },
     users: [],
-    accounts: [],
+    accounts: {},
+    accessTokens: {},
     viewersByName: {},
   };
 }

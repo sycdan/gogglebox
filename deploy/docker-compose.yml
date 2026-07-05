@@ -11,8 +11,7 @@ services:
       - SESSION_SECRET=${SESSION_SECRET:?use a strong secret for production}
       # optional pass-through (only set if present in the env file / shell)
       - WATCHED_THRESHOLD
-      - PORTAL_USERNAME
-      - PORTAL_PASSWORD
+      - ACCESS_TOKEN
       - JELLYFIN_DEBUG
     volumes:
       - ./config.json:/app/config.json:ro

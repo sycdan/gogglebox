@@ -12,12 +12,12 @@
 //                     falls back to the first CLI arg if unset)
 //   PROOF_RUN_ID      optional batch id; groups multiple proof invocations under
 //                     ./artifacts/<PROOF_RUN_ID>/<timestamp-flow>/
-//   PORTAL_USERNAME   account login username (used when the app does not auto-login)
-//   PORTAL_PASSWORD   account login password (used when the app does not auto-login)
+//   ACCESS_TOKEN      account access token (used when the app does not auto-login)
 //
 // Auto-login is NOT a harness env var: startSession reads the running app's
 // GET /api/session (portalAutoLoginEnabled, which the app derives from whether
-// PORTAL creds are set) and either waits for the auto-login or fills the form.
+// the ACCESS_TOKEN env var is set) and either waits for the auto-login or fills
+// the token form.
 //
 // Exits non-zero on navigation/login failure so agents detect breakage.
 //
@@ -51,8 +51,7 @@ import * as groupAlias from './flows/group-alias.mjs';
 const flows = [groupAlias, groupPin, playerHandoff, playerFocus, continueWatching, recommendations, ignoreShows, search, viewerWatched, markAllWatched, cardOrder, movieLeastWatched, showCrossEpisode, railPagination];
 
 const url = process.env.PROOF_URL ?? 'http://client:5173';
-const username = process.env.PORTAL_USERNAME ?? '';
-const password = process.env.PORTAL_PASSWORD ?? '';
+const accessToken = process.env.ACCESS_TOKEN ?? '';
 const flowName = (process.env.PROOF_FLOW || process.argv[2] || 'app').replace(
   /[^a-zA-Z0-9_-]/g,
   '-',
@@ -109,8 +108,7 @@ await mkdir(outDir, { recursive: true });
 
 const { browser, page } = await startSession({
   url,
-  username,
-  password,
+  accessToken,
   flowName,
   shoot,
   fail,

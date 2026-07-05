@@ -8,7 +8,7 @@
 // Keep these plain JSON-serializable objects (no functions/dates) — the
 // generator stringifies EXAMPLE_CONFIG directly.
 
-import { CURRENT_SCHEMA_VERSION, SchemaV1Config } from './configMigrations';
+import { CURRENT_SCHEMA_VERSION, SchemaV2Config } from './configMigrations';
 
 // The shape-defaults the runtime seeds from before overlaying user overrides.
 // schemaVersion auto-tracks the image's current schema (never hard-coded).
@@ -18,32 +18,30 @@ export const CONFIG_DEFAULTS = {
   recommendations: { count: 8 },
 } as const;
 
-// The human-facing deployer config example.
-export const EXAMPLE_CONFIG: SchemaV1Config = {
+// The human-facing deployer config example. house1 shows fully-explicit tier
+// lists (Dave is a pin-gated guest); house2 shows the wildcard style — with
+// secondary_users/tertiary_users omitted, every other live Jellyfin user is a
+// secondary and the leftover (none here) are guest candidates.
+export const EXAMPLE_CONFIG: SchemaV2Config = {
   ...CONFIG_DEFAULTS,
   users: [
     { jellyfin_name: 'Alice', pin: '1234' },
     { jellyfin_name: 'Bob', pin: '5678' },
     { jellyfin_name: 'Carol' },
-    { jellyfin_name: 'Dave' },
+    { jellyfin_name: 'Dave', pin: '2468' },
   ],
-  accounts: [
-    {
-      username: 'household1',
-      password: 'household-password-1',
-      visible_users: [
-        { jellyfin_name: 'Alice', pin_required: true },
-        { jellyfin_name: 'Bob', pin_required: true },
-        { jellyfin_name: 'Carol' },
-      ],
+  accounts: {
+    house1: {
+      primary_users: ['Alice', 'Bob'],
+      secondary_users: ['Carol'],
+      tertiary_users: ['Dave'],
     },
-    {
-      username: 'household2',
-      password: 'household-password-2',
-      visible_users: [
-        { jellyfin_name: 'Carol', pin_required: true },
-        { jellyfin_name: 'Dave' },
-      ],
+    house2: {
+      primary_users: ['Dave'],
     },
-  ],
+  },
+  access_tokens: {
+    'replace-with-a-long-random-token-1': 'house1',
+    'replace-with-a-long-random-token-2': 'house2',
+  },
 };

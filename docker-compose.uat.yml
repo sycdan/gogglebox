@@ -10,10 +10,10 @@
 # (Equivalent explicit form:
 #   docker compose -f docker-compose.yml -f docker-compose.uat.yml ... )
 #
-# Layered env: .env carries the shared config; .env.uat holds ONLY the four
-# per-env overrides (JELLYFIN_URL, JELLYFIN_API_KEY, PORTAL_USERNAME,
-# PORTAL_PASSWORD). Create .env.uat by hand with your real values; supply the
-# household groups in config.uat.json (copy deploy/config.example.json).
+# Layered env: .env carries the shared config; .env.uat holds ONLY the
+# per-env overrides (JELLYFIN_URL, JELLYFIN_API_KEY, ACCESS_TOKEN). Create
+# .env.uat by hand with your real values; supply the household accounts in
+# config.uat.json (copy deploy/config.example.json).
 
 services:
   server:

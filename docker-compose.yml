@@ -35,7 +35,7 @@ services:
     command: npm run dev:server
     # Layered env: .env is the shared base; the sbx/uat overlays append
     # .env.<env> after it (later file wins) for the per-env override keys
-    # (JELLYFIN_URL/API_KEY + portal creds). optional so the bare base parses.
+    # (JELLYFIN_URL/API_KEY + ACCESS_TOKEN). optional so the bare base parses.
     env_file:
       - path: .env
         required: false

@@ -1,5 +1,10 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  buildContinueGuestSubmission,
+  guestIdsForPinRetry,
+  isGuestConfirmDisabled,
+} from './guestSelection';
 import { PlayerSessionPayload, seedJellyfinWebSession } from './jellyfinSession';
 import { clickEl, discoverPlayControl, isPlaybackStarted } from './playerLaunch';
 
@@ -12,14 +17,26 @@ const playerHideStartingOverlay =
 
 type LibraryKind = 'movie' | 'show';
 
+// Config v2 account tiers: primaries are preselected on the picker, secondaries
+// listed after them, tertiaries are pin-gated guests (only addable via the
+// "add guest" modal).
+type ViewerTier = 'primary' | 'secondary' | 'tertiary';
+
 interface Viewer {
   id: string;
   jellyfinUserId: string;
   name: string;
   avatarUrl?: string | null;
-  // Config v2: this account must supply this user's pin to add them to a group.
+  // This account's tier for the viewer (see ViewerTier).
+  tier: ViewerTier;
+  // Convenience flag from the server: true iff tier === 'tertiary' (guests are
+  // the only pin-gated tier).
   pinRequired?: boolean;
 }
+
+// localStorage key remembering the access token until Log out is clicked, so a
+// returning visitor skips the portal login.
+const ACCESS_TOKEN_STORAGE_KEY = 'gogglebox.accessToken';
 
 interface LibraryItem {
   id: string;
@@ -132,7 +149,7 @@ interface SessionResponse {
   portalAutoLoginEnabled: boolean;
   appName: string;
   watchedThreshold: number;
-  // The logged-in account's username, or null when not authenticated.
+  // The logged-in account's key, or null when not authenticated.
   account: string | null;
   viewers: Viewer[];
   activeViewerIds: string[];
@@ -149,6 +166,17 @@ interface SavedGroup {
   memberNames: string[];
 }
 
+// An API failure carrying its HTTP status so callers can branch on specific
+// verdicts (e.g. the 403 pin rejection from POST /api/group).
+class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(input, {
     credentials: 'same-origin',
@@ -161,7 +189,7 @@ async function apiRequest<T>(input: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.json().catch(async () => ({ error: await response.text() }));
-    throw new Error(body.error ?? 'Request failed');
+    throw new ApiError(body.error ?? 'Request failed', response.status);
   }
 
   if (response.status === 204) {
@@ -321,8 +349,22 @@ export function App() {
   const [selectedViewerIds, setSelectedViewerIds] = useState<string[]>([]);
   // Managed groups visible to this account, shown as "Saved groups" on the picker.
   const [savedGroups, setSavedGroups] = useState<SavedGroup[]>([]);
-  // Pins typed for selected pin-required viewers, keyed by viewer id.
+  // Pins collected for selected guests via the continue-time pin modal, keyed
+  // by jellyfinUserId — the same wire contract POST /api/group expects.
   const [pins, setPins] = useState<Record<string, string>>({});
+  // Guest modal state: open flag, the draft guest selection and per-guest draft
+  // pins (keyed by viewer id; continue flow only — the plain "add guest" flow
+  // is selection-only), whether the modal was opened mid-Continue (the single
+  // place pins are typed), and the server's pin-rejection message shown at the
+  // modal so a wrong pin can be retyped in place.
+  const [guestModalOpen, setGuestModalOpen] = useState(false);
+  const [guestDraftIds, setGuestDraftIds] = useState<string[]>([]);
+  const [guestDraftPins, setGuestDraftPins] = useState<Record<string, string>>({});
+  const [guestModalForContinue, setGuestModalForContinue] = useState(false);
+  const [guestModalError, setGuestModalError] = useState<string | null>(null);
+  // Confirmation modal warning that a group with any non-primary member affects
+  // watch progress for ALL its users.
+  const [confirmMixedOpen, setConfirmMixedOpen] = useState(false);
   const [kind, setKind] = useState<LibraryKind>('show');
   const [genre, setGenre] = useState('');
   const [kidsOnly, setKidsOnly] = useState(false);
@@ -351,7 +393,10 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [libraryLoading, setLibraryLoading] = useState(false);
-  const [credentials, setCredentials] = useState({ username: '', password: '' });
+  const [tokenInput, setTokenInput] = useState('');
+  // One boot auto-login attempt per page load (stored token, then env token) —
+  // never a retry loop, and never re-login right after Log out.
+  const autoLoginAttemptedRef = useRef(false);
 
   // Per-rail pagination (3 tiles per page) so rails stay roomy, not cramped.
   const continuePager = usePager(continueWatching);
@@ -360,7 +405,13 @@ export function App() {
   async function loadSession() {
     const nextSession = await apiRequest<SessionResponse>('/api/session');
     setSession(nextSession);
-    setSelectedViewerIds(nextSession.activeViewerIds);
+    // Arriving at the picker (no active group): preselect this account's
+    // PRIMARY viewers (still deselectable). An active group keeps its own ids.
+    setSelectedViewerIds(
+      nextSession.activeViewerIds.length > 0
+        ? nextSession.activeViewerIds
+        : nextSession.viewers.filter((viewer) => viewer.tier === 'primary').map((viewer) => viewer.id),
+    );
   }
 
   async function loadSavedGroups() {
@@ -373,11 +424,14 @@ export function App() {
     }
   }
 
-  async function attemptAutoLogin() {
+  // Log in with an access token and remember it (until Log out) so the next
+  // visit skips the portal login.
+  async function loginWithToken(token: string) {
     await apiRequest('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ token }),
     });
+    window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
     await loadSession();
   }
 
@@ -607,33 +661,89 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [session?.authenticated, searchQuery, kind, genre, kidsOnly]);
 
+  // Boot auto-login, tried once per page load when the session says not
+  // authenticated: (1) a stored localStorage token (removed if it fails), then
+  // (2) an empty-body login when the server has an ACCESS_TOKEN env var
+  // (portalAutoLoginEnabled), else (3) fall through to the login form.
   useEffect(() => {
-    if (!session || session.authenticated || !session.portalAutoLoginEnabled || busy) {
+    if (!session || session.authenticated || busy || autoLoginAttemptedRef.current) {
       return;
     }
+
+    const storedToken = window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+    if (!storedToken && !session.portalAutoLoginEnabled) {
+      return;
+    }
+    autoLoginAttemptedRef.current = true;
 
     void (async () => {
       try {
         setBusy(true);
         setError(null);
-        await attemptAutoLogin();
+        if (storedToken) {
+          try {
+            await loginWithToken(storedToken);
+            return;
+          } catch {
+            // A stale/revoked stored token must not wedge login — drop it and
+            // fall through to env auto-login (or the form).
+            window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+          }
+        }
+        if (session.portalAutoLoginEnabled) {
+          await apiRequest('/api/auth/login', { method: 'POST', body: JSON.stringify({}) });
+          await loadSession();
+        }
       } catch (nextError) {
         setError(nextError instanceof Error ? nextError.message : 'Auto login failed');
       } finally {
         setBusy(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, busy]);
 
-  // Selected viewers (in this account's visible set) that require a PIN, so the
-  // group builder can prompt for each one's PIN before forming the group.
-  const pinRequiredSelected = useMemo(
-    () =>
-      (session?.viewers ?? []).filter(
-        (viewer) => viewer.pinRequired && selectedViewerIds.includes(viewer.id),
-      ),
-    [session?.viewers, selectedViewerIds],
+  // The picker's tiered viewer lists. Primaries + secondaries render as cards;
+  // tertiaries (guests) only render once ADDED via the guest modal.
+  const primaryViewers = useMemo(
+    () => (session?.viewers ?? []).filter((viewer) => viewer.tier === 'primary'),
+    [session?.viewers],
   );
+  const secondaryViewers = useMemo(
+    () => (session?.viewers ?? []).filter((viewer) => viewer.tier === 'secondary'),
+    [session?.viewers],
+  );
+  const tertiaryViewers = useMemo(
+    () => (session?.viewers ?? []).filter((viewer) => viewer.tier === 'tertiary'),
+    [session?.viewers],
+  );
+  const addedGuests = useMemo(
+    () => tertiaryViewers.filter((viewer) => selectedViewerIds.includes(viewer.id)),
+    [tertiaryViewers, selectedViewerIds],
+  );
+
+  // Guests offered by the modal: mid-Continue it collects pins for EXACTLY the
+  // already-selected guests that still lack one (plain-add and saved-group
+  // paths alike); otherwise it offers the not-yet-added guest candidates.
+  const guestCandidates = useMemo(() => {
+    if (guestModalForContinue) {
+      return tertiaryViewers.filter(
+        (viewer) => selectedViewerIds.includes(viewer.id) && !pins[viewer.jellyfinUserId]?.trim(),
+      );
+    }
+    return tertiaryViewers.filter((viewer) => !selectedViewerIds.includes(viewer.id));
+  }, [guestModalForContinue, tertiaryViewers, selectedViewerIds, pins]);
+
+  // Plain add flow: at least one drafted guest (selection-only — pins come at
+  // Continue time). Continue flow: a typed PIN per drafted guest, and the draft
+  // may only be emptied when other members remain in the submitted group.
+  const guestConfirmDisabled = isGuestConfirmDisabled({
+    forContinue: guestModalForContinue,
+    selectedViewerIds,
+    candidateIds: guestCandidates.map((viewer) => viewer.id),
+    draftIds: guestDraftIds,
+    draftPins: guestDraftPins,
+  });
 
   const availableGenres = useMemo(() => {
     const uniqueGenres = new Set<string>();
@@ -644,19 +754,145 @@ export function App() {
   }, [recommendations, searchResults]);
 
   function toggleViewer(viewerId: string) {
+    const viewer = (session?.viewers ?? []).find((candidate) => candidate.id === viewerId);
+    const deselecting = selectedViewerIds.includes(viewerId);
     setSelectedViewerIds((current) =>
       current.includes(viewerId) ? current.filter((id) => id !== viewerId) : [...current, viewerId],
     );
+    // Toggling a guest OFF also drops their collected pin — re-adding them must
+    // go back through the guest modal.
+    if (deselecting && viewer?.tier === 'tertiary') {
+      setPins((current) => {
+        const next = { ...current };
+        delete next[viewer.jellyfinUserId];
+        return next;
+      });
+    }
   }
 
-  // Select exactly a saved group's members. Any member that's pin_required for
-  // this account surfaces a PIN prompt (via pinRequiredSelected); Continue then
-  // activates the group, reusing the existing managed group (same key).
+  // Select exactly a saved group's members. Any guest member's pin is collected
+  // at Continue time (the guest modal reopens for exactly those members) before
+  // the group POST, reusing the existing managed group (same key).
   function selectSavedGroup(group: SavedGroup) {
     const visibleIds = new Set((session?.viewers ?? []).map((viewer) => viewer.id));
     setSelectedViewerIds(group.memberIds.filter((id) => visibleIds.has(id)));
     setPins({});
     setError(null);
+  }
+
+  // Open the guest modal: `preselectedIds` seeds the draft (the Continue flow
+  // preselects the guests whose pins are missing); an empty seed is the plain
+  // "add guest" flow.
+  function openGuestModal(preselectedIds: string[] = [], forContinue = false) {
+    setGuestDraftIds(preselectedIds);
+    setGuestDraftPins({});
+    setGuestModalForContinue(forContinue);
+    setGuestModalError(null);
+    setGuestModalOpen(true);
+  }
+
+  function cancelGuestModal() {
+    // Cancel discards the draft selection and any typed pins.
+    setGuestModalOpen(false);
+    setGuestDraftIds([]);
+    setGuestDraftPins({});
+    setGuestModalForContinue(false);
+    setGuestModalError(null);
+  }
+
+  function toggleGuestDraft(viewerId: string) {
+    setGuestDraftIds((current) =>
+      current.includes(viewerId) ? current.filter((id) => id !== viewerId) : [...current, viewerId],
+    );
+    // Deselecting a draft guest drops their typed pin too.
+    setGuestDraftPins((current) => {
+      if (!(viewerId in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[viewerId];
+      return next;
+    });
+  }
+
+  // Confirm the guest modal. The plain add flow is selection-only: drafted
+  // guests join the selection with NO server call — pins come at Continue time.
+  // The Continue flow reconciles the draft against the submitted selection,
+  // then verifies the typed pins with the server AT the confirm click
+  // (POST /api/group/verify-pins — a preflight that activates/persists
+  // nothing): a wrong pin keeps the modal open with the server's message for a
+  // retype here, never two modals later. Only a verified submission closes the
+  // modal and proceeds to the mixed-group warning / authoritative group POST.
+  async function confirmGuestModal() {
+    const drafted = tertiaryViewers.filter((viewer) => guestDraftIds.includes(viewer.id));
+    if (!guestModalForContinue) {
+      const draftedIds = drafted.map((viewer) => viewer.id);
+      setSelectedViewerIds((current) => [
+        ...current,
+        ...draftedIds.filter((id) => !current.includes(id)),
+      ]);
+      cancelGuestModal();
+      return;
+    }
+
+    const { memberIds: nextSelectedViewerIds, pins: nextPins } = buildContinueGuestSubmission({
+      selectedViewerIds,
+      pins,
+      modalGuests: guestCandidates,
+      draftedGuests: drafted,
+      draftPins: guestDraftPins,
+    });
+
+    try {
+      setBusy(true);
+      setGuestModalError(null);
+      await apiRequest('/api/group/verify-pins', {
+        method: 'POST',
+        body: JSON.stringify({ memberIds: nextSelectedViewerIds, pins: nextPins }),
+      });
+    } catch (nextError) {
+      // The server rejected the submission (403 = pin verdict). Keep the modal
+      // open with the draft selection intact; clear the typed pins so the
+      // retype starts clean under the server's message.
+      setGuestDraftPins({});
+      setGuestModalError(
+        nextError instanceof Error ? nextError.message : 'Could not verify guest PINs',
+      );
+      return;
+    } finally {
+      setBusy(false);
+    }
+
+    setSelectedViewerIds(nextSelectedViewerIds);
+    setPins(nextPins);
+    cancelGuestModal();
+    const selected = (session?.viewers ?? []).filter((viewer) => nextSelectedViewerIds.includes(viewer.id));
+    if (selected.some((viewer) => viewer.tier !== 'primary')) {
+      setConfirmMixedOpen(true);
+      return;
+    }
+    void saveGroup(nextSelectedViewerIds, nextPins);
+  }
+
+  // Continue from the picker — the single pin gate. Order: (1) collect pins for
+  // every selected guest still lacking one this Continue interaction (both the
+  // plain-add and saved-group paths — adding a guest never collects a pin),
+  // (2) warn when the group contains ANY non-primary member (watch progress is
+  // shared), (3) POST the group.
+  function handleContinue() {
+    const selected = (session?.viewers ?? []).filter((viewer) => selectedViewerIds.includes(viewer.id));
+    const missingPinGuests = selected.filter(
+      (viewer) => viewer.tier === 'tertiary' && !pins[viewer.jellyfinUserId]?.trim(),
+    );
+    if (missingPinGuests.length > 0) {
+      openGuestModal(missingPinGuests.map((viewer) => viewer.id), true);
+      return;
+    }
+    if (selected.some((viewer) => viewer.tier !== 'primary')) {
+      setConfirmMixedOpen(true);
+      return;
+    }
+    void saveGroup(selectedViewerIds, pins);
   }
 
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
@@ -665,11 +901,7 @@ export function App() {
     try {
       setBusy(true);
       setError(null);
-      await apiRequest('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify(credentials),
-      });
-      await loadSession();
+      await loginWithToken(tokenInput);
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Login failed');
     } finally {
@@ -677,16 +909,29 @@ export function App() {
     }
   }
 
-  async function saveGroup(memberIds: string[], pins: Record<string, string> = {}) {
+  async function saveGroup(memberIds: string[], groupPins: Record<string, string> = {}) {
     try {
       setBusy(true);
       setError(null);
       await apiRequest('/api/group', {
         method: 'POST',
-        body: JSON.stringify({ memberIds, pins }),
+        body: JSON.stringify({ memberIds, pins: groupPins }),
       });
       await loadSession();
     } catch (nextError) {
+      // A 403 is the server's pin verdict (verifyGroupPins): nothing was
+      // activated or persisted. Drop the collected pins and route back to the
+      // continue-time pin modal with the server's message so the user can
+      // retype and resubmit — never a dead banner.
+      if (nextError instanceof ApiError && nextError.status === 403) {
+        const retryGuestIds = guestIdsForPinRetry(memberIds, session?.viewers ?? []);
+        if (retryGuestIds.length > 0) {
+          setPins({});
+          openGuestModal(retryGuestIds, true);
+          setGuestModalError(nextError.message);
+          return;
+        }
+      }
       setError(nextError instanceof Error ? nextError.message : 'Could not save viewer group');
     } finally {
       setBusy(false);
@@ -712,6 +957,9 @@ export function App() {
   async function logout() {
     try {
       setBusy(true);
+      // Log out forgets the remembered token — the next visit shows the portal
+      // login instead of silently re-entering.
+      window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
       await apiRequest('/api/auth/logout', { method: 'POST' });
       setSession(null);
       setSelectedViewerIds([]);
@@ -1277,21 +1525,15 @@ export function App() {
         <div className="panel auth-panel">
           <p className="eyebrow">LAN household portal</p>
           <h1>{session.appName}</h1>
-          <p className="lead">Log in to your account, then choose who is watching together.</p>
+          <p className="lead">Enter your access token, then choose who is watching together.</p>
           <form className="stack" onSubmit={handleLogin}>
             <label>
-              <span>Account username</span>
-              <input
-                value={credentials.username}
-                onChange={(event) => setCredentials((current) => ({ ...current, username: event.target.value }))}
-              />
-            </label>
-            <label>
-              <span>Password</span>
+              <span>Access token</span>
               <input
                 type="password"
-                value={credentials.password}
-                onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))}
+                autoComplete="off"
+                value={tokenInput}
+                onChange={(event) => setTokenInput(event.target.value)}
               />
             </label>
             <button disabled={busy} type="submit">Enter gogglebox</button>
@@ -1314,7 +1556,9 @@ export function App() {
             <button className="ghost" onClick={() => void logout()}>Log out</button>
           </div>
           <div className="viewer-grid">
-            {session.viewers.map((viewer) => {
+            {/* Primaries (preselected), then secondaries, then any ADDED guests.
+                No PIN badges — guest pins are collected at Continue time. */}
+            {[...primaryViewers, ...secondaryViewers, ...addedGuests].map((viewer) => {
               const selected = selectedViewerIds.includes(viewer.id);
               return (
                 <button
@@ -1325,10 +1569,20 @@ export function App() {
                 >
                   <ViewerAvatar viewer={viewer} />
                   <strong>{viewer.name}</strong>
-                  {viewer.pinRequired ? <span className="badge">PIN</span> : null}
                 </button>
               );
             })}
+            {tertiaryViewers.some((viewer) => !selectedViewerIds.includes(viewer.id)) ? (
+              <button
+                className="viewer-card add-guest-card"
+                onClick={() => openGuestModal()}
+                type="button"
+                aria-label="Add guest"
+              >
+                <span className="viewer-avatar add-guest-plus" aria-hidden="true">+</span>
+                <strong>Add guest</strong>
+              </button>
+            ) : null}
           </div>
           {savedGroups.length > 0 ? (
             <div className="stack saved-groups">
@@ -1353,29 +1607,10 @@ export function App() {
               </div>
             </div>
           ) : null}
-          {pinRequiredSelected.length > 0 ? (
-            <div className="stack pin-prompts">
-              <p className="muted">These viewers need their PIN to join the group:</p>
-              {pinRequiredSelected.map((viewer) => (
-                <label key={`pin-${viewer.id}`}>
-                  <span>{viewer.name}’s PIN</span>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    value={pins[viewer.id] ?? ''}
-                    onChange={(event) =>
-                      setPins((current) => ({ ...current, [viewer.id]: event.target.value }))
-                    }
-                  />
-                </label>
-              ))}
-            </div>
-          ) : null}
           <div className="row spread">
             <button
               disabled={busy || selectedViewerIds.length === 0}
-              onClick={() => void saveGroup(selectedViewerIds, pins)}
+              onClick={handleContinue}
               type="button"
             >
               Continue
@@ -1383,6 +1618,94 @@ export function App() {
           </div>
           {error ? <p className="error">{error}</p> : null}
         </div>
+        {guestModalOpen ? (
+          <div className="modal-backdrop" onClick={cancelGuestModal}>
+            <div className="modal guest-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="row spread">
+                <div>
+                  <p className="eyebrow">Guests</p>
+                  <h2>{guestModalForContinue ? 'Enter guest PINs' : 'Add guests'}</h2>
+                </div>
+                <button className="ghost" onClick={cancelGuestModal} type="button">Cancel</button>
+              </div>
+              {guestCandidates.length === 0 ? (
+                <p className="muted">No guests can be added right now.</p>
+              ) : (
+                <div className="stack">
+                  {guestCandidates.map((viewer) => {
+                    const selected = guestDraftIds.includes(viewer.id);
+                    return (
+                      <div className="guest-row" key={`guest-${viewer.id}`}>
+                        <button
+                          className={`viewer-card guest-card${selected ? ' selected' : ''}`}
+                          onClick={() => toggleGuestDraft(viewer.id)}
+                          type="button"
+                        >
+                          <ViewerAvatar viewer={viewer} />
+                          <strong>{viewer.name}</strong>
+                        </button>
+                        {/* PINs are only typed at Continue time — the plain
+                            add flow is selection-only. */}
+                        {selected && guestModalForContinue ? (
+                          <label>
+                            <span>{viewer.name}’s PIN</span>
+                            <input
+                              type="password"
+                              inputMode="numeric"
+                              autoComplete="off"
+                              value={guestDraftPins[viewer.id] ?? ''}
+                              onChange={(event) =>
+                                setGuestDraftPins((current) => ({ ...current, [viewer.id]: event.target.value }))
+                              }
+                            />
+                          </label>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {/* The server's pin rejection (403) lands HERE so the user can
+                  retype and resubmit at the point of entry. */}
+              {guestModalError ? <p className="error">{guestModalError}</p> : null}
+              <div className="row spread">
+                <button className="ghost" onClick={cancelGuestModal} type="button">Cancel</button>
+                <button
+                  disabled={guestConfirmDisabled || busy}
+                  onClick={() => void confirmGuestModal()}
+                  type="button"
+                >
+                  {guestModalForContinue ? 'Confirm PINs' : 'Add guests'}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {confirmMixedOpen ? (
+          <div className="modal-backdrop" onClick={() => setConfirmMixedOpen(false)}>
+            <div className="modal confirm-modal" onClick={(event) => event.stopPropagation()}>
+              <p className="eyebrow">Heads up</p>
+              <h2>Shared watch progress</h2>
+              <p className="muted">
+                This group includes viewers beyond the default household set. Continuing will
+                affect watch progress and watched states for ALL users in the group.
+              </p>
+              <div className="row spread">
+                <button className="ghost" onClick={() => setConfirmMixedOpen(false)} type="button">Cancel</button>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirmMixedOpen(false);
+                    void saveGroup(selectedViewerIds, pins);
+                  }}
+                  type="button"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   }

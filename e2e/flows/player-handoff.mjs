@@ -1,4 +1,5 @@
 import { seedInProgressEpisode } from '../lib/seed-inprogress.mjs';
+import { continueFromPicker, selectExactViewersByName } from '../lib/viewer.mjs';
 
 // ── player-handoff flow ─────────────────────────────────────────────────────
 // Proves the Stage A "Gogglebox as front-door" browser auto-login handoff:
@@ -24,8 +25,10 @@ import { seedInProgressEpisode } from '../lib/seed-inprogress.mjs';
 // the handoff cannot work — we fail loudly with a clear message if so.
 export const match = /player-handoff|handoff|front-door|frontdoor|auto-login|autologin/i;
 
-// Select the "parents" preset (Alice + Bob). Falls back to any 2-member preset,
-// then to the first preset, so the flow still runs on a differently-named config.
+// Select EXACTLY Alice + Bob (the sbx household primaries, preselected on the
+// picker). Falls back to the first two viewer cards on a differently-named
+// config. Uses the shared helpers so preselected primaries outside the wanted
+// set are deselected and any mixed-group confirmation modal is confirmed.
 async function pickParentsGroupAndContinue(page) {
   const pickHeading = page.getByRole('heading', { name: /pick the group/i });
   if (!(await pickHeading.count().then((n) => n > 0))) {
@@ -33,24 +36,16 @@ async function pickParentsGroupAndContinue(page) {
     return;
   }
 
-  const chips = page.locator('.preset-row .chip');
-  const parents = chips.filter({ hasText: /alice\s*\+\s*bob|parents/i }).first();
-  if (await parents.count().then((n) => n > 0)) {
-    console.log('[proof] player-handoff: selecting "Alice + Bob" (parents) preset');
-    await parents.click();
-  } else if (await chips.count().then((n) => n > 0)) {
-    console.log('[proof] player-handoff: parents preset not found; using first preset chip');
-    await chips.first().click();
+  const { missing, labels } = await selectExactViewersByName(page, ['Alice', 'Bob']);
+  if (missing.length > 0) {
+    console.log(`[proof] player-handoff: [${missing.join(', ')}] not found; selecting the first two viewer cards`);
+    await selectExactViewersByName(page, labels.slice(0, 2));
   } else {
-    console.log('[proof] player-handoff: no preset chips; selecting first two viewer cards');
-    const viewerCards = page.locator('button.viewer-card');
-    const count = await viewerCards.count();
-    await viewerCards.nth(0).click();
-    if (count > 1) await viewerCards.nth(1).click();
+    console.log('[proof] player-handoff: selected Alice + Bob');
   }
+  console.log(`[proof] player-handoff: viewer cards = ${JSON.stringify(labels)}`);
 
-  await page.getByRole('button', { name: /^Continue$/ }).first().click();
-  await page.waitForLoadState('networkidle');
+  await continueFromPicker(page, 'player-handoff');
 }
 
 export async function run(page, ctx) {

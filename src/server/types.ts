@@ -8,34 +8,30 @@ export interface FamilyMember {
 }
 
 // Config v2: a configured user, referenced by its (unique) Jellyfin name. The
-// optional pin gates adding this user to a group from any account that marks
-// them pin_required.
+// pin registry: the optional pin gates adding this user to a group whenever
+// they resolve to the tertiary (guest) tier for the logged-in account.
 export interface ConfigUser {
   jellyfin_name: string;
   pin?: string;
 }
 
-// Config v2: a user an account may see, and whether forming a group with that
-// user from this account requires the user's pin.
-export interface VisibleUser {
-  jellyfin_name: string;
-  pin_required?: boolean;
-}
-
-// Config v2: a login account (a household). Authenticates with username/password
-// and sees only its own visible_users.
-export interface ConfigAccount {
-  username: string;
-  password: string;
-  visible_users: VisibleUser[];
-}
-
-// Optional auto-login credentials sourced from PORTAL_USERNAME/PORTAL_PASSWORD.
-// When set AND matching an accounts[] entry, that account is logged in
-// automatically; otherwise the login screen is shown.
-export interface PortalCredentials {
-  username: string;
-  password: string;
+// Config v2: a login account (a household), keyed by account_key in
+// AppConfig.accounts. Tier lists are arrays of Jellyfin user NAMES; the viewer
+// universe is ALL live Jellyfin users (not just users[]):
+//   - primary_users: selected by default when the picker loads (deselectable).
+//     Omitted/null => [].
+//   - secondary_users: listed after primaries, unselected by default.
+//     Omitted/null => WILDCARD: all live Jellyfin users minus primaries minus
+//     explicit tertiaries. Explicit [] => none.
+//   - tertiary_users (guests): not shown as cards; addable only via the
+//     pin-gated "add guest" flow. Omitted/null => WILDCARD: all live Jellyfin
+//     users minus primaries minus resolved secondaries. Explicit [] => none.
+// Precedence when a name appears in multiple explicit lists:
+// primary > secondary > tertiary (keep highest, warn at startup).
+export interface AccountV2 {
+  primary_users?: string[] | null;
+  secondary_users?: string[] | null;
+  tertiary_users?: string[] | null;
 }
 
 export interface AppConfig {
@@ -43,17 +39,23 @@ export interface AppConfig {
   port: number;
   sessionSecret: string;
   watchedThreshold: number;
-  // Auto-login credentials (PORTAL_USERNAME/PORTAL_PASSWORD), or null when unset.
-  portalCredentials: PortalCredentials | null;
+  // Optional auto-login token from the ACCESS_TOKEN env var, or null when
+  // unset. When it matches a configured access token, an empty login body
+  // authenticates as that token's account (the portal auto-login).
+  envAccessToken: string | null;
   jellyfinUrl: string;
   jellyfinApiKey: string;
   recommendations: {
     count: number;
   };
   users: ConfigUser[];
-  accounts: ConfigAccount[];
-  // Resolved at startup: configured Jellyfin name -> Jellyfin user (id/avatar).
-  // Empty until the startup resolution runs (see resolveViewers / server.ts).
+  // account_key -> tiered account config.
+  accounts: Record<string, AccountV2>;
+  // access token -> account_key. Login is by token ONLY; tokens must be unique.
+  accessTokens: Record<string, string>;
+  // Resolved at startup: Jellyfin name -> Jellyfin user (id/avatar), for ALL
+  // live Jellyfin users (wildcard tiers may include unconfigured users). Empty
+  // until the startup resolution runs (see resolveViewers / server.ts).
   viewersByName: Record<string, FamilyMember>;
 }
 

@@ -24,16 +24,19 @@ export interface GroupPlayerUser {
 }
 
 // The cached "effective config" derived from the read-only config.json: the
-// migrated + merged + validated users/accounts plus provenance for cache
-// invalidation. We re-derive (and overwrite this) when sourceHash changes (the
-// user edited config.json) OR builtForPackage != the running package version (a
-// new/rolled-back image whose migrations may differ).
+// migrated + merged + validated users/accounts/accessTokens plus provenance for
+// cache invalidation. We re-derive (and overwrite this) when sourceHash changes
+// (the user edited config.json), builtForPackage != the running package version
+// (a new/rolled-back image whose migrations may differ), OR schemaVersion !=
+// the image's current schema (a cached v1 shape must never be consumed by a v2
+// runtime).
 export interface CachedEffectiveConfig {
   schemaVersion: number;
   builtForPackage: string;
   sourceHash: string;
   users: unknown[];
-  accounts: unknown[];
+  accounts: Record<string, unknown>;
+  accessTokens: Record<string, string>;
   watchedThreshold: number;
   recommendationCount: number;
 }
@@ -266,14 +269,17 @@ export class AppState {
   }
 
   // Whether the cached effective config can be reused: present AND derived from
-  // the same source (sourceHash) by the same image (builtForPackage). A mismatch
-  // (user edited config.json, or a new/rolled-back image) means re-derive.
-  isEffectiveConfigFresh(sourceHash: string, packageVersion: string): boolean {
+  // the same source (sourceHash) by the same image (builtForPackage) INTO the
+  // schema shape this image consumes (schemaVersion). A mismatch (user edited
+  // config.json, a new/rolled-back image, or a cached older-schema shape)
+  // means re-derive.
+  isEffectiveConfigFresh(sourceHash: string, packageVersion: string, schemaVersion: number): boolean {
     const cached = this.getEffectiveConfig();
     return Boolean(
       cached &&
       cached.sourceHash === sourceHash &&
-      cached.builtForPackage === packageVersion,
+      cached.builtForPackage === packageVersion &&
+      cached.schemaVersion === schemaVersion,
     );
   }
 

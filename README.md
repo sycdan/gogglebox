@@ -59,9 +59,10 @@ cp deploy/config.example.json deploy/config.json
 cp deploy/.env.example deploy/.env
 ```
 
-In `deploy/config.json`, list the Jellyfin users Gogglebox may show and the
-portal accounts that can see them. Use Jellyfin user names, not UUIDs. Older
-supported config shapes are migrated automatically by the app on startup.
+In `deploy/config.json`, configure schemaVersion 2 auth: list the Jellyfin users
+Gogglebox may show, define one or more household accounts, and map login tokens
+to those accounts. Use Jellyfin user names, not UUIDs. Older supported config
+shapes are migrated automatically by the app on startup.
 
 In `deploy/.env`, set the required deployment values:
 
@@ -71,6 +72,11 @@ In `deploy/.env`, set the required deployment values:
 | `JELLYFIN_URL`     | Normal Jellyfin origin, without `/player` |
 | `JELLYFIN_API_KEY` | Jellyfin API key                          |
 | `SESSION_SECRET`   | Long random string for session cookies    |
+
+`ACCESS_TOKEN` is optional. When set to a token that exists in
+`deploy/config.json`, Gogglebox automatically logs the browser into that token's
+account and skips the token form. Leave it unset when you want visitors to type
+their token.
 
 Start Gogglebox from the repo root:
 
@@ -91,6 +97,52 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env down
 Runtime state, such as ignored items, is stored under the configured state
 directory. For a real deployment, set `GOGGLEBOX_STATE_DIR` to a durable host
 path that is writable by container uid `1000`.
+
+### Auth config
+
+Gogglebox login is token-only. A visitor enters one access token; that token maps
+to an account key in `access_tokens`, and the account controls which Jellyfin
+users the visitor can select. There is no separate username/password portal
+login in the current config model.
+
+```json
+{
+  "schemaVersion": 2,
+  "users": [
+    { "jellyfin_name": "Alice", "pin": "1234" },
+    { "jellyfin_name": "Bob" },
+    { "jellyfin_name": "Carol", "pin": "5678" }
+  ],
+  "accounts": {
+    "living_room": {
+      "primary_users": ["Alice"],
+      "secondary_users": ["Bob"],
+      "tertiary_users": ["Carol"]
+    }
+  },
+  "access_tokens": {
+    "replace-with-a-long-random-token": "living_room"
+  }
+}
+```
+
+After a successful manual token login, the browser remembers the token in local
+storage and uses it on later visits until Log out is clicked. This is separate
+from `ACCESS_TOKEN` auto-login, which is configured on the server and applies to
+any browser reaching that deployment.
+
+Account tiers control the picker:
+
+- `primary_users` are selected by default when the account opens Gogglebox.
+- `secondary_users` are shown as normal selectable viewers, but are not selected
+  by default.
+- `tertiary_users` are guests. They are hidden behind Add guest and require the
+  configured user PIN whenever they are added to a group for that account.
+
+If `secondary_users` or `tertiary_users` is omitted or set to `null`, it acts as
+a wildcard over the remaining live Jellyfin users after higher-priority tiers
+are assigned. Guests without a configured `pin` in `users` are not addable,
+because Gogglebox cannot verify them.
 
 ## Development
 

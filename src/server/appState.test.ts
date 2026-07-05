@@ -157,49 +157,61 @@ test('reads a legacy flat ignoredItems: string[] shape and migrates as whole-sho
   assert.deepEqual(remaining, []);
 });
 
-function cachedConfig(overrides: Partial<{ sourceHash: string; builtForPackage: string }> = {}): {
+function cachedConfig(
+  overrides: Partial<{ sourceHash: string; builtForPackage: string; schemaVersion: number }> = {},
+): {
   schemaVersion: number;
   builtForPackage: string;
   sourceHash: string;
   users: unknown[];
-  accounts: unknown[];
+  accounts: Record<string, unknown>;
+  accessTokens: Record<string, string>;
   watchedThreshold: number;
   recommendationCount: number;
 } {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     builtForPackage: '2026.6.29',
     sourceHash: 'hash-a',
     users: [{ jellyfin_name: 'Alice' }],
-    accounts: [{ username: 'h', password: 'p', visible_users: [{ jellyfin_name: 'Alice' }] }],
+    accounts: { h: { primary_users: ['Alice'], secondary_users: [], tertiary_users: [] } },
+    accessTokens: { 'token-1': 'h' },
     watchedThreshold: 0.9,
     recommendationCount: 8,
     ...overrides,
   };
 }
 
-test('effective config round-trips and is fresh for the same hash + package', () => {
+test('effective config round-trips and is fresh for the same hash + package + schema', () => {
   const state = new AppState(tempStatePath());
   state.setEffectiveConfig(cachedConfig());
 
   assert.equal(state.getEffectiveConfig()?.sourceHash, 'hash-a');
-  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.6.29'), true);
+  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.6.29', 2), true);
 });
 
 test('effective config is stale when the source hash changed (user edited config.json)', () => {
   const state = new AppState(tempStatePath());
   state.setEffectiveConfig(cachedConfig());
-  assert.equal(state.isEffectiveConfigFresh('hash-b', '2026.6.29'), false);
+  assert.equal(state.isEffectiveConfigFresh('hash-b', '2026.6.29', 2), false);
 });
 
 test('effective config is stale when the package version changed (new/rolled-back image)', () => {
   const state = new AppState(tempStatePath());
   state.setEffectiveConfig(cachedConfig());
-  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.7.1'), false);
+  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.7.1', 2), false);
+});
+
+test('effective config is stale when the cached schemaVersion differs (older-schema cache)', () => {
+  const state = new AppState(tempStatePath());
+  // A schemaVersion-1 effective config cached by an older image must NOT be
+  // reused by a v2 runtime, even when source + package happen to match.
+  state.setEffectiveConfig(cachedConfig({ schemaVersion: 1 }));
+  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.6.29', 2), false);
 });
 
 test('effective config is not fresh when nothing has been cached yet', () => {
   const state = new AppState(tempStatePath());
   assert.equal(state.getEffectiveConfig(), undefined);
-  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.6.29'), false);
+  assert.equal(state.isEffectiveConfigFresh('hash-a', '2026.6.29', 2), false);
 });

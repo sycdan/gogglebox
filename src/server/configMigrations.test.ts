@@ -4,10 +4,12 @@ import test from 'node:test';
 import {
   CURRENT_SCHEMA_VERSION,
   MigrationContext,
+  SchemaV1Config,
   deepMergeConfig,
   detectSchemaVersion,
   hashRawConfig,
   migrate0to1,
+  migrate1to2,
   runMigrationChain,
 } from './configMigrations';
 
@@ -106,24 +108,159 @@ test('migrate0to1 carries over playback/recommendations and drops obsolete group
   assert.equal('groups' in result, false);
 });
 
-test('runMigrationChain starts at the source version and stops when no next migration', () => {
+// ── Migration 1 -> 2 ────────────────────────────────────────────────────────
+
+function v1Config(overrides: Partial<SchemaV1Config> = {}): SchemaV1Config {
+  return {
+    schemaVersion: 1,
+    users: [
+      { jellyfin_name: 'Alice', pin: '1234' },
+      { jellyfin_name: 'Bob' },
+    ],
+    accounts: [
+      {
+        username: 'house1',
+        password: 'pw1',
+        visible_users: [
+          { jellyfin_name: 'Alice', pin_required: true },
+          { jellyfin_name: 'Bob' },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+test('migrate1to2 maps account_key = username and access token = password', () => {
+  const result = migrate1to2(v1Config() as unknown as Record<string, unknown>, ctx());
+
+  assert.equal(result.schemaVersion, 2);
+  assert.deepEqual(Object.keys(result.accounts), ['house1']);
+  assert.deepEqual(result.access_tokens, { pw1: 'house1' });
+});
+
+test('migrate1to2 maps pin_required visible users to tertiary, others to secondary, primaries empty', () => {
+  const result = migrate1to2(v1Config() as unknown as Record<string, unknown>, ctx());
+
+  assert.deepEqual(result.accounts.house1, {
+    primary_users: [],
+    secondary_users: ['Bob'],
+    tertiary_users: ['Alice'],
+  });
+});
+
+test('migrate1to2 writes ALL THREE tier lists explicitly so wildcards cannot widen v1 visibility', () => {
+  const config = v1Config({
+    accounts: [{ username: 'narrow', password: 'pw', visible_users: [{ jellyfin_name: 'Alice' }] }],
+  });
+  const result = migrate1to2(config as unknown as Record<string, unknown>, ctx());
+
+  const account = result.accounts.narrow;
+  // Explicit arrays (never undefined/null): omitted lists would be WILDCARDS
+  // in v2 and let this account see users the v1 config never granted.
+  assert.deepEqual(account.primary_users, []);
+  assert.deepEqual(account.secondary_users, ['Alice']);
+  assert.deepEqual(account.tertiary_users, []);
+});
+
+test('migrate1to2 de-duplicates a repeated password into a unique token (warns)', () => {
+  const warnings: string[] = [];
+  const config = v1Config({
+    accounts: [
+      { username: 'first', password: 'same-pw', visible_users: [{ jellyfin_name: 'Alice' }] },
+      { username: 'second', password: 'same-pw', visible_users: [{ jellyfin_name: 'Bob' }] },
+    ],
+  });
+  const result = migrate1to2(
+    config as unknown as Record<string, unknown>,
+    ctx({ warn: (m) => warnings.push(m) }),
+  );
+
+  assert.deepEqual(result.access_tokens, {
+    'same-pw': 'first',
+    'same-pw-second': 'second',
+  });
+  assert.ok(warnings.some((w) => /same-pw-second/.test(w)));
+});
+
+test('migrate1to2 rechecks duplicate-password fallback tokens before assigning them', () => {
+  const warnings: string[] = [];
+  const config = v1Config({
+    accounts: [
+      { username: 'first', password: 'same-pw', visible_users: [{ jellyfin_name: 'Alice' }] },
+      { username: 'second', password: 'same-pw-third', visible_users: [{ jellyfin_name: 'Bob' }] },
+      { username: 'third', password: 'same-pw', visible_users: [{ jellyfin_name: 'Carol' }] },
+    ],
+  });
+  const result = migrate1to2(
+    config as unknown as Record<string, unknown>,
+    ctx({ warn: (m) => warnings.push(m) }),
+  );
+
+  assert.deepEqual(result.access_tokens, {
+    'same-pw': 'first',
+    'same-pw-third': 'second',
+    'same-pw-third-2': 'third',
+  });
+  assert.equal(result.access_tokens['same-pw'], 'first');
+  assert.equal(result.access_tokens['same-pw-third'], 'second');
+  assert.equal(result.access_tokens['same-pw-third-2'], 'third');
+  assert.ok(
+    warnings.some(
+      (w) =>
+        /account "third"/.test(w) &&
+        /same-pw-third-2/.test(w) &&
+        /fallback "same-pw-third"/.test(w),
+    ),
+  );
+});
+
+test('migrate1to2 carries users/playback/recommendations through unchanged', () => {
+  const config = v1Config({
+    playback: { watchedThreshold: 0.8 },
+    recommendations: { count: 12 },
+  });
+  const result = migrate1to2(config as unknown as Record<string, unknown>, ctx());
+
+  assert.deepEqual(result.users, [
+    { jellyfin_name: 'Alice', pin: '1234' },
+    { jellyfin_name: 'Bob' },
+  ]);
+  assert.equal(result.playback?.watchedThreshold, 0.8);
+  assert.equal(result.recommendations?.count, 12);
+});
+
+// ── Chain ───────────────────────────────────────────────────────────────────
+
+test('runMigrationChain walks a 0-source config through 0 -> 1 -> 2', () => {
   const legacy = { household: { username: 'h', password: 'p' }, groups: [{ memberIds: ['uuid-a'] }] };
   const result = runMigrationChain(legacy, ctx());
 
   assert.equal(result.schemaVersion, CURRENT_SCHEMA_VERSION);
   assert.deepEqual(result.users.map((u) => u.jellyfin_name), ['Alice']);
+  // The synthesized v1 household account becomes a v2 account keyed by its
+  // username, reachable via its password-as-token.
+  assert.deepEqual(result.accounts.h, {
+    primary_users: [],
+    secondary_users: ['Alice'],
+    tertiary_users: [],
+  });
+  assert.deepEqual(result.access_tokens, { p: 'h' });
 });
 
 test('runMigrationChain leaves an already-current config unchanged', () => {
   const current = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     users: [{ jellyfin_name: 'Alice' }],
-    accounts: [{ username: 'h', password: 'p', visible_users: [{ jellyfin_name: 'Alice' }] }],
+    accounts: { house1: { primary_users: ['Alice'] } },
+    access_tokens: { 'token-1': 'house1' },
   };
   const result = runMigrationChain(current, ctx());
 
-  assert.equal(result.schemaVersion, 1);
+  assert.equal(result.schemaVersion, 2);
   assert.deepEqual(result.users, [{ jellyfin_name: 'Alice' }]);
+  assert.deepEqual(result.accounts, { house1: { primary_users: ['Alice'] } });
+  assert.deepEqual(result.access_tokens, { 'token-1': 'house1' });
 });
 
 test('runMigrationChain fails fast when the source schema is newer than the image', () => {

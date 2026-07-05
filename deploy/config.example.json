@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "playback": {
     "watchedThreshold": 0.9
   },
@@ -19,39 +19,31 @@
       "jellyfin_name": "Carol"
     },
     {
-      "jellyfin_name": "Dave"
+      "jellyfin_name": "Dave",
+      "pin": "2468"
     }
   ],
-  "accounts": [
-    {
-      "username": "household1",
-      "password": "household-password-1",
-      "visible_users": [
-        {
-          "jellyfin_name": "Alice",
-          "pin_required": true
-        },
-        {
-          "jellyfin_name": "Bob",
-          "pin_required": true
-        },
-        {
-          "jellyfin_name": "Carol"
-        }
+  "accounts": {
+    "house1": {
+      "primary_users": [
+        "Alice",
+        "Bob"
+      ],
+      "secondary_users": [
+        "Carol"
+      ],
+      "tertiary_users": [
+        "Dave"
       ]
     },
-    {
-      "username": "household2",
-      "password": "household-password-2",
-      "visible_users": [
-        {
-          "jellyfin_name": "Carol",
-          "pin_required": true
-        },
-        {
-          "jellyfin_name": "Dave"
-        }
+    "house2": {
+      "primary_users": [
+        "Dave"
       ]
     }
-  ]
+  },
+  "access_tokens": {
+    "replace-with-a-long-random-token-1": "house1",
+    "replace-with-a-long-random-token-2": "house2"
+  }
 }
