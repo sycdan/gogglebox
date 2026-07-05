@@ -98,9 +98,9 @@ worktree has uncommitted changes, the orchestrator stages them and makes a
 mechanical snapshot commit in the session branch so the range can be consumed.
 The orchestrator then squashes exactly the commits in `base_tag..<session-branch-head>`
 into one commit on `main` with this message:
-`effort(<effort-slug-chain>): handoff from <agent>`, where `<effort-slug-chain>`
-is the slash-separated effort directory under `efforts/`, such as
-`auth-refactor` or `auth-refactor/guest-pin-rework`. This keeps `main`
+`output(<output_path>): handoff from <agent>`, where `<output_path>` is the
+prompt's declared `output_path` (e.g.
+`efforts/auth-refactor/.outputs/<uuidv7>.md`). This keeps `main`
 phase-oriented while letting session branches contain any number of local
 progress commits or none at all. After the squash lands successfully on `main`,
 the orchestrator removes the temporary `base_tag`, then tears the session down
