@@ -77,10 +77,94 @@ jobs:
       - name: Unit tests
         run: npm test
 
-  # No `if` here: publish `needs: test`, and a skipped dependency (test, when the
-  # gate said not a bump) skips this job too. It only runs when test ran and passed.
+  # Behavior gate: the full e2e/visual-proof flow suite (e2e/run.mjs, all 14
+  # flows) against a freshly-bootstrapped sandbox stack, so a published image
+  # is proven to actually work end to end, not just typecheck/unit-test clean.
+  # Parallel to `test` (both `needs: gate`) rather than folded into it: `test`
+  # stays fast/cheap (no Docker, no Jellyfin) so a quick regression shows up
+  # fast, and the two failure signals (unit-test break vs. flow break) stay
+  # easy to tell apart in the Actions UI instead of one merged job log. The
+  # tradeoff is more concurrent runner minutes, accepted for the clearer signal.
+  e2e:
+    needs: gate
+    if: needs.gate.outputs.bump == 'true'
+    runs-on: ubuntu-latest
+    # Initial tunable value, not a measured permanent constant: covers sandbox
+    # bootstrap (Jellyfin first-run wizard + fixture generation/provisioning)
+    # plus 14 sequential Playwright flows against the sandbox stack. Tighten or
+    # raise once real CI timing is known.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      # Bring up just the sandbox Jellyfin first — provisioning talks to it
+      # directly before the rest of the stack (server/client/proxy) exists.
+      - name: Boot sandbox Jellyfin
+        run: docker compose -f docker-compose.yml -f docker-compose.sbx.yml up -d jellyfin-sandbox
+
+      - name: Generate sandbox fixtures
+        run: docker compose -f docker-compose.yml -f docker-compose.sbx.yml run --rm sandbox-generate
+
+      # Provisioning runs the Jellyfin first-run wizard, creates users/libraries,
+      # mints an API key, and emits .env.sbx + config.sbx.json at the repo root —
+      # the sbx overlay's server/proof overrides require both to exist.
+      - name: Provision sandbox Jellyfin
+        run: docker compose -f docker-compose.yml -f docker-compose.sbx.yml run --rm sandbox-provision
+
+      - name: Reset sandbox played-state
+        run: docker compose -f docker-compose.yml -f docker-compose.sbx.yml run --rm sandbox-reset
+
+      # Only now do .env.sbx and config.sbx.json exist, so only now can the
+      # server/proxy/proof overrides (which mount config.sbx.json and require
+      # .env.sbx) come up correctly.
+      - name: Bring up sandbox stack
+        run: docker compose -f docker-compose.yml -f docker-compose.sbx.yml up -d
+
+      # No fixed sleep: poll the client service's own healthcheck (defined in
+      # docker-compose.yml) until compose reports it healthy, or fail after a
+      # bounded number of attempts.
+      - name: Wait for client healthcheck
+        run: |
+          for i in $(seq 1 60); do
+            status="$(docker compose -f docker-compose.yml -f docker-compose.sbx.yml ps --format json client | jq -r '.Health // .State')"
+            echo "attempt $i: client status=$status"
+            if [[ "$status" == "healthy" ]]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "client did not become healthy in time"
+          docker compose -f docker-compose.yml -f docker-compose.sbx.yml logs client
+          exit 1
+
+      # Same-origin proxy target required by player-handoff; all-flows mode
+      # (PROOF_FLOW=all) runs every flow in e2e/run.mjs's dispatch order
+      # sequentially in one invocation, isolated per-flow (fresh browser/session
+      # each flow). A flow's fail() calls process.exit(1) directly, so a broken
+      # flow already yields a non-zero exit here with no extra plumbing.
+      - name: Run e2e flow suite
+        run: docker compose -f docker-compose.yml -f docker-compose.sbx.yml run --rm -e PROOF_URL=http://proxy:8080 -e PROOF_FLOW=all proof
+
+      # Screenshots from a broken CI run, inspectable from the Actions UI.
+      - name: Upload artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: ./artifacts/**
+          if-no-files-found: ignore
+
+      # Always tear down, pass or fail, so no dangling containers/volumes are
+      # left on the runner.
+      - name: Tear down sandbox stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.sbx.yml down -v --remove-orphans
+
+  # No `if` here: publish `needs: [test, e2e]`, and a skipped dependency (either
+  # job, when the gate said not a bump) skips this job too. It only runs when
+  # both test and e2e ran and passed.
   publish:
-    needs: test
+    needs: [test, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read
