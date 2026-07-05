@@ -41,11 +41,19 @@ prompt file must start with frontmatter containing at least:
 prompt_id: <uuidv7>
 target_agent: <agent>
 effort_path: <effort-spec-path>
-output_path: <effort-dir>/.outputs/<uuidv7>.md
+output_path: <effort-dir>/.outputs/<output-uuidv7>.md
 base_tag: handoff/<prompt_id>
 session_name: <deepest-effort-slug>.<...>.<root-effort-slug>.<utcmillis>
 ---
 ```
+
+`prompt_id` and the uuidv7 embedded in `output_path` (`<output-uuidv7>`) are
+**two separate freshly-generated UUIDv7s**, decided by the orchestrator up
+front before writing the prompt file — never reuse `prompt_id` as the output
+filename. This keeps the `.prompts/<uuidv7>.md` and `.outputs/<uuidv7>.md`
+filenames independently unique and independently sortable, even though the
+frontmatter still links them (`output_path` declared inside the prompt is the
+request/response link, not a shared id).
 
 `session_name` is the effort's slug chain, **deepest subeffort first** (the
 reverse of the directory path), dot-separated, with the UTC-millis timestamp of
