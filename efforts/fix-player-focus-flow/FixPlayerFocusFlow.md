@@ -73,7 +73,7 @@ the first card that has one (see `e2e/flows/player-uat.mjs` lines ~85-108).
    after the button is located and clicked (dialog focus, scroll lock,
    iframe mount, Space no-op behavior, Escape close/scroll-restore all
    verified identically to before).
-2. [ ] [proof](./.proofs/019f307b-b4d9-7c81-b3c3-32683aa3ffea.md) the fixed
+2. [x] [proof](./.proofs/019f307b-b4d9-7c81-b3c3-32683aa3ffea.md) the fixed
    flow passes against the running sandbox stack in both of the following
    states, run via `PROOF_FLOW=player-focus ./scripts/sbx.sh run --rm proof`:
    (a) the clean/default sandbox state with a single resumable card, and (b)
