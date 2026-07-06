@@ -103,7 +103,7 @@ in-process from a test.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/019f3495-1612-71cf-8d95-2b9d125396e1.md) A golden
+1. [x] [proof](./.proofs/019f3495-1612-71cf-8d95-2b9d125396e1.md) A golden
    -value regression test exists (in `src/server/partyKey.test.ts` or a
    new file) that computes `derivePartyKey` for one or more fixed viewer-id
    inputs and asserts the result equals a specific, pre-computed, hard-coded
@@ -112,7 +112,7 @@ in-process from a test.
    a different value locally causes this new test (and only tests that
    depend on the namespace) to fail, confirming the test actually pins the
    constant rather than passing vacuously.
-2. [ ] [proof](./.proofs/019f3495-3105-7457-bb87-42d041ade278.md) An
+2. [x] [proof](./.proofs/019f3495-3105-7457-bb87-42d041ade278.md) An
    automated, in-process HTTP-route-level test exists proving each
    `/api/group*` alias is wired to the identical handler as its `/api/party*`
    counterpart with agreeing response bodies for the same input, covering at
@@ -125,7 +125,7 @@ in-process from a test.
    ephemeral listener vs. any additive `server.ts` seam extraction), why it
    fits or extends the existing `src/server/*.test.ts` conventions, and
    confirms no existing route, handler, or startup behavior changed.
-3. [ ] [proof](./.proofs/019f3495-4bd6-7296-a123-1c219ddab732.md) A fresh
+3. [x] [proof](./.proofs/019f3495-4bd6-7296-a123-1c219ddab732.md) A fresh
    `docker compose run --rm check` and `docker compose run --rm test` run
    from this effort's own branch/worktree is green: zero typecheck errors,
    and the full unit-test run passes with both new tests included and no
