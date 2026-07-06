@@ -64,7 +64,7 @@ the first card that has one (see `e2e/flows/player-uat.mjs` lines ~85-108).
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/019f307b-9663-7ef8-b19e-00344091e9f9.md)
+1. [x] [proof](./.proofs/019f307b-9663-7ef8-b19e-00344091e9f9.md)
    `player-focus.mjs`'s Play/Resume button lookup is rewritten to scope the
    search to a single chosen `.media-card` at a time (mirroring
    `player-uat.mjs`'s `nth(index)` iteration picking the first card whose
