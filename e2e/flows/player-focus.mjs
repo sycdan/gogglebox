@@ -19,10 +19,26 @@ export async function run(page, ctx) {
     fail('player-focus: no media cards appeared (library empty?)', error);
   }
 
-  const playButton = page
-    .locator('.media-card button', { hasText: /^Play$/ })
-    .first()
-    .or(page.locator('.media-card button', { hasText: /^Resume$/ }).first());
+  // Scope the Play/Resume search to ONE specific card at a time (never a
+  // page-wide button locator with .or(), which becomes an ambiguous
+  // Playwright strict-mode match once more than one .media-card
+  // simultaneously has a visible Play/Resume button). Mirrors
+  // e2e/flows/player-uat.mjs's per-card-scoped nth(index) pattern.
+  const cardCount = await page.locator('.media-card').count();
+  let playButton = null;
+  for (let index = 0; index < cardCount; index += 1) {
+    const card = page.locator('.media-card').nth(index);
+    const button = card.locator('button', { hasText: /^(Play|Resume)$/ }).first();
+    if (await button.count().then((n) => n > 0)) {
+      playButton = button;
+      break;
+    }
+  }
+
+  if (!playButton) {
+    await shootView(page, `${flowName}-03-no-play-button`);
+    fail('player-focus: found no Play/Resume button to open the modal');
+  }
 
   try {
     await playButton.waitFor({ state: 'visible', timeout: 10_000 });
