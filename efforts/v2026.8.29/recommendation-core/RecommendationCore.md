@@ -21,6 +21,6 @@ strategy internals.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/019f2aa8-493f-7133-bde8-7c73e61e8d6d.md) that the effort documents the first recommendation strategy, including inputs, ranking rules, and expected API response shape.
-2. [ ] [proof](./.proofs/019f2aa8-4941-7582-a896-943dd69b5c03.md) that the backend exposes a recommendation endpoint that returns deterministic recommendations for a seeded sandbox dataset.
-3. [ ] [proof](./.proofs/019f2aa8-4943-74fe-9945-dad3754c53a2.md) that each recommendation response item includes enough structured explanation data for the client to render a user-facing reason.
+1. [ ] [proof](./.artifacts/019f2aa8-493f-7133-bde8-7c73e61e8d6d-proof.md) that the effort documents the first recommendation strategy, including inputs, ranking rules, and expected API response shape.
+2. [ ] [proof](./.artifacts/019f2aa8-4941-7582-a896-943dd69b5c03-proof.md) that the backend exposes a recommendation endpoint that returns deterministic recommendations for a seeded sandbox dataset.
+3. [ ] [proof](./.artifacts/019f2aa8-4943-74fe-9945-dad3754c53a2-proof.md) that each recommendation response item includes enough structured explanation data for the client to render a user-facing reason.

@@ -24,7 +24,7 @@ episodes from that specific show.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/019f2aa8-4939-7df8-b837-de245fa41849.md) that clicking a show title anywhere it appears opens an accessible show modal without breaking the current page state behind it.
-2. [ ] [proof](./.proofs/019f2aa8-493a-7ef9-958a-cfcc7486cdd8.md) that the modal lists episodes grouped or filterable by season and supports selecting a season button to narrow the visible episode list.
-3. [ ] [proof](./.proofs/019f2aa8-493c-7830-b953-38a8a7ed72ab.md) that each visible episode row shows the watched or unwatched state for every watcher in the active group.
-4. [ ] [proof](./.proofs/019f2aa8-493e-7583-8889-4e701cc2bc20.md) that Jellyfin search can find episodes by keyword scoped to one specific show without surfacing episodes from other shows or becoming a global discovery rail search.
+1. [ ] [proof](./.artifacts/019f2aa8-4939-7df8-b837-de245fa41849-proof.md) that clicking a show title anywhere it appears opens an accessible show modal without breaking the current page state behind it.
+2. [ ] [proof](./.artifacts/019f2aa8-493a-7ef9-958a-cfcc7486cdd8-proof.md) that the modal lists episodes grouped or filterable by season and supports selecting a season button to narrow the visible episode list.
+3. [ ] [proof](./.artifacts/019f2aa8-493c-7830-b953-38a8a7ed72ab-proof.md) that each visible episode row shows the watched or unwatched state for every watcher in the active group.
+4. [ ] [proof](./.artifacts/019f2aa8-493e-7583-8889-4e701cc2bc20-proof.md) that Jellyfin search can find episodes by keyword scoped to one specific show without surfacing episodes from other shows or becoming a global discovery rail search.

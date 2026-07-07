@@ -27,7 +27,7 @@ had mutated watched/continue-watching state) and once standalone via
 `PROOF_FLOW=player-focus` against the exact same sandbox state — confirming
 it is a flow-authoring bug in `player-focus.mjs` itself, not an all-flows
 isolation/harness regression. See
-`efforts/release-e2e-gate/.outputs/019f301a-1c2b-75ac-be64-a8f5e4d4ff49.md`
+`efforts/release-e2e-gate/.artifacts/019f301a-1c2b-75ac-be64-a8f5e4d4ff49-output.md`
 for the full repro record.
 
 `e2e/flows/player-uat.mjs` already documents this exact class of bug in its
@@ -64,7 +64,7 @@ the first card that has one (see `e2e/flows/player-uat.mjs` lines ~85-108).
 
 ## Acceptance Criteria
 
-1. [x] [proof](./.proofs/019f307b-9663-7ef8-b19e-00344091e9f9.md)
+1. [x] [proof](./.artifacts/019f307b-9663-7ef8-b19e-00344091e9f9-proof.md)
    `player-focus.mjs`'s Play/Resume button lookup is rewritten to scope the
    search to a single chosen `.media-card` at a time (mirroring
    `player-uat.mjs`'s `nth(index)` iteration picking the first card whose
@@ -73,7 +73,7 @@ the first card that has one (see `e2e/flows/player-uat.mjs` lines ~85-108).
    after the button is located and clicked (dialog focus, scroll lock,
    iframe mount, Space no-op behavior, Escape close/scroll-restore all
    verified identically to before).
-2. [x] [proof](./.proofs/019f307b-b4d9-7c81-b3c3-32683aa3ffea.md) the fixed
+2. [x] [proof](./.artifacts/019f307b-b4d9-7c81-b3c3-32683aa3ffea-proof.md) the fixed
    flow passes against the running sandbox stack in both of the following
    states, run via `PROOF_FLOW=player-focus ./scripts/sbx.sh run --rm proof`:
    (a) the clean/default sandbox state with a single resumable card, and (b)

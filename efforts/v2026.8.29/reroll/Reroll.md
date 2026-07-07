@@ -19,6 +19,6 @@ the currently available and enabled channels.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.proofs/019f2aa8-492a-7fcd-bf0a-8e09dbd49299.md) that the recommendation rail has a dice action for rerolling results.
-2. [ ] [proof](./.proofs/019f2aa8-492b-7fdb-9e5a-3e519461a0b4.md) that reroll returns a different recommendation set across repeated uses when the seeded sandbox has enough eligible items.
-3. [ ] [proof](./.proofs/019f2aa8-492d-7967-866a-eeed2808eb5b.md) that reroll only draws from currently enabled recommendation channels.
+1. [ ] [proof](./.artifacts/019f2aa8-492a-7fcd-bf0a-8e09dbd49299-proof.md) that the recommendation rail has a dice action for rerolling results.
+2. [ ] [proof](./.artifacts/019f2aa8-492b-7fdb-9e5a-3e519461a0b4-proof.md) that reroll returns a different recommendation set across repeated uses when the seeded sandbox has enough eligible items.
+3. [ ] [proof](./.artifacts/019f2aa8-492d-7967-866a-eeed2808eb5b-proof.md) that reroll only draws from currently enabled recommendation channels.

@@ -1,0 +1,68 @@
+---
+prompt_id: 019f33e6-efcc-782f-8ae5-cdf5aa22ef18
+target_agent: gogglebox-prover
+effort_path: efforts/rename-group-to-party/RenameGroupToParty.md
+output_path: efforts/rename-group-to-party/.artifacts/019f33e7-0756-7b78-a6a2-f824c565b1f7-output.md
+base_tag: handoff/019f33e6-efcc-782f-8ae5-cdf5aa22ef18
+session_name: rename-group-to-party.1783282207259
+---
+
+First, `cd` into `./sessions/rename-group-to-party.1783282207259` and do all
+commands from there.
+
+## Effort
+
+Read `efforts/rename-group-to-party/RenameGroupToParty.md` in full. Read prior
+phase outputs at
+`efforts/rename-group-to-party/.artifacts/019f33b8-bcab-7de3-9b20-ccc8bf0dfc57-output.md`
+(builder: implemented group->party rename, renamed e2e flows to
+`e2e/flows/party-alias.mjs` and `e2e/flows/party-pin.mjs`) and
+`efforts/rename-group-to-party/.artifacts/019f33e2-5c9b-73fc-8082-3ec70b50e197-output.md`
+(verifier: typecheck + unit tests pass).
+
+## Your phase: visual proof (remainder of AC5, plus evidence for AC1)
+
+AC5 requires "at least one visual proof that the party language appears in
+the running UI." AC1 requires party terminology in user-visible copy,
+navigation, form labels, and empty states.
+
+Bring up the sandbox stack (`./scripts/sbx.sh up -d`, provision if needed per
+`tools/sandbox/README.md`), then run the renamed e2e proof flows against it
+with a shared `PROOF_RUN_ID`, at minimum:
+
+```bash
+PROOF_RUN_ID=<pick one> ./scripts/sbx.sh run --rm -e PROOF_FLOW=party-alias proof
+PROOF_RUN_ID=<same> ./scripts/sbx.sh run --rm -e PROOF_FLOW=party-pin proof
+```
+
+Read the resulting PNGs under `./artifacts/<PROOF_RUN_ID>/...` to confirm the
+UI shows party language (e.g. "Pick the party", "Saved parties", "Party
+picks") with no leftover "group" text in user-facing copy.
+
+Copy the relevant screenshots from `./artifacts` into
+`efforts/rename-group-to-party/.artifacts/` (create the directory if absent) —
+`./artifacts` is gitignored and won't survive session teardown, so a proof
+doc that still points there is not durable evidence.
+
+Write two proof docs:
+
+- `efforts/rename-group-to-party/.artifacts/019f2aa8-4918-7f02-84c7-b04208e85468-proof.md`
+  (AC5) — describe the full verification chain: typecheck/unit test pass
+  (cite the verifier output above), and the visual proof screenshots you
+  copied in, with your description of what each shows.
+- `efforts/rename-group-to-party/.artifacts/019f2aa8-4912-7399-87c4-c849a4287ff5-proof.md`
+  (AC1) — describe how the same (or additional) screenshots demonstrate
+  party terminology in user-visible copy, nav, labels, and empty states.
+
+Both proof docs must reference the copied-in `.artifacts/` image paths, never
+`./artifacts`.
+
+You are read-only on source — do not edit anything under `src/`. You may only
+write inside `./efforts/rename-group-to-party/.artifacts/` and your declared
+output file.
+
+## Output
+
+Write your phase summary (what you ran, what you saw, which proof docs you
+created, any party/group copy inconsistencies you noticed in the running UI)
+to `efforts/rename-group-to-party/.artifacts/019f33e7-0756-7b78-a6a2-f824c565b1f7-output.md`.

@@ -33,7 +33,7 @@ effort specs only when the evidence is sufficient.
 - If proof is incomplete, ambiguous, stale, or only asserted in chat, leave the
   criterion unchecked and explain what evidence is missing.
 - A proof doc whose cited screenshot path resolves outside its own
-  `.proofs/` directory (most commonly still pointing at gitignored
+  `.artifacts/` directory (most commonly still pointing at gitignored
   `./artifacts/...`) is insufficient — that evidence will not survive the
   producing session's worktree being torn down. Leave the criterion unchecked
   and say so explicitly.
@@ -50,7 +50,7 @@ effort specs only when the evidence is sufficient.
 
 ## Output File
 
-The `.outputs/<uuidv7>.md` summary must include:
+The `.artifacts/<uuidv7>-output.md` summary must include:
 
 - `status`: pass | partial | fail
 - `effort`: path to the effort spec

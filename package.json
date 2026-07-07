@@ -16,7 +16,6 @@
     "test:e2e:real": "RUN_REAL_E2E=1 tsx --test src/server/*.real.e2e.test.ts",
     "test:all": "npm run test && npm run test:e2e:real",
     "gen:config-example": "tsx scripts/gen-config-example.mjs",
-    "gen:uuid7": "tsx scripts/gen-uuid7.mjs",
     "start": "node dist/server/server.js"
   },
   "keywords": [],

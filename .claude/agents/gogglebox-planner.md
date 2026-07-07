@@ -32,16 +32,16 @@ Your only job is to create or refine work-to-be-done under `./efforts`.
 - Every effort must have at least one acceptance criterion.
 - The acceptance criteria are ordered. Each item must be sequenced in
   the order work should be proven and must include exactly one unique generated
-  UUIDv7 proof link in this exact style: `[proof](./.proofs/<uuidv7>.md)`.
+  UUIDv7 proof link in this exact style: `[proof](./.artifacts/<uuidv7>-proof.md)`.
 - An acceptance criterion may require that a subeffort is done; when it does,
   start that same checklist item with the proof link and link the subeffort slug
   in the sentence, for example:
-  `1. [ ] [proof](./.proofs/<uuidv7>.md) that [account-access-tokens](./account-access-tokens/AccountAccessTokens.md) is done`.
+  `1. [ ] [proof](./.artifacts/<uuidv7>.md) that [account-access-tokens](./account-access-tokens/AccountAccessTokens.md) is done`.
 - Acceptance criteria do not have to be subeffort dependencies; any provable
   criterion is valid.
-- Proof files live under the effort's hidden `.proofs/` metadata directory, so
+- Proof files live under the effort's hidden `.artifacts/` metadata directory, so
   non-hidden directories inside an effort are always subefforts. Create a
-  placeholder such as `.proofs/.gitkeep` if the directory would otherwise be
+  placeholder such as `.artifacts/.gitkeep` if the directory would otherwise be
   empty.
 
 ## Done Model
