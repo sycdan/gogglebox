@@ -307,7 +307,12 @@ export class JellyfinClient {
     return data.Items.map((item) => this.toLibraryItem(item, kind));
   }
 
-  async listEpisodes(seriesId: string): Promise<EpisodeItem[]> {
+  // Episodes of a single series, optionally keyword-filtered. `ParentId` scopes
+  // EVERY call (including the searchTerm branch) to this one seriesId, so a
+  // keyword search here can never surface episodes from other shows — Jellyfin
+  // applies SearchTerm as an additional filter on top of the ParentId scope,
+  // it never widens the result set beyond it.
+  async listEpisodes(seriesId: string, searchTerm?: string): Promise<EpisodeItem[]> {
     const query = new URLSearchParams({
       Recursive: 'true',
       ParentId: seriesId,
@@ -316,6 +321,10 @@ export class JellyfinClient {
       IncludeItemTypes: 'Episode',
       Fields: 'Overview,RunTimeTicks,ImageTags,SeriesId,SeriesName,ParentIndexNumber,IndexNumber',
     });
+
+    if (searchTerm) {
+      query.set('SearchTerm', searchTerm);
+    }
 
     const data = await this.request<JellyfinListResponse<JellyfinItem>>('/Items', query);
     return data.Items.map((item) => this.toEpisodeItem(item));

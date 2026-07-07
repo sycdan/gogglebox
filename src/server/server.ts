@@ -23,7 +23,7 @@ import {
 } from './continueWatching';
 import { derivePartyKey } from './partyKey';
 import { buildPartyAlias, resolvePartyForMembers, visiblePartiesForAccount } from './parties';
-import { JellyfinClient } from './jellyfin';
+import { EpisodeItem, JellyfinClient } from './jellyfin';
 import {
   AccountV2,
   AppConfig,
@@ -34,6 +34,13 @@ import {
   ViewerWatchedState,
 } from './types';
 import { computeWatchedFanout } from './watchedFanout';
+
+// An episode row plus each active viewer's watched state for it — the shape
+// GET /api/shows/:seriesId/episodes returns so the show detail modal can show
+// per-watcher seen/unseen per episode (Show Detail Browser AC3).
+export interface EpisodeItemWithWatched extends EpisodeItem {
+  viewerWatched: ViewerWatchedState[];
+}
 
 const config = loadConfig();
 const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
@@ -236,6 +243,29 @@ async function withViewerWatchedState(
   );
 }
 
+// Attach, per episode row (show detail modal), each active viewer's played
+// state for that exact episode item. Same live-read-from-Jellyfin approach as
+// withViewerWatchedState above, just generalized to EpisodeItem (Show Detail
+// Browser AC3 — never edits state, only reads it).
+async function withEpisodeViewerWatchedState(
+  episodes: EpisodeItem[],
+  viewers: FamilyMember[],
+): Promise<EpisodeItemWithWatched[]> {
+  return Promise.all(
+    episodes.map(async (episode) => {
+      const viewerWatched: ViewerWatchedState[] = await Promise.all(
+        viewers.map(async (viewer) => ({
+          viewerId: viewer.id,
+          viewerName: viewer.name,
+          avatarUrl: viewer.avatarUrl ?? null,
+          watched: await jellyfin.getItemPlayedState(viewer.jellyfinUserId, episode.id),
+        })),
+      );
+      return { ...episode, viewerWatched };
+    }),
+  );
+}
+
 // Build the Express app and wire every route onto it. Extracted into a
 // function (rather than acting directly on a module-level `app`) so an
 // in-process test can construct a fresh app instance from injected
@@ -419,6 +449,29 @@ export function createApp(
           })),
         );
         return { ...item, viewerWatched };
+      }),
+    );
+  }
+
+  // Attach, per episode row (show detail modal), each active viewer's played
+  // state for that exact episode item. Same live-read-from-Jellyfin approach as
+  // withViewerWatchedState above, just generalized to EpisodeItem (Show Detail
+  // Browser AC3 — never edits state, only reads it).
+  async function withEpisodeViewerWatchedState(
+    episodes: EpisodeItem[],
+    viewers: FamilyMember[],
+  ): Promise<EpisodeItemWithWatched[]> {
+    return Promise.all(
+      episodes.map(async (episode) => {
+        const viewerWatched: ViewerWatchedState[] = await Promise.all(
+          viewers.map(async (viewer) => ({
+            viewerId: viewer.id,
+            viewerName: viewer.name,
+            avatarUrl: viewer.avatarUrl ?? null,
+            watched: await jellyfin.getItemPlayedState(viewer.jellyfinUserId, episode.id),
+          })),
+        );
+        return { ...episode, viewerWatched };
       }),
     );
   }
@@ -770,11 +823,20 @@ export function createApp(
     res.json({ items });
   });
 
+  // The show detail modal's episode list: every episode of one series
+  // (grouped/filtered by season client-side), each carrying every active
+  // viewer's watched state (AC3). An optional `q` scopes a keyword search to
+  // THIS series only (AC4) — jellyfin.listEpisodes always sets ParentId, so a
+  // keyword search here can never surface another show's episodes and is not a
+  // general/global search endpoint.
   app.get('/api/shows/:seriesId/episodes', requireAuth, requireViewerParty, async (req, res) => {
     try {
       const seriesId = Array.isArray(req.params.seriesId) ? req.params.seriesId[0] : req.params.seriesId;
-      const episodes = await jellyfin.listEpisodes(seriesId);
-      res.json({ items: episodes });
+      const searchTerm = typeof req.query.q === 'string' && req.query.q.trim() ? req.query.q.trim() : undefined;
+      const viewers = activeViewersForSession(req);
+      const episodes = await jellyfin.listEpisodes(seriesId, searchTerm);
+      const items = await withEpisodeViewerWatchedState(episodes, viewers);
+      res.json({ items });
     } catch (error) {
       res.status(502).json({ error: error instanceof Error ? error.message : 'Could not load episodes' });
     }

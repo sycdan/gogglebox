@@ -313,3 +313,105 @@ test('GET /api/session returns activePartyAlias and activeGroupAlias with equal 
     await testServer.close();
   }
 });
+
+interface EpisodeWithWatchedResponse {
+  id: string;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  viewerWatched: { viewerId: string; viewerName: string; watched: boolean }[];
+}
+
+// Show Detail Browser AC3 + AC4: GET /api/shows/:seriesId/episodes attaches
+// every active party viewer's watched state per episode row, and an optional
+// `q` scopes a keyword search to ONLY this series (proven here by asserting
+// the stubbed Jellyfin request always carries ParentId=series1, with/without
+// SearchTerm). Stubs global fetch so no live Jellyfin is required.
+test('GET /api/shows/:seriesId/episodes returns per-viewer watched state and scopes q to the series', async () => {
+  const config = buildConfig();
+  const appState = new AppState(tempStatePath());
+  const partyKey = derivePartyKey([ALICE.jellyfinUserId, BOB.jellyfinUserId]);
+  appState.setPartyPlayerUser(partyKey, 'jf-party-user', [ALICE.jellyfinUserId, BOB.jellyfinUserId]);
+
+  const originalFetch = globalThis.fetch;
+  const requestedUrls: URL[] = [];
+
+  globalThis.fetch = (async (input: URL | string, init?: RequestInit) => {
+    const url = new URL(String(input));
+
+    // Only intercept calls aimed at the (fake) Jellyfin base URL — requests the
+    // test itself makes to the ephemeral test-server listener must reach the
+    // REAL fetch, or login()/the party POST below would never complete.
+    if (url.origin !== 'http://jellyfin.invalid') {
+      return originalFetch(input, init);
+    }
+    requestedUrls.push(url);
+
+    if (url.pathname === '/Items' && url.searchParams.get('IncludeItemTypes') === 'Episode') {
+      return new Response(
+        JSON.stringify({
+          Items: [
+            {
+              Id: 'ep1',
+              Name: 'Pilot',
+              Type: 'Episode',
+              SeriesId: 'series1',
+              SeriesName: 'Series One',
+              ParentIndexNumber: 1,
+              IndexNumber: 1,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    // getItemPlayedState reads /Users/{userId}/Items?Ids=... — Alice has seen
+    // it, Bob hasn't, proving the per-viewer (not per-party-union) shape.
+    if (url.pathname === '/Users/alice/Items') {
+      return new Response(
+        JSON.stringify({ Items: [{ Id: 'ep1', UserData: { Played: true } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    if (url.pathname === '/Users/bob/Items') {
+      return new Response(
+        JSON.stringify({ Items: [{ Id: 'ep1', UserData: { Played: false } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    throw new Error(`Unexpected Jellyfin request in test: ${url}`);
+  }) as typeof fetch;
+
+  const testServer = await startTestServer(config, appState);
+  try {
+    const cookie = await login(testServer.baseUrl, 'test-token');
+    await fetch(`${testServer.baseUrl}/api/party`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ memberIds: [ALICE.id, BOB.id] }),
+    });
+
+    const res = await fetch(`${testServer.baseUrl}/api/shows/series1/episodes?q=pilot`, { headers: { cookie } });
+    const body = await json<{ items: EpisodeWithWatchedResponse[] }>(res);
+
+    assert.equal(res.status, 200);
+    assert.equal(body.items.length, 1);
+    const [episode] = body.items;
+    assert.equal(episode.id, 'ep1');
+    assert.equal(episode.viewerWatched.length, 2);
+    assert.equal(episode.viewerWatched.find((viewer) => viewer.viewerId === ALICE.id)?.watched, true);
+    assert.equal(episode.viewerWatched.find((viewer) => viewer.viewerId === BOB.id)?.watched, false);
+
+    // The episode list request scoped BOTH ParentId (the series) and the
+    // keyword — proving the search never widens beyond this one show.
+    const episodesRequest = requestedUrls.find(
+      (url) => url.pathname === '/Items' && url.searchParams.get('IncludeItemTypes') === 'Episode',
+    );
+    assert.equal(episodesRequest?.searchParams.get('ParentId'), 'series1');
+    assert.equal(episodesRequest?.searchParams.get('SearchTerm'), 'pilot');
+  } finally {
+    await testServer.close();
+    globalThis.fetch = originalFetch;
+  }
+});

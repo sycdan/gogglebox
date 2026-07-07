@@ -63,6 +63,9 @@ interface EpisodeItem {
   runtimeMinutes: number | null;
   overview: string;
   imageUrl: string | null;
+  // Every active viewer's watched state for this exact episode (display-only —
+  // the show detail modal never edits watched state from here).
+  viewerWatched?: ViewerWatchedState[];
 }
 
 interface ActivePlaybackItem {
@@ -382,9 +385,23 @@ export function App() {
   const shownRecommendationIdsRef = useRef<Set<string>>(new Set());
   const [ignoredItems, setIgnoredItems] = useState<IgnoredItem[]>([]);
   const [ignoredOpen, setIgnoredOpen] = useState(false);
-  const [selectedSeries, setSelectedSeries] = useState<LibraryItem | null>(null);
+  // The show detail modal's target series — just enough to load + label its
+  // episodes. Deliberately NOT the full LibraryItem: continue-watching cards
+  // (which only carry seriesId/seriesName) open the same modal, so the shape
+  // has to cover both a library card (id/name) and a continue-watching card
+  // (seriesId/seriesName).
+  const [selectedSeries, setSelectedSeries] = useState<{ id: string; name: string } | null>(null);
   const [episodes, setEpisodes] = useState<EpisodeItem[]>([]);
   const [episodesLoading, setEpisodesLoading] = useState(false);
+  // Season filter for the open show modal: null shows every season. Reset
+  // whenever a different show opens (see openShowDetail).
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  // Keyword search scoped to the currently-open show's episodes only (AC4) —
+  // separate state from the top-level library search so it never becomes a
+  // global/discovery-rail search.
+  const [episodeSearchQuery, setEpisodeSearchQuery] = useState('');
+  const episodeSearchRequestIdRef = useRef(0);
+  const showModalRef = useRef<HTMLDivElement | null>(null);
   const [playingItem, setPlayingItem] = useState<ActivePlaybackItem | null>(null);
   const [playerStarted, setPlayerStarted] = useState(false);
   const [playerNeedsUserStart, setPlayerNeedsUserStart] = useState(false);
@@ -662,6 +679,25 @@ export function App() {
 
     return () => window.clearTimeout(timer);
   }, [session?.authenticated, searchQuery, kind, genre, kidsOnly]);
+
+  // Debounced keyword search scoped to the OPEN show's episodes only (AC4) —
+  // a separate effect/state from the top-level library search above, so this
+  // can never widen into a global/cross-show search. Re-fetches the full
+  // (unfiltered) episode list when the query is cleared.
+  useEffect(() => {
+    if (!selectedSeries) {
+      return;
+    }
+
+    const seriesId = selectedSeries.id;
+    const trimmedQuery = episodeSearchQuery.trim();
+    const timer = window.setTimeout(() => {
+      void loadEpisodesFor(seriesId, trimmedQuery);
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSeries?.id, episodeSearchQuery]);
 
   // Boot auto-login, tried once per page load when the session says not
   // authenticated: (1) a stored localStorage token (removed if it fails), then
@@ -1024,20 +1060,56 @@ export function App() {
     }
   }
 
-  async function openEpisodes(series: LibraryItem) {
+  // Fetch one series' episodes, optionally keyword-scoped to THIS series (AC4).
+  // Sequenced with a request id so a stale in-flight search can never clobber a
+  // fresher one (same pattern as the top-level library search).
+  async function loadEpisodesFor(seriesId: string, searchTerm: string) {
+    const requestId = (episodeSearchRequestIdRef.current += 1);
     try {
       setEpisodesLoading(true);
-      setError(null);
-      setSelectedSeries(series);
-      const response = await apiRequest<{ items: EpisodeItem[] }>(`/api/shows/${series.id}/episodes`);
+      const params = new URLSearchParams();
+      if (searchTerm.trim()) {
+        params.set('q', searchTerm.trim());
+      }
+      const query = params.toString();
+      const response = await apiRequest<{ items: EpisodeItem[] }>(
+        `/api/shows/${seriesId}/episodes${query ? `?${query}` : ''}`,
+      );
+      if (requestId !== episodeSearchRequestIdRef.current) {
+        return;
+      }
       setEpisodes(response.items);
     } catch (nextError) {
-      setSelectedSeries(null);
+      if (requestId !== episodeSearchRequestIdRef.current) {
+        return;
+      }
       setEpisodes([]);
       setError(nextError instanceof Error ? nextError.message : 'Could not load episodes');
     } finally {
-      setEpisodesLoading(false);
+      if (requestId === episodeSearchRequestIdRef.current) {
+        setEpisodesLoading(false);
+      }
     }
+  }
+
+  // Open the show detail modal for any clickable show title (media card,
+  // continue-watching card, etc.) — accepts just id/name so every call site
+  // works whether it has a full LibraryItem or only a seriesId/seriesName.
+  // Purely additive local-state open: it never touches the page's own
+  // list/query state behind it (AC1).
+  async function openShowDetail(series: { id: string; name: string }) {
+    setSelectedSeries(series);
+    setSelectedSeason(null);
+    setEpisodeSearchQuery('');
+    setError(null);
+    await loadEpisodesFor(series.id, '');
+  }
+
+  function closeShowDetail() {
+    setSelectedSeries(null);
+    setEpisodes([]);
+    setSelectedSeason(null);
+    setEpisodeSearchQuery('');
   }
 
   async function openPlayback({
@@ -1191,6 +1263,33 @@ export function App() {
       document.body.style.overflow = previousOverflow;
     };
   }, [playingItem]);
+
+  // Accessible show detail modal: focus moves INTO the dialog on open (so
+  // screen readers land on it) and Escape closes it, without touching the page
+  // state behind it (AC1) — same pattern as the player modal above.
+  useEffect(() => {
+    if (!selectedSeries) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const raf = window.requestAnimationFrame(() => showModalRef.current?.focus());
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeShowDetail();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSeries?.id]);
 
   const clickJellyfinPlayControl = useCallback((reason: string): boolean => {
     const frame = playerFrameRef.current;
@@ -1759,12 +1858,24 @@ export function App() {
                 </div>
                 <p className="meta">
                   {item.type === 'show'
-                    ? [
-                      item.seriesName,
-                      item.seasonNumber && item.episodeNumber
-                        ? `S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}`
-                        : null,
-                    ].filter(Boolean).join(' • ')
+                    ? (
+                      <>
+                        {item.seriesId && item.seriesName ? (
+                          <button
+                            className="link-title link-title-inline"
+                            onClick={() => void openShowDetail({ id: item.seriesId as string, name: item.seriesName as string })}
+                            type="button"
+                          >
+                            {item.seriesName}
+                          </button>
+                        ) : (
+                          item.seriesName
+                        )}
+                        {item.seasonNumber && item.episodeNumber
+                          ? ` • S${String(item.seasonNumber).padStart(2, '0')}E${String(item.episodeNumber).padStart(2, '0')}`
+                          : null}
+                      </>
+                    )
                     : [item.year, item.runtimeMinutes ? `${item.runtimeMinutes} min` : null].filter(Boolean).join(' • ')}
                 </p>
                 <p className="overview">{item.overview || 'No synopsis available.'}</p>
@@ -1877,7 +1988,7 @@ export function App() {
                 item={item}
                 onMarkWatched={markWatched}
                 onPlay={openPlayback}
-                onOpenEpisodes={openEpisodes}
+                onOpenShowDetail={openShowDetail}
                 onIgnore={ignore}
               />
             ))}
@@ -1901,7 +2012,7 @@ export function App() {
                 item={item}
                 onMarkWatched={markWatched}
                 onPlay={openPlayback}
-                onOpenEpisodes={openEpisodes}
+                onOpenShowDetail={openShowDetail}
                 onIgnore={ignore}
               />
             ))}
@@ -1913,52 +2024,140 @@ export function App() {
       ) : null}
 
       {selectedSeries ? (
-        <div className="modal-backdrop" onClick={() => setSelectedSeries(null)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-backdrop" onClick={closeShowDetail}>
+          <div
+            ref={showModalRef}
+            className="modal show-detail-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${selectedSeries.name} episodes`}
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="row spread">
               <div>
-                <p className="eyebrow">Episodes</p>
+                <p className="eyebrow">Show</p>
                 <h2>{selectedSeries.name}</h2>
               </div>
-              <button className="ghost" onClick={() => setSelectedSeries(null)} type="button">Close</button>
+              <button className="ghost" onClick={closeShowDetail} type="button">Close</button>
             </div>
-            {episodesLoading ? <p className="muted">Loading episodes…</p> : null}
-            {!episodesLoading && episodes.length === 0 ? <p className="muted">No episodes were found for this series.</p> : null}
-            <div className="episode-list">
-              {episodes.map((episode) => {
-                const label = [
-                  episode.seasonNumber ? `S${String(episode.seasonNumber).padStart(2, '0')}` : null,
-                  episode.episodeNumber ? `E${String(episode.episodeNumber).padStart(2, '0')}` : null,
-                ].filter(Boolean).join(' ');
+            <label className="search-field">
+              <span>Search episodes in {selectedSeries.name}</span>
+              <input
+                type="search"
+                value={episodeSearchQuery}
+                onChange={(event) => setEpisodeSearchQuery(event.target.value)}
+                placeholder="Search by title or keyword…"
+              />
+            </label>
+            {(() => {
+              // Season buttons — grouped/filterable list (AC2). Seasons are
+              // derived from whatever episodes the current keyword search
+              // returned, so the filter row narrows along with search results
+              // instead of showing seasons no longer in view.
+              const seasonNumbers = [...new Set(
+                episodes
+                  .map((episode) => episode.seasonNumber)
+                  .filter((season): season is number => typeof season === 'number'),
+              )].sort((left, right) => left - right);
 
-                return (
-                  <article className="episode-card" key={episode.id}>
-                    <div>
-                      <p className="eyebrow">{label || 'Episode'}</p>
-                      <h3>{episode.name}</h3>
-                      <p className="meta">{episode.runtimeMinutes ? `${episode.runtimeMinutes} min` : 'Runtime unavailable'}</p>
-                      <p className="overview">{episode.overview || 'No synopsis available.'}</p>
-                    </div>
-                    <div className="row">
+              const visibleEpisodes = selectedSeason == null
+                ? episodes
+                : episodes.filter((episode) => episode.seasonNumber === selectedSeason);
+
+              return (
+                <>
+                  {seasonNumbers.length > 0 ? (
+                    <div className="season-filter-row" role="group" aria-label="Filter by season">
                       <button
-                        onClick={() => {
-                          void openPlayback({
-                            id: episode.id,
-                            title: episode.name,
-                            subtitle: `${selectedSeries.name}${label ? ` • ${label}` : ''}`,
-                          });
-                          setSelectedSeries(null);
-                        }}
+                        className={selectedSeason == null ? 'selected' : ''}
+                        onClick={() => setSelectedSeason(null)}
                         type="button"
                       >
-                        Play episode
+                        All seasons
                       </button>
-                      <button className="ghost" onClick={() => void markWatched(episode.id)} type="button">Mark watched</button>
+                      {seasonNumbers.map((season) => (
+                        <button
+                          key={`season-${season}`}
+                          className={selectedSeason === season ? 'selected' : ''}
+                          onClick={() => setSelectedSeason(season)}
+                          type="button"
+                        >
+                          Season {season}
+                        </button>
+                      ))}
                     </div>
-                  </article>
-                );
-              })}
-            </div>
+                  ) : null}
+                  {episodesLoading ? <p className="muted">Loading episodes…</p> : null}
+                  {!episodesLoading && episodes.length === 0 ? (
+                    <p className="muted">
+                      {episodeSearchQuery.trim()
+                        ? `No episodes of ${selectedSeries.name} match “${episodeSearchQuery.trim()}”.`
+                        : 'No episodes were found for this series.'}
+                    </p>
+                  ) : null}
+                  {!episodesLoading && episodes.length > 0 && visibleEpisodes.length === 0 ? (
+                    <p className="muted">No episodes in this season match the current search.</p>
+                  ) : null}
+                  <div className="episode-list">
+                    {visibleEpisodes.map((episode) => {
+                      const label = [
+                        episode.seasonNumber ? `S${String(episode.seasonNumber).padStart(2, '0')}` : null,
+                        episode.episodeNumber ? `E${String(episode.episodeNumber).padStart(2, '0')}` : null,
+                      ].filter(Boolean).join(' ');
+
+                      return (
+                        <article className="episode-card" key={episode.id}>
+                          <div>
+                            <p className="eyebrow">{label || 'Episode'}</p>
+                            <h3>{episode.name}</h3>
+                            <p className="meta">{episode.runtimeMinutes ? `${episode.runtimeMinutes} min` : 'Runtime unavailable'}</p>
+                            <p className="overview">{episode.overview || 'No synopsis available.'}</p>
+                            {/* Per-watcher seen/unseen for THIS episode (AC3) — display-only,
+                                mirrors the continue-watching viewer pills but without a click
+                                handler: this modal never edits watched state. */}
+                            {episode.viewerWatched && episode.viewerWatched.length > 0 ? (
+                              <div className="viewer-pills" aria-label="Watched state per viewer">
+                                {episode.viewerWatched.map((viewer) => (
+                                  <span
+                                    key={viewer.viewerId}
+                                    className={`viewer-pill viewer-pill-static${viewer.watched ? ' watched' : ''}`}
+                                    title={`${viewer.viewerName} — ${viewer.watched ? 'watched' : 'not watched'}`}
+                                  >
+                                    {viewer.avatarUrl ? (
+                                      <img className="viewer-pill-avatar" src={viewer.avatarUrl} alt={viewer.viewerName} />
+                                    ) : (
+                                      <span className="viewer-pill-avatar">{viewer.viewerName.slice(0, 1)}</span>
+                                    )}
+                                    {viewer.watched ? <span className="viewer-pill-check" aria-hidden="true">✓</span> : null}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="row">
+                            <button
+                              onClick={() => {
+                                void openPlayback({
+                                  id: episode.id,
+                                  title: episode.name,
+                                  subtitle: `${selectedSeries.name}${label ? ` • ${label}` : ''}`,
+                                });
+                                closeShowDetail();
+                              }}
+                              type="button"
+                            >
+                              Play episode
+                            </button>
+                            <button className="ghost" onClick={() => void markWatched(episode.id)} type="button">Mark watched</button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}
@@ -2057,15 +2256,19 @@ function MediaCard({
   item,
   onMarkWatched,
   onPlay,
-  onOpenEpisodes,
+  onOpenShowDetail,
   onIgnore,
 }: {
   item: LibraryItem;
   onMarkWatched: (itemId: string) => Promise<void>;
   onPlay: (item: { id: string; title: string }) => Promise<void>;
-  onOpenEpisodes: (series: LibraryItem) => Promise<void>;
+  onOpenShowDetail: (series: { id: string; name: string }) => Promise<void>;
   onIgnore: (item: LibraryItem) => Promise<void>;
 }) {
+  // Shows are actionable by title everywhere they appear (AC1); movies have no
+  // show detail modal, so their title stays plain text.
+  const isShow = item.type === 'show';
+
   return (
     <article className="media-card">
       <div className="poster" style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : undefined}>
@@ -2073,7 +2276,17 @@ function MediaCard({
       </div>
       <div className="media-copy">
         <div className="row spread top-align">
-          <h3>{item.name}</h3>
+          {isShow ? (
+            <button
+              className="link-title"
+              onClick={() => void onOpenShowDetail({ id: item.id, name: item.name })}
+              type="button"
+            >
+              <h3>{item.name}</h3>
+            </button>
+          ) : (
+            <h3>{item.name}</h3>
+          )}
           {item.rating ? <span className="badge">{item.rating.toFixed(1)}</span> : null}
         </div>
         <p className="meta">{[item.year, item.runtimeMinutes ? `${item.runtimeMinutes} min` : null, item.officialRating].filter(Boolean).join(' • ') || 'No metadata yet'}</p>
@@ -2088,7 +2301,7 @@ function MediaCard({
         {item.playable ? (
           <button onClick={() => void onPlay({ id: item.id, title: item.name })} type="button">Play</button>
         ) : (
-          <button onClick={() => void onOpenEpisodes(item)} type="button">Episodes</button>
+          <button onClick={() => void onOpenShowDetail({ id: item.id, name: item.name })} type="button">Episodes</button>
         )}
         <button className="ghost" onClick={() => void onMarkWatched(item.id)} type="button">Mark watched</button>
         <button className="ghost" onClick={() => void onIgnore(item)} type="button">Ignore</button>

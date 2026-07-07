@@ -545,6 +545,54 @@ img.viewer-pill-avatar {
   padding: 0.95rem;
 }
 
+.show-detail-modal {
+  display: grid;
+  gap: 0.9rem;
+}
+
+/* A show title rendered as a button (media card h3, continue-watching series
+   name) — looks like normal text/heading, but is keyboard + screen-reader
+   actionable (AC1). */
+.link-title {
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link-title:hover,
+.link-title:focus-visible {
+  text-decoration: underline;
+}
+
+.link-title-inline {
+  display: inline;
+  font-weight: 700;
+}
+
+.season-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.season-filter-row button {
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Display-only viewer pill (episode rows in the show detail modal) — same look
+   as the interactive continue-watching pill, but not a click target. */
+.viewer-pill-static {
+  cursor: default;
+}
+
 @media (max-width: 820px) {
   .toolbar {
     grid-template-columns: 1fr;

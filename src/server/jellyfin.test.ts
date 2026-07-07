@@ -348,6 +348,40 @@ test('listEpisodes requests episode metadata and maps season info', async () => 
   }
 });
 
+// Show Detail Browser AC4: a keyword search inside one show must stay scoped
+// to that show — never widen into a global/cross-show search. listEpisodes
+// always sets ParentId, and a searchTerm only adds Jellyfin's SearchTerm
+// filter ON TOP of that scope, so this proves both the request shape (both
+// params present together) and that omitting the term omits SearchTerm.
+test('listEpisodes scopes an optional keyword search to the given seriesId (ParentId always set)', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: URL[] = [];
+
+  globalThis.fetch = (async (input: URL | string) => {
+    const url = new URL(String(input));
+    calls.push(url);
+
+    return new Response(JSON.stringify({ Items: [] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const client = new JellyfinClient('https://example.com', 'abc123');
+
+    await client.listEpisodes('series1', 'pilot');
+    assert.equal(calls[0].searchParams.get('ParentId'), 'series1');
+    assert.equal(calls[0].searchParams.get('SearchTerm'), 'pilot');
+
+    await client.listEpisodes('series1');
+    assert.equal(calls[1].searchParams.get('ParentId'), 'series1');
+    assert.equal(calls[1].searchParams.has('SearchTerm'), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('listContinueWatching requests resume endpoint and maps user progress', async () => {
   const originalFetch = globalThis.fetch;
 
