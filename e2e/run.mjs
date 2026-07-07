@@ -54,6 +54,7 @@ import * as markAllWatched from './flows/mark-all-watched.mjs';
 import * as cardOrder from './flows/card-order.mjs';
 import * as movieLeastWatched from './flows/movie-least-watched.mjs';
 import * as showCrossEpisode from './flows/show-cross-episode.mjs';
+import * as showDetailBrowser from './flows/show-detail-browser.mjs';
 import * as railPagination from './flows/rail-pagination.mjs';
 import * as playerHandoff from './flows/player-handoff.mjs';
 import * as playerUat from './flows/player-uat.mjs';
@@ -80,6 +81,7 @@ const flows = [
   { name: 'card-order', mod: cardOrder },
   { name: 'movie-least-watched', mod: movieLeastWatched },
   { name: 'show-cross-episode', mod: showCrossEpisode },
+  { name: 'show-detail-browser', mod: showDetailBrowser },
   { name: 'rail-pagination', mod: railPagination },
 ];
 
