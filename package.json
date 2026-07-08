@@ -1,6 +1,6 @@
 {
   "name": "gogglebox",
-  "version": "2026.7.8-8257637",
+  "version": "2026.7.8-12762575",
   "private": true,
   "description": "LAN-first family media portal for Jellyfin households.",
   "main": "dist/server/server.js",
