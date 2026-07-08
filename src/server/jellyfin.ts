@@ -178,18 +178,24 @@ export class JellyfinClient {
     return parsed;
   }
 
+  // Relative to the /player same-origin proxy mount (see server.ts), NOT
+  // this.baseUrl: the browser fetches this directly, and JELLYFIN_URL is
+  // often a LAN-only host (unreachable from outside the LAN).
+  // Caddy's `handle_path /player/*` strips the prefix and forwards to the
+  // same Jellyfin upstream apiUrl() targets server-side.
   private buildImageUrl(itemId: string, tag?: string): string | null {
     if (!tag) {
       return null;
     }
 
-    const url = this.apiUrl(`/Items/${itemId}/Images/Primary`);
-    url.searchParams.set('quality', '90');
-    url.searchParams.set('fillWidth', '480');
-    url.searchParams.set('fillHeight', '720');
-    url.searchParams.set('tag', tag);
-    url.searchParams.set('api_key', this.apiKey);
-    return url.toString();
+    const params = new URLSearchParams({
+      quality: '90',
+      fillWidth: '480',
+      fillHeight: '720',
+      tag,
+      api_key: this.apiKey,
+    });
+    return `/player/Items/${itemId}/Images/Primary?${params.toString()}`;
   }
 
   private toLibraryItem(item: JellyfinItem, kind: LibraryKind): LibraryItem {
@@ -569,15 +575,14 @@ export class JellyfinClient {
     return out;
   }
 
+  // Same /player-relative rationale as buildImageUrl above.
   private buildUserAvatarUrl(userId: string, tag?: string): string | null {
     if (!tag) {
       return null;
     }
 
-    const url = this.apiUrl(`/Users/${userId}/Images/Primary`);
-    url.searchParams.set('tag', tag);
-    url.searchParams.set('api_key', this.apiKey);
-    return url.toString();
+    const params = new URLSearchParams({ tag, api_key: this.apiKey });
+    return `/player/Users/${userId}/Images/Primary?${params.toString()}`;
   }
 
   async fetchUsers(): Promise<FamilyMember[]> {
