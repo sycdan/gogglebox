@@ -29,9 +29,11 @@ The work backlog lives under [`efforts`](./efforts). Current top-level efforts i
 authentication, persistence, show-detail browsing, and the `v2026.8.29`
 "Judgement Day" discovery work.
 
-Judgement Day is the main product direction: a single responsive discovery rail
-with recommendation channels, reroll controls, and search that filters the rail
-instead of becoming a separate mode. Planned work is described in the effort specs.
+Judgement Day is the main product direction: fact-driven, explainable
+recommendations for the whole room, presented as a finite "tonight's deck"
+(one hero proposal plus an on-deck strip) with controller-first input — log
+in, press Start, and the top pick plays. Planned work is described in the
+effort specs.
 
 ## Deployment
 
