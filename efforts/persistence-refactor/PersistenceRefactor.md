@@ -1,28 +1,30 @@
-# Persistence Refactor
+# Persistence Refactor (Superseded)
 
 ## Overview
 
-Currently we just use plain json files in the bind-mounted data dir on the host.
+**This effort is superseded and will not be done.** The 2026-07 Judgement Day
+design exploration absorbed it into
+[v2026.8.29/signal-facts](../v2026.8.29/signal-facts/SignalFacts.md): durable
+state lands as an append-only JSONL fact log in the state dir. A real database
+is deferred until measured pain — file contention or query slowness, which is
+unlikely before roughly 100k facts. Graph-shaped relationships were rejected
+as unjustified at household scale. See the
+[Judgement Day](../v2026.8.29/V2026.8.29.md) nongoals ledger
+("database-backed persistence").
 
-Explore and add a durable database-backed model for Gogglebox state, with room
-for graph-shaped relationships if that proves useful.
-
-## Goals
-
-- Define which application state belongs in durable storage rather than config
-  or transient memory.
-- Introduce a database layer that can be migrated, inspected and restored from backup safely.
-- Preserve LAN-first deployment simplicity.
-- If port forwards are required, they must be easy for the deployer to override.
+This spec is kept for history only. There is no live work here.
 
 ## Nongoals
 
-- Do not require external hosted database infrastructure.
-- Do not change user-facing behavior without a specific acceptance criterion.
-- Do not open hardcoded ports ont he docker host.
+- Everything previously in scope: the data-model exploration, the
+  database layer, and automated migrations are all withdrawn in favor of the
+  JSONL fact store.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.artifacts/019f2aa8-4925-73d1-b1b6-c5948f4ecbbd-proof.md) that the effort defines the initial data model, including whether graph-shaped relationships are needed and why.
-2. [ ] [proof](./.artifacts/019f2aa8-4927-71e7-b7b8-9b90e4e99815-proof.md) that the app can initialize the chosen local database storage through Docker Compose without requiring host-level database setup.
-3. [ ] [proof](./.artifacts/019f2aa8-4928-7da3-a974-966d8fc479bd-proof.md) that database migrations run automatically and are covered by verification that starts from an empty database and at least one prior schema version.
+The former acceptance criteria (define the initial data model incl. whether
+graph relationships are needed; initialize local database storage via Docker
+Compose; automatic verified migrations) are withdrawn unproven — the effort
+was superseded before any were checked, and no proof will be produced. Its
+durable-storage intent is carried by the signal-facts acceptance criteria
+instead.

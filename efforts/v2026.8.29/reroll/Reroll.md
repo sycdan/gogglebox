@@ -1,24 +1,29 @@
-# Reroll
+# Reroll (Withdrawn)
 
 ## Overview
 
-Add a dice action that requests a fresh randomized set of recommendations from
-the currently available and enabled channels.
+**This effort is dissolved.** The 2026-07 Judgement Day design exploration
+replaced the reroll concept entirely with deck mechanics: a deterministic
+seeded deck dealt from the top-K score-weighted candidates, deck advancement,
+and an explicit "deal new deck" on exhaustion (logged as a strong
+dissatisfaction fact). That resolves the old determinism-vs-reroll
+contradiction. The behavior now lives in
+[recommendation-core](../recommendation-core/RecommendationCore.md) (deck
+contract) and [recommendation-rail](../recommendation-rail/RecommendationRail.md)
+(deck position and deal-new-deck surface). See the parent
+[Judgement Day](../V2026.8.29.md) spec.
 
-## Goals
-
-- Provide a visible reroll control in the recommendation rail.
-- Return a different recommendation set when enough eligible items exist.
-- Keep randomization bounded to enabled channels and explainable item data.
+This spec is kept for history only. There is no live work here.
 
 ## Nongoals
 
-- Do not add channel preference controls.
-- Do not replace deterministic default recommendation ordering.
-- Do not randomize content outside the recommendation rail.
+- Everything previously in scope: the dice action, randomized re-draws, and
+  channel-bounded randomization are all withdrawn.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.artifacts/019f2aa8-492a-7fcd-bf0a-8e09dbd49299-proof.md) that the recommendation rail has a dice action for rerolling results.
-2. [ ] [proof](./.artifacts/019f2aa8-492b-7fdb-9e5a-3e519461a0b4-proof.md) that reroll returns a different recommendation set across repeated uses when the seeded sandbox has enough eligible items.
-3. [ ] [proof](./.artifacts/019f2aa8-492d-7967-866a-eeed2808eb5b-proof.md) that reroll only draws from currently enabled recommendation channels.
+The former acceptance criteria (dice action; different set across repeated
+rerolls; draws only from enabled channels) are withdrawn unproven — the effort
+was dissolved before any were checked, and no proof will be produced. Its
+replacement is covered by the deck-contract and deck-surface acceptance
+criteria in recommendation-core and recommendation-rail.

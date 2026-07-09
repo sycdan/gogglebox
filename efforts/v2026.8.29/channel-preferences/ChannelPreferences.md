@@ -1,25 +1,26 @@
-# Channel Preferences
+# Channel Preferences (Withdrawn)
 
 ## Overview
 
-Add a gear-driven configuration surface that lets a household choose which
-recommendation channels feed the rail.
+**This effort is dissolved.** The 2026-07 Judgement Day design exploration
+dropped the channel-preferences UI: channels dissolve into candidate sources
+under one ranker, per-item correction (see
+[correction-loop](../correction-loop/CorrectionLoop.md)) beats channel
+toggles, and a channel control panel violates the zero-config floor. Channel
+provenance survives as card explanations, not a control panel. See the parent
+[Judgement Day](../V2026.8.29.md) nongoals ledger.
 
-## Goals
-
-- Support an arbitrary number of recommendation channels from the backend
-  contract.
-- Let users enable and disable channels without leaving the home experience.
-- Persist the selected channels for the household or group context.
+This spec is kept for history only. There is no live work here.
 
 ## Nongoals
 
-- Do not define new ranking strategies.
-- Do not implement reroll or search behavior.
-- Do not add administrator-only configuration.
+- Everything previously in scope: the gear action, the channel list UI, and
+  persisted channel enable/disable state are all withdrawn.
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.artifacts/019f2aa8-491a-7472-b95c-ea38cdb105a0-proof.md) that the recommendation rail has a gear action that opens channel preferences.
-2. [ ] [proof](./.artifacts/019f2aa8-491b-722a-9393-2183eed11644-proof.md) that channel preferences list all available recommendation channels returned by the backend.
-3. [ ] [proof](./.artifacts/019f2aa8-491d-7f41-a32d-3085b20856c8-proof.md) that enabling or disabling channels changes which channels contribute to the rail and survives a page reload.
+The former acceptance criteria (gear action opens channel preferences; list
+all backend channels; enable/disable persists across reload) are withdrawn
+unproven — the effort was dissolved before any were checked, and no proof will
+be produced. This effort carries no live acceptance criteria and is not a
+dependency of any other effort.

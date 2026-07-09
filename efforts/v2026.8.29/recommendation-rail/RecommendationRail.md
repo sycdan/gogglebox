@@ -2,29 +2,48 @@
 
 ## Overview
 
-Replace the continue-watching section with the primary discovery rail while
-preserving continue-watching as the first recommendation channel. The rail pages
-recommendations according to the space available on the current device instead
-of using a fixed item count.
+Build the proposal-deck surface for [Judgement Day](../V2026.8.29.md): the
+algorithm makes its argument on one hero card at a time instead of a
+capacity-paged rail. The hero card takes ~70-80% of the screen — art, title,
+runtime, legible-from-couch reasons, and member vote pips. An on-deck strip
+shows the next 3-5 deck items as small thumbnails (art + title only) for
+recognition ("that one!") and calibration; on a phone the strip collapses to
+pure one-at-a-time. A persistent resume slot sits outside the deck flow so
+resume is always one action away, never buried. Pressing Start plays the hero
+immediately — the north-star interaction.
+
+This replaces the old slot-based action layout and the responsive
+capacity-count paging model: the hero is always exactly one item and the strip
+is simple overflow.
 
 ## Goals
 
-- Render recommendations from the backend endpoint in the home experience.
-- Present clear recommendation explanations on each item.
-- Keep the rail ready for channel controls, reroll, and search actions.
-- Constrain the number of visible recommendations per page responsively, with a
-  mobile phone layout showing one item per page.
+- Render the hero card with everything a couch needs to say yes: art, title,
+  runtime, reasons, member vote pips.
+- Show the on-deck strip and collapse it cleanly on phones.
+- Keep resume persistent, fixed, and outside the deck flow, with coherent
+  mixed card semantics — episode cards (progress, Resume, scoped ignore) vs
+  title cards (Start).
+- Show deck position ("3 of 7") and offer deal-new-deck on exhaustion.
+- Wire "Press Start plays the hero" end-to-end.
+- Surface correction affordances on every card.
 
 ## Nongoals
 
-- Do not implement the channel configuration UI.
-- Do not implement reroll randomization.
-- Do not implement search filtering behavior; that belongs to the discovery rail
-  search subeffort.
+- No channel configuration UI (dropped effort; see the parent ledger).
+- No reroll control — deck advancement and deal-new-deck replace it.
+- No infinite browse or autoplay dark patterns.
+- Correction behavior (fact writes, deck effect) is specced in
+  [correction-loop](../correction-loop/CorrectionLoop.md); this effort only
+  guarantees the affordances are present on cards.
+- Search result presentation belongs to
+  [jellyfin-search](../jellyfin-search/JellyfinSearch.md).
 
 ## Acceptance Criteria
 
-1. [ ] [proof](./.artifacts/019f2aa8-490c-726c-86e5-60da55bb52a7-proof.md) that the UI presents recommendations with enough explanation for a household to understand why each item was suggested.
-2. [ ] [proof](./.artifacts/019f2aa8-490e-7e9a-9076-a4e46383bc11-proof.md) that continue watching appears as a recommendation channel in the rail instead of as a separate home section.
-3. [ ] [proof](./.artifacts/019f2aa8-490f-76a8-b953-4e54827a0489-proof.md) that the rail layout reserves stable top-left, middle, and top-right action slots for reroll, search, and channel preferences.
-4. [ ] [proof](./.artifacts/019f2aa8-4911-727c-9df8-6a5d06fd4677-proof.md) that each rail page constrains the visible recommendation count based on responsive layout capacity rather than a hardcoded count, and that a mobile phone viewport shows one recommendation per page.
+1. [ ] [proof](./.artifacts/019f46d2-d315-7d29-a871-a9d84a211fc8-proof.md) that the hero card occupies roughly 70-80% of the screen and renders art, title, runtime, legible-from-couch reasons, and member vote pips.
+2. [ ] [proof](./.artifacts/019f46d2-d446-72f1-9e1a-1aedf163fc05-proof.md) that an on-deck strip shows the next 3-5 deck items as small thumbnails (art + title only), and that on a phone viewport the strip collapses to pure one-at-a-time.
+3. [ ] [proof](./.artifacts/019f46d2-d57f-70fa-bb25-12e7672d477d-proof.md) that a persistent resume slot with fixed placement sits outside the deck flow whenever the party has in-progress items, with coherent mixed card semantics: episode cards show progress, Resume, and scoped ignore; title cards show Start.
+4. [ ] [proof](./.artifacts/019f46d2-d6b9-727d-9d9d-3b15c412c149-proof.md) that the surface shows the deck position (e.g. "3 of 7") and, when the deck is exhausted, offers an explicit "deal new deck" action.
+5. [ ] [proof](./.artifacts/019f46d2-d801-7418-8bcb-a4c2ea8008af-proof.md) that Press Start plays the hero end-to-end: from login, one Start press begins playback of the top recommendation.
+6. [ ] [proof](./.artifacts/019f46d2-d938-76c2-9346-48d9c91b84d4-proof.md) that every card visibly carries the one-press correction affordances ("not for us" and "not tonight").
