@@ -298,6 +298,14 @@ export async function run(page, ctx) {
     await shoot(page, `${flowName}-carol-NOT-ADDED`);
     fail('party-pin: confirming the add-guest modal did not add Carol to the picker selection');
   }
+  const daveCard = cards.filter({ hasText: 'Dave' }).first();
+  if (!(await daveCard.count().then((n) => n > 0))) {
+    fail('party-pin: Dave card disappeared after adding Carol');
+  }
+  const daveSelected = await daveCard.evaluate((el) => el.classList.contains('selected'));
+  if (!daveSelected) {
+    await daveCard.click();
+  }
   console.log('[proof] party-pin: PASS — add-guest modal is selection-only and added Carol without a PIN');
 
   const continueBtn = page.getByRole('button', { name: /^Continue$/ }).first();
@@ -334,6 +342,27 @@ export async function run(page, ctx) {
     }
     // Human-readable proof of the warning ITSELF (not just a DOM assertion) —
     // screenshot before dismissing it.
+    const warningText = ((await confirmModal.textContent().catch(() => '')) ?? '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    console.log('[proof] party-pin: mixed-party warning text =', JSON.stringify(warningText));
+    for (const expectedText of [
+      'Everyone ready?',
+      'You selected Dave and Carol.',
+      'Continue only if everyone listed is watching now',
+      'watch progress and watched/unwatched states will all be updated',
+    ]) {
+      if (!warningText.includes(expectedText)) {
+        await shoot(page, `${flowName}-mixed-modal-WRONG-TEXT`);
+        fail(
+          `party-pin: mixed-party warning text did not include ${JSON.stringify(expectedText)} (got ${JSON.stringify(warningText)})`,
+        );
+      }
+    }
+    if (/default household|old saved party/i.test(warningText)) {
+      await shoot(page, `${flowName}-mixed-modal-LEAKED-CONFIG-COPY`);
+      fail(`party-pin: mixed-party warning leaked config/example copy (got ${JSON.stringify(warningText)})`);
+    }
     await shoot(page, 'party-pin-mixed-warning');
     await confirmModal.getByRole('button', { name: /^Confirm$/ }).click();
   };

@@ -219,6 +219,20 @@ function ViewerAvatar({ viewer }: { viewer: Viewer }) {
   return <span className="viewer-avatar">{viewer.name.slice(0, 1)}</span>;
 }
 
+function formatViewerNames(viewers: Viewer[]): string {
+  const names = viewers.map((viewer) => viewer.name).filter(Boolean);
+  if (names.length === 0) {
+    return 'the selected viewers';
+  }
+  if (names.length === 1) {
+    return names[0];
+  }
+  if (names.length === 2) {
+    return `${names[0]} and ${names[1]}`;
+  }
+  return `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}`;
+}
+
 const RAIL_PAGE_SIZE = 3;
 
 // Keeps a single rail's page index local + simple. Clamps when the underlying
@@ -759,6 +773,11 @@ export function App() {
     () => tertiaryViewers.filter((viewer) => selectedViewerIds.includes(viewer.id)),
     [tertiaryViewers, selectedViewerIds],
   );
+  const selectedViewers = useMemo(
+    () => (session?.viewers ?? []).filter((viewer) => selectedViewerIds.includes(viewer.id)),
+    [session?.viewers, selectedViewerIds],
+  );
+  const selectedViewerNames = formatViewerNames(selectedViewers);
 
   // Guests offered by the modal: mid-Continue it collects pins for EXACTLY the
   // already-selected guests that still lack one (plain-add and saved-party
@@ -1786,10 +1805,10 @@ export function App() {
           <div className="modal-backdrop" onClick={() => setConfirmMixedOpen(false)}>
             <div className="modal confirm-modal" onClick={(event) => event.stopPropagation()}>
               <p className="eyebrow">Heads up</p>
-              <h2>Shared watch progress</h2>
+              <h2>Everyone ready?</h2>
               <p className="muted">
-                This party includes viewers beyond the default household set. Continuing will
-                affect watch progress and watched states for ALL users in the party.
+                You selected {selectedViewerNames}. Continue only if everyone listed is watching
+                now; their watch progress and watched/unwatched states will all be updated.
               </p>
               <div className="row spread">
                 <button className="ghost" onClick={() => setConfirmMixedOpen(false)} type="button">Cancel</button>
