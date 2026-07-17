@@ -193,6 +193,19 @@ versioning and publish scripts/workflows to build once, test once, and promote a
 tested image to a release tag. Deployers can pin `GOGGLEBOX_VERSION` in
 `deploy/.env` when they want reproducible upgrades and rollbacks.
 
+## Legal Use
+
+Gogglebox is a self-hosted companion interface for Jellyfin. It does not
+provide, host, index, download, rip, decrypt, or distribute media.
+
+You are responsible for ensuring that your Jellyfin server, media library, user
+access, network exposure, and any sharing you configure comply with applicable
+law and with the rights associated with your media. Do not use Gogglebox to make
+copyrighted works available to others unless you have the right to do so.
+
+Gogglebox is intended for lawful personal and household use with media you are
+authorized to access.
+
 ---
 
 In loving memory of [Oggie](./mascot.jpg).
