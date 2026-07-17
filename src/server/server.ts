@@ -25,6 +25,11 @@ import { derivePartyKey } from './partyKey';
 import { buildPartyAlias, resolvePartyForMembers, visiblePartiesForAccount } from './parties';
 import { EpisodeItem, JellyfinClient } from './jellyfin';
 import {
+  createLibraryQualityEvidence,
+  rankRecommendationCandidates,
+  toRecommendedItems,
+} from './recommendationCore';
+import {
   AccountV2,
   AppConfig,
   ContinueWatchingItem,
@@ -760,10 +765,15 @@ export function createApp(
         candidates = candidates.filter(isKidsContent);
       }
 
-      const items = candidates
-        .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id) && !isIgnored(ignoreEntries, item))
-        .sort((left, right) => (right.rating ?? 0) - (left.rating ?? 0))
-        .slice(0, config.recommendations.count);
+      candidates = candidates
+        .filter((item) => !watchedUnion.has(item.id) && !excludeIds.has(item.id) && !isIgnored(ignoreEntries, item));
+      const evidence = createLibraryQualityEvidence(candidates);
+      const items = toRecommendedItems(
+        rankRecommendationCandidates(candidates, evidence, {
+          channelWeights: { 'library-quality': 1 },
+          limit: config.recommendations.count,
+        }),
+      );
 
       res.json({ items });
     } catch (error) {

@@ -15,7 +15,7 @@ import { CURRENT_SCHEMA_VERSION, SchemaV2Config } from './configMigrations';
 export const CONFIG_DEFAULTS = {
   schemaVersion: CURRENT_SCHEMA_VERSION,
   playback: { watchedThreshold: 0.9 },
-  recommendations: { count: 8 },
+  recommendations: { count: 9 },
 } as const;
 
 // The human-facing deployer config example. house1 shows fully-explicit tier

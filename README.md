@@ -30,10 +30,16 @@ authentication, persistence, show-detail browsing, and the `v2026.8.29`
 "Judgement Day" discovery work.
 
 Judgement Day is the main product direction: fact-driven, explainable
-recommendations for the whole room, presented as a finite "tonight's deck"
-(one hero proposal plus an on-deck strip) with controller-first input — log
-in, press Start, and the top pick plays. Planned work is described in the
-effort specs.
+recommendations for the whole room, presented as "Tonight's Nine": a finite set
+of nine session picks shown through three large, couch-readable cards with a
+slight center focus. Recommendation channels contribute weighted evidence to the
+same item ids, so party resume, party next-up, newly added, party-seen, and
+library quality can all reinforce the same movie, episode, or show without
+needing separate ranking machinery. Controller-first input remains the target:
+quick play starts a short countdown, hold play starts the focused item
+immediately, and explicit up/down sentiment teaches the system without exposing
+individual watch-progress history. Planned work is described in the effort
+specs.
 
 ## Deployment
 

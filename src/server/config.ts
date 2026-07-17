@@ -67,7 +67,7 @@ function clampThreshold(value: number): number {
 
 function clampRecommendationCount(value: number): number {
   if (Number.isNaN(value)) {
-    return 8;
+    return CONFIG_DEFAULTS.recommendations.count;
   }
 
   return Math.min(24, Math.max(1, Math.trunc(value)));
@@ -348,7 +348,9 @@ export function buildEffectiveConfig(
     watchedThreshold: clampThreshold(
       Number(process.env.WATCHED_THRESHOLD ?? merged.playback?.watchedThreshold ?? 0.9),
     ),
-    recommendationCount: clampRecommendationCount(Number(merged.recommendations?.count ?? 8)),
+    recommendationCount: clampRecommendationCount(
+      Number(merged.recommendations?.count ?? CONFIG_DEFAULTS.recommendations.count),
+    ),
   };
 }
 
@@ -373,7 +375,7 @@ export function loadConfig(): AppConfig {
     envAccessToken: process.env.ACCESS_TOKEN?.trim() || null,
     jellyfinUrl: jellyfinUrl.replace(/\/$/, ''),
     jellyfinApiKey,
-    recommendations: { count: 8 },
+    recommendations: { count: CONFIG_DEFAULTS.recommendations.count },
     users: [],
     accounts: {},
     accessTokens: {},
