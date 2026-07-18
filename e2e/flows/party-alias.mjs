@@ -117,7 +117,12 @@ export async function run(page, ctx) {
     fail('party-alias: did not return to the picker after Change viewers', error);
   }
 
-  const savedCard = page.locator('button.saved-group-card', { hasText: EXPECTED_ALIAS }).first();
+  const savedCards = page.locator('button.saved-group-card');
+  const savedCard = savedCards
+    .filter({
+      has: page.locator('strong').filter({ hasText: new RegExp(`^${escapeRegExp(EXPECTED_ALIAS)}$`) }),
+    })
+    .first();
   try {
     await savedCard.waitFor({ state: 'visible', timeout: 15_000 });
   } catch (error) {
@@ -161,4 +166,8 @@ export async function run(page, ctx) {
     );
   }
   console.log('[proof] party-alias: PASS — create + alias + reuse (no duplicate)');
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -570,6 +570,7 @@ export function App() {
         method: 'POST',
         body: JSON.stringify(payload),
       });
+      setSearchResults((current) => current.filter((item) => item.id !== payload.key));
       if (session) {
         await Promise.all([
           loadIgnoredItems(session),
@@ -587,12 +588,26 @@ export function App() {
       await apiRequest<{ items: IgnoredItem[] }>(`/api/ignored/${key}`, {
         method: 'DELETE',
       });
+      const activeSearchQuery = searchQuery.trim();
       if (session) {
         await Promise.all([
           loadIgnoredItems(session),
           loadLibraryAndRecommendations(session, kind, genre, kidsOnly),
           loadContinueWatching(session),
         ]);
+        if (activeSearchQuery) {
+          const params = new URLSearchParams({ kind, q: activeSearchQuery });
+          if (genre) {
+            params.set('genre', genre);
+          }
+          if (kidsOnly) {
+            params.set('kidsOnly', 'true');
+          }
+          const response = await apiRequest<{ items: LibraryItem[] }>(`/api/library?${params.toString()}`);
+          if (activeSearchQuery === searchQuery.trim()) {
+            setSearchResults(response.items);
+          }
+        }
       }
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Could not unignore');
