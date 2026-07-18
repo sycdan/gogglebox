@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { AppState } from './appState';
+import { FeatureFlagContext, FeatureFlagReader } from './featureFlags';
 import { JellyfinClient } from './jellyfin';
 import { derivePartyKey } from './partyKey';
 import { AppConfig, FamilyMember } from './types';
@@ -80,7 +81,7 @@ interface TestServer {
 
 async function startTestServer(config: AppConfig, appState: AppState): Promise<TestServer> {
   const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
-  const app = createApp(config, jellyfin, appState);
+  const app = createApp(config, jellyfin, appState, new MapFeatureFlags());
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -91,6 +92,23 @@ async function startTestServer(config: AppConfig, appState: AppState): Promise<T
     baseUrl: `http://127.0.0.1:${address.port}`,
     close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };
+}
+
+class MapFeatureFlags implements FeatureFlagReader {
+  readonly contexts: FeatureFlagContext[] = [];
+
+  constructor(private readonly values: Record<string, boolean> = {}) {}
+
+  async booleanValue(key: string, defaultValue: boolean, context: FeatureFlagContext): Promise<boolean> {
+    this.contexts.push(context);
+    return this.values[key] ?? defaultValue;
+  }
+}
+
+class FailingFeatureFlags implements FeatureFlagReader {
+  async booleanValue(): Promise<boolean> {
+    throw new Error('flag service unavailable');
+  }
 }
 
 // Extracts the cookie name=value pairs from a fetch Response's Set-Cookie
@@ -149,6 +167,77 @@ async function login(baseUrl: string, token: string): Promise<string> {
   assert.ok(cookie, 'login must set a session cookie');
   return cookie as string;
 }
+
+async function startTestServerWithFlags(
+  config: AppConfig,
+  appState: AppState,
+  featureFlags: FeatureFlagReader,
+): Promise<TestServer> {
+  const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
+  const app = createApp(config, jellyfin, appState, featureFlags);
+  const server = http.createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    throw new Error('Expected an AddressInfo from an ephemeral listener');
+  }
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+}
+
+test('GET /api/flags reports Tonight\'s Nine disabled by default', async () => {
+  const config = buildConfig();
+  const appState = new AppState(tempStatePath());
+  const featureFlags = new MapFeatureFlags();
+  const testServer = await startTestServerWithFlags(config, appState, featureFlags);
+  try {
+    const cookie = await login(testServer.baseUrl, 'test-token');
+    const res = await fetch(`${testServer.baseUrl}/api/flags`, { headers: { cookie } });
+    const body = await json<{ tonightsNine: boolean }>(res);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, { tonightsNine: false });
+    assert.equal(featureFlags.contexts[0].targetingKey, 'household');
+    assert.equal(featureFlags.contexts[0].app, 'gogglebox');
+  } finally {
+    await testServer.close();
+  }
+});
+
+test('GET /api/flags reports Tonight\'s Nine enabled when GOFF returns enabled', async () => {
+  const config = buildConfig();
+  const appState = new AppState(tempStatePath());
+  const featureFlags = new MapFeatureFlags({ 'tonights-nine': true });
+  const testServer = await startTestServerWithFlags(config, appState, featureFlags);
+  try {
+    const cookie = await login(testServer.baseUrl, 'test-token');
+    const res = await fetch(`${testServer.baseUrl}/api/flags`, { headers: { cookie } });
+    const body = await json<{ tonightsNine: boolean }>(res);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, { tonightsNine: true });
+  } finally {
+    await testServer.close();
+  }
+});
+
+test('GET /api/flags fails closed when flag evaluation throws', async () => {
+  const config = buildConfig();
+  const appState = new AppState(tempStatePath());
+  const testServer = await startTestServerWithFlags(config, appState, new FailingFeatureFlags());
+  try {
+    const cookie = await login(testServer.baseUrl, 'test-token');
+    const res = await fetch(`${testServer.baseUrl}/api/flags`, { headers: { cookie } });
+    const body = await json<{ tonightsNine: boolean }>(res);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(body, { tonightsNine: false });
+  } finally {
+    await testServer.close();
+  }
+});
 
 test('/api/group and /api/party (create) invoke the identical handler with agreeing response bodies', async () => {
   const config = buildConfig();

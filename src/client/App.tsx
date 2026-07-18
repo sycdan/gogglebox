@@ -176,6 +176,14 @@ interface SessionResponse {
   activePartyAlias: string | null;
 }
 
+interface AppFlags {
+  tonightsNine: boolean;
+}
+
+const DEFAULT_APP_FLAGS: AppFlags = {
+  tonightsNine: false,
+};
+
 // A managed party visible to the logged-in account, surfaced as a selectable
 // "Saved party" on the picker. Identified by partyKey; shown by alias. Parties
 // were formerly called "groups" — see /api/parties (and its /api/groups
@@ -428,6 +436,7 @@ export function App() {
   const continueRequestIdRef = useRef(0);
   const [recommendations, setRecommendations] = useState<LibraryItem[]>([]);
   const [tonightState, setTonightState] = useState<TonightNineState>(() => createTonightNineState([]));
+  const [appFlags, setAppFlags] = useState<AppFlags>(DEFAULT_APP_FLAGS);
   const [pendingDismissal, setPendingDismissal] = useState<{ itemId: string; kind: 'not-now' | 'not-for-us' } | null>(null);
   const [countdown, setCountdown] = useState<CountdownTarget | null>(null);
   const holdTimerRef = useRef<number | null>(null);
@@ -491,6 +500,11 @@ export function App() {
     }
   }
 
+  async function loadFlags() {
+    const nextFlags = await apiRequest<AppFlags>('/api/flags');
+    setAppFlags({ tonightsNine: Boolean(nextFlags.tonightsNine) });
+  }
+
   // Log in with an access token and remember it (until Log out) so the next
   // visit skips the portal login.
   async function loginWithToken(token: string) {
@@ -513,7 +527,7 @@ export function App() {
 
     setPendingDismissal(null);
     setCountdown(null);
-    if (activeSession.activeViewerIds.length > 0) {
+    if (activeSession.activeViewerIds.length > 0 && appFlags.tonightsNine) {
       const recommendationsResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`);
       setRecommendations(recommendationsResponse.items);
       setTonightState(createTonightNineState(recommendationsResponse.items.slice(0, 9)));
@@ -604,6 +618,32 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.activeViewerIds.join(',')]);
 
+  useEffect(() => {
+    if (!session?.authenticated) {
+      setAppFlags(DEFAULT_APP_FLAGS);
+      return;
+    }
+
+    void (async () => {
+      try {
+        await loadFlags();
+      } catch {
+        setAppFlags(DEFAULT_APP_FLAGS);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.authenticated, session?.account, session?.activeViewerIds.join(',')]);
+
+  useEffect(() => {
+    if (appFlags.tonightsNine) {
+      return;
+    }
+
+    setPendingDismissal(null);
+    setCountdown(null);
+    setTonightState(createTonightNineState([]));
+  }, [appFlags.tonightsNine]);
+
   // Refresh the picker's "Saved parties" whenever we land on the picker (logged
   // in, no active party). Re-runs after activating/clearing a party so a newly
   // created party shows up on the next visit.
@@ -630,7 +670,7 @@ export function App() {
         setLibraryLoading(false);
       }
     })();
-  }, [session, kind, genre, kidsOnly]);
+  }, [session, kind, genre, kidsOnly, appFlags.tonightsNine]);
 
   useEffect(() => {
     if (!session?.authenticated) {
@@ -1301,7 +1341,7 @@ export function App() {
   }
 
   function handleTonightKeyDown(event: KeyboardEvent) {
-    if (!session?.authenticated || searchQuery.trim() || selectedSeries || playingItem) {
+    if (!session?.authenticated || !appFlags.tonightsNine || searchQuery.trim() || selectedSeries || playingItem) {
       return;
     }
     const target = event.target as HTMLElement | null;
@@ -1354,6 +1394,10 @@ export function App() {
   }
 
   function handleTonightKeyUp(event: KeyboardEvent) {
+    if (!appFlags.tonightsNine) {
+      return;
+    }
+
     if (event.key === 'ArrowDown' && holdActionRef.current === 'down') {
       event.preventDefault();
       clearHoldTimer();
@@ -2160,7 +2204,7 @@ export function App() {
 
       {error ? <div className="panel error">{error}</div> : null}
 
-      {searchQuery.trim() ? null : (
+      {!appFlags.tonightsNine || searchQuery.trim() ? null : (
         <section className={`panel section-block tonight-panel${exhaustedTonight ? ' exhausted' : ''}`}>
           <div className="row spread">
             <div>

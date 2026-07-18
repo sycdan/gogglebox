@@ -121,6 +121,8 @@ services:
       # viewers: [] / "Unknown viewer").
       - ./config.sbx.json:/app/config.json:ro
     depends_on:
+      goff:
+        condition: service_started
       deps:
         condition: service_completed_successfully
       jellyfin-sandbox:

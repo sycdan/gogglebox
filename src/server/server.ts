@@ -22,6 +22,11 @@ import {
   mergeContinueWatching,
 } from './continueWatching';
 import { derivePartyKey } from './partyKey';
+import {
+  createFeatureFlagReaderFromEnv,
+  FEATURE_FLAGS,
+  FeatureFlagReader,
+} from './featureFlags';
 import { buildPartyAlias, resolvePartyForMembers, visiblePartiesForAccount } from './parties';
 import { EpisodeItem, JellyfinClient } from './jellyfin';
 import {
@@ -49,6 +54,7 @@ export interface EpisodeItemWithWatched extends EpisodeItem {
 
 const config = loadConfig();
 const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
+const featureFlags = createFeatureFlagReaderFromEnv();
 const appState = new AppState();
 const clientDist = path.resolve(process.cwd(), 'dist/client');
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
@@ -283,6 +289,7 @@ export function createApp(
   config: AppConfig,
   jellyfin: JellyfinClient,
   appState: AppState,
+  featureFlags: FeatureFlagReader = createFeatureFlagReaderFromEnv(),
 ): express.Express {
   const app = express();
 
@@ -540,6 +547,32 @@ export function createApp(
       // reading the old name. Never diverges from activePartyAlias above.
       activeGroupAlias: partyAlias,
     });
+  });
+
+  app.get('/api/flags', requireAuth, async (req, res) => {
+    const auth = accountForSession(req);
+    if (!auth) {
+      res.status(401).json({ error: 'Not authenticated' });
+      return;
+    }
+
+    const activeViewerIds = req.session.activeViewerIds ?? [];
+    const partyKey = activeViewerIds.length > 0 ? activePartyKey(req) : undefined;
+    const context = {
+      targetingKey: partyKey ?? auth.accountKey,
+      account: auth.accountKey,
+      app: 'gogglebox' as const,
+      activePartyKey: partyKey,
+      activeViewerIds,
+    };
+
+    let tonightsNine = false;
+    try {
+      tonightsNine = await featureFlags.booleanValue(FEATURE_FLAGS.tonightsNine, false, context);
+    } catch {
+      tonightsNine = false;
+    }
+    res.json({ tonightsNine });
   });
 
   app.post('/api/auth/login', (req, res) => {
@@ -1045,7 +1078,7 @@ export function createApp(
   return app;
 }
 
-const app = createApp(config, jellyfin, appState);
+const app = createApp(config, jellyfin, appState, featureFlags);
 
 // ── Stage B: watched fan-out poller ────────────────────────────────────────
 //

@@ -8,6 +8,15 @@ export const match = /recommend|picks|tonight/i;
 export async function run(page, ctx) {
   const { fail, shoot, shootView, flowName } = ctx;
 
+  await page.route('**/api/flags', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tonightsNine: true }),
+    });
+  });
+  await page.reload({ waitUntil: 'networkidle' });
+
   console.log('[proof] recommendations: locating viewer-selection screen');
   await pickEveryonePartyAndContinue(page, 'recommendations');
 
