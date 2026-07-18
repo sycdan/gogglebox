@@ -23,6 +23,12 @@ compatibility aliases (see `src/server/server.ts`). Jellyfin remains the source
 of truth for library, metadata, and watch history; Gogglebox is a thin
 party-aware layer on top.
 
+The main discovery surface deals a finite Tonight's Nine set for the active
+party and shows it as three large cards: the selected card in the middle with
+readable neighbors on either side. The room can move focus, register lightweight
+positive sentiment, dismiss a pick for tonight, start a short play countdown, or
+hold play to launch the focused item immediately.
+
 ## Where it is going
 
 The work backlog lives under [`efforts`](./efforts). Current top-level efforts include

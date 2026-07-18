@@ -1,124 +1,121 @@
 import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
-// ── recommendations (Party picks) flow ─────────────────────────────────────
-// Proves the "Show me other picks" button swaps the Party-picks grid to a
-// fresh, DISJOINT batch of recommendations. Reads the card titles in the
-// "Party picks" section before and after, and logs whether the two batches
-// overlap (expected: zero overlap).
-export const match = /recommend|picks/i;
+// Tonight's Nine recommendations flow. Proves the finite three-card surface:
+// three large visible cards, center focus, sentiment leader, stable-neighbor
+// dismissal replacement, and countdown cancellation on directional input.
+export const match = /recommend|picks|tonight/i;
 
 export async function run(page, ctx) {
   const { fail, shoot, shootView, flowName } = ctx;
 
   console.log('[proof] recommendations: locating viewer-selection screen');
-
-  // We may be on the viewer-selection screen ("Pick the party"). Pick the
-  // "Everyone" preset (same approach as continue-watching), then Continue.
   await pickEveryonePartyAndContinue(page, 'recommendations');
 
-  // Locate the "Party picks" section: the .section-block whose eyebrow text
-  // is "Party picks".
-  const picksSection = page
+  const tonightSection = page
     .locator('.section-block')
-    .filter({ has: page.locator('.eyebrow', { hasText: /^Party picks$/ }) })
+    .filter({ has: page.locator('.eyebrow', { hasText: /^Tonight's Nine$/ }) })
     .first();
 
   try {
-    await picksSection.waitFor({ state: 'visible', timeout: 30_000 });
+    await tonightSection.waitFor({ state: 'visible', timeout: 30_000 });
   } catch (error) {
-    await shoot(page, `${flowName}-03-no-party-picks`);
-    fail('recommendations: "Party picks" section never appeared', error);
+    await shoot(page, `${flowName}-01-no-tonights-nine`);
+    fail('recommendations: "Tonight\'s Nine" section never appeared', error);
   }
 
-  await picksSection.scrollIntoViewIfNeeded();
-
-  // Reads the recommendation card titles within the Party-picks section.
-  async function pickTitles() {
-    return picksSection
-      .locator('.media-grid .media-card h3')
-      .allInnerTexts()
-      .then((arr) => arr.map((t) => t.trim()).filter(Boolean))
-      .catch(() => []);
-  }
-
-  // Wait for at least one recommendation card to render in this section.
-  try {
-    await picksSection
-      .locator('.media-grid .media-card')
-      .first()
-      .waitFor({ state: 'visible', timeout: 30_000 });
-  } catch (error) {
-    await shoot(page, `${flowName}-03-no-picks-cards`);
-    const empty = await picksSection.locator('.muted').allInnerTexts().catch(() => []);
-    fail(
-      'recommendations: no .media-card rendered in the Party-picks section' +
-        (empty.length ? ` (section message: ${JSON.stringify(empty)})` : ' (data gap?)'),
-      error,
-    );
-  }
-
-  // Scroll the section to the top of the viewport so the windowed screenshot
-  // captures it legibly.
-  async function scrollSectionToTop() {
-    await picksSection.evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  async function scrollTonightToTop() {
+    await tonightSection.evaluate((el) => {
+      const top = el.getBoundingClientRect().top + window.scrollY - 16;
+      window.scrollTo(0, top);
+    });
     await page.waitForTimeout(300);
   }
 
-  await scrollSectionToTop();
+  await scrollTonightToTop();
 
-  const batch1 = await pickTitles();
-  console.log(`[proof] recommendations: batch-1 titles [${batch1.length}] =`, JSON.stringify(batch1));
-  await shootView(page, `${flowName}-01-batch1`);
-
-  // Click "Show me other picks" within this section and wait for the titles
-  // to change from batch 1.
-  const otherPicksBtn = picksSection
-    .locator('button', { hasText: /Show me other picks/i })
-    .first();
-  if (!(await otherPicksBtn.count().then((n) => n > 0))) {
-    await shootView(page, `${flowName}-02-no-button`);
-    fail('recommendations: "Show me other picks" button not found in the Party-picks section');
+  const cards = tonightSection.locator('.tonight-grid .tonight-card');
+  try {
+    await cards.first().waitFor({ state: 'visible', timeout: 30_000 });
+  } catch (error) {
+    await shoot(page, `${flowName}-02-no-tonight-cards`);
+    fail('recommendations: no Tonight\'s Nine cards rendered', error);
   }
 
-  const disabledBefore = await otherPicksBtn.isDisabled().catch(() => false);
-  if (disabledBefore) {
-    console.warn('[proof] recommendations: "Show me other picks" button is disabled (e.g. "No more picks") — batch swap may not occur');
+  async function cardTitles() {
+    return cards
+      .locator('h3')
+      .allInnerTexts()
+      .then((arr) => arr.map((text) => text.trim()).filter(Boolean));
   }
 
-  await otherPicksBtn.click();
-
-  // Poll the title array until it differs from batch 1 (or timeout).
-  const batch1Key = [...batch1].sort().join('');
-  let batch2 = batch1;
-  const deadline = Date.now() + 20_000;
-  let changed = false;
-  while (Date.now() < deadline) {
-    await page.waitForTimeout(400);
-    const current = await pickTitles();
-    if (current.length > 0 && [...current].sort().join('') !== batch1Key) {
-      batch2 = current;
-      changed = true;
-      break;
-    }
-    batch2 = current;
+  const initialCount = await cards.count();
+  const initialTitles = await cardTitles();
+  console.log(`[proof] recommendations: visible cards [${initialCount}] =`, JSON.stringify(initialTitles));
+  if (initialCount !== 3) {
+    await shootView(page, `${flowName}-03-wrong-card-count`);
+    fail(`recommendations: expected exactly 3 visible Tonight's Nine cards, saw ${initialCount}`);
   }
-  if (!changed) {
-    console.warn('[proof] recommendations: batch-2 titles did not change from batch-1 within timeout (data-dependent; continuing)');
-  }
-  await page.waitForLoadState('networkidle').catch(() => {});
 
-  await scrollSectionToTop();
-  console.log(`[proof] recommendations: batch-2 titles [${batch2.length}] =`, JSON.stringify(batch2));
-  await shootView(page, `${flowName}-02-batch2`);
-
-  // Compute overlap (by title) between the two batches.
-  const set1 = new Set(batch1);
-  const overlap = [...new Set(batch2)].filter((t) => set1.has(t));
-  console.log(`[proof] recommendations: batch-1 count = ${batch1.length}, batch-2 count = ${batch2.length} (expected ~8 each; data-dependent)`);
-  console.log(`[proof] recommendations: overlap [${overlap.length}] =`, JSON.stringify(overlap));
-  if (overlap.length === 0) {
-    console.log('[proof] recommendations: PASS — batches disjoint (zero overlap between batch-1 and batch-2)');
-  } else {
-    console.error(`[proof] recommendations: FAIL — batches disjoint: ${overlap.length} title(s) overlap between batch-1 and batch-2: ${JSON.stringify(overlap)}`);
+  const focused = tonightSection.locator('.tonight-card.center.focused').first();
+  const focusedTitle = ((await focused.locator('h3').first().innerText({ timeout: 10_000 })) ?? '').trim();
+  if (!focusedTitle) {
+    await shootView(page, `${flowName}-04-no-focused-title`);
+    fail('recommendations: center focused card title was not readable');
   }
+  await scrollTonightToTop();
+  await shootView(page, `${flowName}-01-tonights-nine`);
+
+  await page.keyboard.press('ArrowUp');
+  const leader = tonightSection.locator('.leader-pill').first();
+  try {
+    await leader.waitFor({ state: 'visible', timeout: 5_000 });
+  } catch (error) {
+    await shootView(page, `${flowName}-05-no-leader`);
+    fail('recommendations: pressing Up did not show a sentiment leader', error);
+  }
+  const leaderText = ((await leader.innerText()) ?? '').trim();
+  if (!leaderText.includes(focusedTitle)) {
+    await shootView(page, `${flowName}-06-wrong-leader`);
+    fail(`recommendations: leader "${leaderText}" did not include focused title "${focusedTitle}"`);
+  }
+
+  const beforeDismiss = await cardTitles();
+  await page.keyboard.press('ArrowDown');
+  await page.waitForTimeout(2_200);
+  const afterDismiss = await cardTitles();
+  console.log('[proof] recommendations: before dismiss =', JSON.stringify(beforeDismiss));
+  console.log('[proof] recommendations: after dismiss =', JSON.stringify(afterDismiss));
+  if (afterDismiss.length !== 3) {
+    await shootView(page, `${flowName}-07-dismiss-card-count`);
+    fail(`recommendations: expected 3 cards after dismissal replacement, saw ${afterDismiss.length}`);
+  }
+  if (afterDismiss[0] !== beforeDismiss[0] || afterDismiss[2] !== beforeDismiss[2]) {
+    await shootView(page, `${flowName}-08-neighbors-shifted`);
+    fail('recommendations: dismissing focused card did not keep left/right neighbors stable');
+  }
+  if (afterDismiss[1] === beforeDismiss[1]) {
+    await shootView(page, `${flowName}-09-center-not-replaced`);
+    fail('recommendations: dismissing focused card did not inject a replacement into center');
+  }
+  await scrollTonightToTop();
+  await shootView(page, `${flowName}-02-after-dismiss`);
+
+  await page.keyboard.press('Enter');
+  const countdown = tonightSection.locator('.countdown-pill').first();
+  try {
+    await countdown.waitFor({ state: 'visible', timeout: 5_000 });
+  } catch (error) {
+    await shootView(page, `${flowName}-10-no-countdown`);
+    fail('recommendations: pressing Enter did not start a play countdown', error);
+  }
+  await page.keyboard.press('ArrowRight');
+  const countdownStillVisible = await countdown.isVisible().catch(() => false);
+  if (countdownStillVisible) {
+    await shootView(page, `${flowName}-11-countdown-not-cancelled`);
+    fail('recommendations: directional input did not cancel the countdown');
+  }
+
+  await scrollTonightToTop();
+  await shootView(page, `${flowName}-03-countdown-cancelled`);
+  console.log('[proof] recommendations: PASS — Tonight\'s Nine surface behaved as expected');
 }

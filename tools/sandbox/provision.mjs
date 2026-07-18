@@ -290,7 +290,7 @@ async function emitArtifacts(apiKey, usersByName) {
   const config = {
     schemaVersion: 2,
     playback: { watchedThreshold: 0.9 },
-    recommendations: { count: 4 },
+    recommendations: { count: 9 },
     users: [
       { jellyfin_name: 'Alice' },
       { jellyfin_name: 'Bob' },

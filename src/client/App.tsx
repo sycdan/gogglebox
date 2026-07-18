@@ -7,6 +7,16 @@ import {
 } from './guestSelection';
 import { PlayerSessionPayload, seedJellyfinWebSession } from './jellyfinSession';
 import { clickEl, discoverPlayControl, isPlaybackStarted } from './playerLaunch';
+import {
+  addTonightSentiment,
+  createTonightNineState,
+  currentTonightLeader,
+  dismissFocusedTonightCard,
+  isTonightExhausted,
+  moveTonightFocus,
+  TonightNineState,
+  TonightSlot,
+} from './tonightsNine';
 
 const playerStartMuted =
   import.meta.env.VITE_PLAYER_START_MUTED === '1' ||
@@ -51,6 +61,12 @@ interface LibraryItem {
   imageUrl: string | null;
   backdropUrl: string | null;
   playable: boolean;
+  recommendationReasons?: string[];
+}
+
+interface CountdownTarget {
+  itemId: string;
+  seconds: number;
 }
 
 interface EpisodeItem {
@@ -307,6 +323,23 @@ function RailPager({
   );
 }
 
+function formatMediaMeta(item: LibraryItem): string {
+  return [item.year, item.runtimeMinutes ? `${item.runtimeMinutes} min` : null, item.officialRating]
+    .filter(Boolean)
+    .join(' • ') || 'No metadata yet';
+}
+
+function recommendationReasonsFor(item: LibraryItem): string[] {
+  const reasons = item.recommendationReasons?.filter(Boolean) ?? [];
+  if (reasons.length > 0) {
+    return reasons.slice(0, 2);
+  }
+  if (item.rating) {
+    return [`Rated ${item.rating.toFixed(1)} in your library`];
+  }
+  return ['Recommended from your library'];
+}
+
 // Compact "S01E10" episode code for a show card's ignore-flyout label.
 function episodeCode(seasonNumber: number | null, episodeNumber: number | null): string {
   if (!seasonNumber || !episodeNumber) {
@@ -394,9 +427,11 @@ export function App() {
   const [continueWatching, setContinueWatching] = useState<ContinueWatchingItem[]>([]);
   const continueRequestIdRef = useRef(0);
   const [recommendations, setRecommendations] = useState<LibraryItem[]>([]);
-  const [noMorePicks, setNoMorePicks] = useState(false);
-  const [picksLoading, setPicksLoading] = useState(false);
-  const shownRecommendationIdsRef = useRef<Set<string>>(new Set());
+  const [tonightState, setTonightState] = useState<TonightNineState>(() => createTonightNineState([]));
+  const [pendingDismissal, setPendingDismissal] = useState<{ itemId: string; kind: 'not-now' | 'not-for-us' } | null>(null);
+  const [countdown, setCountdown] = useState<CountdownTarget | null>(null);
+  const holdTimerRef = useRef<number | null>(null);
+  const holdActionRef = useRef<'enter' | 'down' | null>(null);
   const [ignoredItems, setIgnoredItems] = useState<IgnoredItem[]>([]);
   const [ignoredOpen, setIgnoredOpen] = useState(false);
   // The show detail modal's target series — just enough to load + label its
@@ -433,7 +468,6 @@ export function App() {
 
   // Per-rail pagination (3 tiles per page) so rails stay roomy, not cramped.
   const continuePager = usePager(continueWatching);
-  const recommendationsPager = usePager(recommendations);
 
   async function loadSession() {
     const nextSession = await apiRequest<SessionResponse>('/api/session');
@@ -477,47 +511,15 @@ export function App() {
       params.set('kidsOnly', 'true');
     }
 
-    setNoMorePicks(false);
+    setPendingDismissal(null);
+    setCountdown(null);
     if (activeSession.activeViewerIds.length > 0) {
       const recommendationsResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`);
       setRecommendations(recommendationsResponse.items);
-      recommendationsResponse.items.forEach((item) => shownRecommendationIdsRef.current.add(item.id));
+      setTonightState(createTonightNineState(recommendationsResponse.items.slice(0, 9)));
     } else {
       setRecommendations([]);
-    }
-  }
-
-  async function showOtherPicks() {
-    if (!session || session.activeViewerIds.length === 0) {
-      return;
-    }
-
-    const params = new URLSearchParams({ kind });
-    if (genre) {
-      params.set('genre', genre);
-    }
-    if (kidsOnly) {
-      params.set('kidsOnly', 'true');
-    }
-    const shownIds = [...shownRecommendationIdsRef.current];
-    if (shownIds.length > 0) {
-      params.set('exclude', shownIds.join(','));
-    }
-
-    try {
-      setPicksLoading(true);
-      setError(null);
-      const recommendationsResponse = await apiRequest<{ items: LibraryItem[] }>(`/api/recommendations?${params.toString()}`);
-      if (recommendationsResponse.items.length === 0) {
-        setNoMorePicks(true);
-        return;
-      }
-      setRecommendations(recommendationsResponse.items);
-      recommendationsResponse.items.forEach((item) => shownRecommendationIdsRef.current.add(item.id));
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not load more picks');
-    } finally {
-      setPicksLoading(false);
+      setTonightState(createTonightNineState([]));
     }
   }
 
@@ -597,8 +599,8 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    shownRecommendationIdsRef.current = new Set();
-    setNoMorePicks(false);
+    setPendingDismissal(null);
+    setCountdown(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.activeViewerIds.join(',')]);
 
@@ -809,6 +811,29 @@ export function App() {
     );
     return [...uniqueGenres].sort((left, right) => left.localeCompare(right));
   }, [recommendations, searchResults]);
+  const recommendationsById = useMemo(
+    () => new Map(recommendations.map((item) => [item.id, item])),
+    [recommendations],
+  );
+  const tonightSlots = useMemo(
+    () => ([
+      ['left', tonightState.slots.left],
+      ['center', tonightState.slots.center],
+      ['right', tonightState.slots.right],
+    ] as const)
+      .map(([slot, itemId]) => ({
+        slot,
+        item: itemId ? recommendationsById.get(itemId) ?? null : null,
+      }))
+      .filter((entry): entry is { slot: TonightSlot; item: LibraryItem } => Boolean(entry.item)),
+    [tonightState.slots, recommendationsById],
+  );
+  const focusedTonightItem = tonightState.slots.center
+    ? recommendationsById.get(tonightState.slots.center) ?? null
+    : null;
+  const leaderId = currentTonightLeader(tonightState);
+  const leaderItem = leaderId ? recommendationsById.get(leaderId) ?? null : null;
+  const exhaustedTonight = recommendations.length > 0 && isTonightExhausted(tonightState);
 
   function toggleViewer(viewerId: string) {
     const viewer = (session?.viewers ?? []).find((candidate) => candidate.id === viewerId);
@@ -1215,6 +1240,178 @@ export function App() {
       startPositionTicks: item.playbackPositionTicks,
     });
   }
+
+  function cancelCountdown() {
+    setCountdown(null);
+  }
+
+  function cancelPendingDismissal() {
+    setPendingDismissal(null);
+  }
+
+  function clearHoldTimer() {
+    if (holdTimerRef.current !== null) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  }
+
+  function moveTonight(direction: 'left' | 'right') {
+    cancelCountdown();
+    cancelPendingDismissal();
+    setTonightState((current) => moveTonightFocus(current, direction));
+  }
+
+  function supportFocusedTonightItem() {
+    cancelCountdown();
+    cancelPendingDismissal();
+    setTonightState((current) => addTonightSentiment(current));
+  }
+
+  function beginDismissFocusedTonightItem(kind: 'not-now' | 'not-for-us' = 'not-now') {
+    cancelCountdown();
+    const focusedId = tonightState.slots.center;
+    if (!focusedId) {
+      return;
+    }
+    setPendingDismissal({ itemId: focusedId, kind });
+  }
+
+  function removePendingTonightItem() {
+    setTonightState((current) => dismissFocusedTonightCard(current));
+    setPendingDismissal(null);
+  }
+
+  function playTonightItem(item: LibraryItem) {
+    cancelCountdown();
+    void openPlayback({ id: item.id, title: item.name });
+  }
+
+  function countdownTargetItem(): LibraryItem | null {
+    return leaderItem ?? focusedTonightItem;
+  }
+
+  function startTonightCountdown() {
+    const item = countdownTargetItem();
+    if (!item) {
+      return;
+    }
+    setPendingDismissal(null);
+    setCountdown({ itemId: item.id, seconds: 3 });
+  }
+
+  function handleTonightKeyDown(event: KeyboardEvent) {
+    if (!session?.authenticated || searchQuery.trim() || selectedSeries || playingItem) {
+      return;
+    }
+    const target = event.target as HTMLElement | null;
+    if (target && ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(target.tagName)) {
+      return;
+    }
+    if (event.repeat) {
+      return;
+    }
+
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      moveTonight('left');
+      return;
+    }
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      moveTonight('right');
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      supportFocusedTonightItem();
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      cancelCountdown();
+      clearHoldTimer();
+      holdActionRef.current = 'down';
+      holdTimerRef.current = window.setTimeout(() => {
+        holdTimerRef.current = null;
+        holdActionRef.current = null;
+        beginDismissFocusedTonightItem('not-for-us');
+      }, 650);
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      clearHoldTimer();
+      holdActionRef.current = 'enter';
+      holdTimerRef.current = window.setTimeout(() => {
+        holdTimerRef.current = null;
+        holdActionRef.current = null;
+        if (focusedTonightItem) {
+          playTonightItem(focusedTonightItem);
+        }
+      }, 650);
+    }
+  }
+
+  function handleTonightKeyUp(event: KeyboardEvent) {
+    if (event.key === 'ArrowDown' && holdActionRef.current === 'down') {
+      event.preventDefault();
+      clearHoldTimer();
+      holdActionRef.current = null;
+      beginDismissFocusedTonightItem('not-now');
+    }
+    if (event.key === 'Enter' && holdActionRef.current === 'enter') {
+      event.preventDefault();
+      clearHoldTimer();
+      holdActionRef.current = null;
+      startTonightCountdown();
+    }
+  }
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleTonightKeyDown);
+    document.addEventListener('keyup', handleTonightKeyUp);
+    return () => {
+      document.removeEventListener('keydown', handleTonightKeyDown);
+      document.removeEventListener('keyup', handleTonightKeyUp);
+    };
+  });
+
+  useEffect(() => () => {
+    clearHoldTimer();
+    holdActionRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!pendingDismissal || pendingDismissal.itemId !== tonightState.slots.center) {
+      return;
+    }
+    const timer = window.setTimeout(removePendingTonightItem, 1800);
+    return () => window.clearTimeout(timer);
+  }, [pendingDismissal, tonightState.slots.center]);
+
+  useEffect(() => {
+    if (!countdown) {
+      return;
+    }
+    if (countdown.seconds <= 0) {
+      const item = recommendationsById.get(countdown.itemId);
+      if (item) {
+        playTonightItem(item);
+      } else {
+        setCountdown(null);
+      }
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setCountdown((current) =>
+        current && current.itemId === countdown.itemId
+          ? { ...current, seconds: current.seconds - 1 }
+          : current,
+      );
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [countdown, recommendationsById]);
 
   useEffect(() => {
     if (!playingItem || !session || autoMarked) {
@@ -1964,54 +2161,52 @@ export function App() {
       {error ? <div className="panel error">{error}</div> : null}
 
       {searchQuery.trim() ? null : (
-        <section className="panel section-block">
+        <section className={`panel section-block tonight-panel${exhaustedTonight ? ' exhausted' : ''}`}>
           <div className="row spread">
             <div>
-              <p className="eyebrow">Party picks</p>
-              <h2>Because none of you have seen this</h2>
+              <p className="eyebrow">Tonight's Nine</p>
+              <h2>{exhaustedTonight ? 'Search is up' : 'Pick for the room'}</h2>
             </div>
-            <div className="row">
+            <div className="tonight-status">
               {libraryLoading ? <span className="muted">Refreshing…</span> : null}
-              {noMorePicks ? <span className="muted">No more picks</span> : null}
-              <RailPager
-                page={recommendationsPager.page}
-                pageCount={recommendationsPager.pageCount}
-                hasPrev={recommendationsPager.hasPrev}
-                hasNext={recommendationsPager.hasNext}
-                onPrev={recommendationsPager.prev}
-                onNext={recommendationsPager.next}
-              />
-              <button
-                onClick={() => void showOtherPicks()}
-                type="button"
-                disabled={
-                  libraryLoading ||
-                  picksLoading ||
-                  noMorePicks ||
-                  !session ||
-                  session.activeViewerIds.length === 0
-                }
-              >
-                {picksLoading ? 'Finding…' : 'Show me other picks'}
-              </button>
+              {leaderItem ? <span className="leader-pill">Leader: {leaderItem.name}</span> : null}
+              {countdown ? (
+                <span className="countdown-pill">
+                  Playing {recommendationsById.get(countdown.itemId)?.name ?? 'selection'} in {countdown.seconds}
+                </span>
+              ) : null}
             </div>
           </div>
           {libraryLoading ? <p className="muted">Loading recommendations…</p> : null}
-          {!libraryLoading && recommendations.length === 0 ? (
+          {!libraryLoading && recommendations.length === 0 && !exhaustedTonight ? (
             <p className="muted">No fresh recommendations match this filter yet. Try another genre or turn off kids-only.</p>
           ) : null}
-          <div className="media-grid">
-            {recommendationsPager.visible.map((item) => (
-              <MediaCard
-                key={`rec-${item.id}`}
-                item={item}
-                onMarkWatched={markWatched}
-                onPlay={openPlayback}
-                onOpenShowDetail={openShowDetail}
-                onIgnore={ignore}
-              />
-            ))}
-          </div>
+          {exhaustedTonight && recommendations.length > 0 ? (
+            <div className="search-fallback">
+              <p className="muted">Tonight's Nine missed. Use the filters and search box above to take over manually.</p>
+            </div>
+          ) : (
+            <div className="tonight-grid" aria-label="Tonight's Nine recommendations">
+              {tonightSlots.map(({ slot, item }) => (
+                <TonightCard
+                  key={`${slot}-${item.id}`}
+                  item={item}
+                  slot={slot}
+                  pendingKind={pendingDismissal?.itemId === item.id ? pendingDismissal.kind : null}
+                  isLeader={leaderId === item.id}
+                  countdownSeconds={countdown?.itemId === item.id ? countdown.seconds : null}
+                  onMoveLeft={() => moveTonight('left')}
+                  onMoveRight={() => moveTonight('right')}
+                  onSupport={supportFocusedTonightItem}
+                  onDismiss={() => beginDismissFocusedTonightItem('not-now')}
+                  onPlayCountdown={startTonightCountdown}
+                  onPlayNow={() => playTonightItem(item)}
+                  onOpenShowDetail={openShowDetail}
+                  onIgnore={ignore}
+                />
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -2325,6 +2520,104 @@ function MediaCard({
         <button className="ghost" onClick={() => void onMarkWatched(item.id)} type="button">Mark watched</button>
         <button className="ghost" onClick={() => void onIgnore(item)} type="button">Ignore</button>
       </div>
+    </article>
+  );
+}
+
+function TonightCard({
+  item,
+  slot,
+  pendingKind,
+  isLeader,
+  countdownSeconds,
+  onMoveLeft,
+  onMoveRight,
+  onSupport,
+  onDismiss,
+  onPlayCountdown,
+  onPlayNow,
+  onOpenShowDetail,
+  onIgnore,
+}: {
+  item: LibraryItem;
+  slot: TonightSlot;
+  pendingKind: 'not-now' | 'not-for-us' | null;
+  isLeader: boolean;
+  countdownSeconds: number | null;
+  onMoveLeft: () => void;
+  onMoveRight: () => void;
+  onSupport: () => void;
+  onDismiss: () => void;
+  onPlayCountdown: () => void;
+  onPlayNow: () => void;
+  onOpenShowDetail: (series: { id: string; name: string }) => Promise<void>;
+  onIgnore: (item: LibraryItem) => Promise<void>;
+}) {
+  const focused = slot === 'center';
+  const isShow = item.type === 'show';
+  const reasons = recommendationReasonsFor(item);
+  const slotLabel = slot === 'center' ? 'Selected' : slot === 'left' ? 'Left option' : 'Right option';
+
+  return (
+    <article
+      className={`tonight-card ${slot}${focused ? ' focused' : ''}${pendingKind ? ' pending' : ''}`}
+      aria-label={`${slotLabel}: ${item.name}`}
+      onClick={() => {
+        if (slot === 'left') onMoveLeft();
+        if (slot === 'right') onMoveRight();
+      }}
+    >
+      <div
+        className="tonight-art"
+        style={item.backdropUrl || item.imageUrl ? { backgroundImage: `url(${item.backdropUrl ?? item.imageUrl})` } : undefined}
+      >
+        {!item.backdropUrl && !item.imageUrl ? <span>No artwork</span> : null}
+        {isLeader ? <span className="leader-corner">Leader</span> : null}
+        {countdownSeconds !== null ? <span className="countdown-corner">{countdownSeconds}</span> : null}
+      </div>
+      <div className="tonight-copy">
+        <p className="eyebrow">{slotLabel}</p>
+        {isShow ? (
+          <button
+            className="link-title tonight-title"
+            onClick={(event) => {
+              event.stopPropagation();
+              void onOpenShowDetail({ id: item.id, name: item.name });
+            }}
+            type="button"
+          >
+            <h3>{item.name}</h3>
+          </button>
+        ) : (
+          <h3>{item.name}</h3>
+        )}
+        <p className="meta">{formatMediaMeta(item)}</p>
+        <div className="reason-list">
+          {reasons.map((reason) => (
+            <span key={reason}>{reason}</span>
+          ))}
+        </div>
+        {pendingKind ? (
+          <p className="pending-copy">
+            {pendingKind === 'not-for-us' ? 'Removing as not for us…' : 'Removing for tonight…'}
+          </p>
+        ) : null}
+      </div>
+      {focused ? (
+        <div className="tonight-actions">
+          <button type="button" onClick={onSupport}>Vote</button>
+          <button className="ghost" type="button" onClick={onDismiss}>Not now</button>
+          {item.playable ? (
+            <>
+              <button type="button" onClick={onPlayCountdown}>Play</button>
+              <button className="ghost" type="button" onClick={onPlayNow}>Play now</button>
+            </>
+          ) : (
+            <button type="button" onClick={() => void onOpenShowDetail({ id: item.id, name: item.name })}>Episodes</button>
+          )}
+          <button className="ghost" type="button" onClick={() => void onIgnore(item)}>Hide</button>
+        </div>
+      ) : null}
     </article>
   );
 }
