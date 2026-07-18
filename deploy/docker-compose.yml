@@ -1,6 +1,6 @@
 services:
   goff:
-    image: gofeatureflag/go-feature-flag:latest
+    image: gofeatureflag/go-feature-flag:v1.55.1
     container_name: gogglebox-goff
     restart: unless-stopped
     volumes:

@@ -29,7 +29,7 @@ services:
   # default; tests can override GOFF_FLAGS_FILE to mount a complete alternate
   # flag input without editing production-safe flags/goff.yaml.
   goff:
-    image: gofeatureflag/go-feature-flag:latest
+    image: gofeatureflag/go-feature-flag:v1.55.1
     volumes:
       - ./tools/goff/goff-proxy.yaml:/goff/goff-proxy.yaml:ro
       - ${GOFF_FLAGS_FILE:-./flags/goff.yaml}:/goff/flags.goff.yaml:ro
