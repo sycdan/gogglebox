@@ -47,6 +47,7 @@ import { startSession } from './lib/session.mjs';
 import * as playerFocus from './flows/player-focus.mjs';
 import * as continueWatching from './flows/continue-watching.mjs';
 import * as recommendations from './flows/recommendations.mjs';
+import * as tonightsNineHidden from './flows/tonights-nine-hidden.mjs';
 import * as ignoreShows from './flows/ignore-shows.mjs';
 import * as search from './flows/search.mjs';
 import * as viewerWatched from './flows/viewer-watched.mjs';
@@ -73,6 +74,7 @@ const flows = [
   { name: 'player-uat', mod: playerUat },
   { name: 'player-focus', mod: playerFocus },
   { name: 'continue-watching', mod: continueWatching },
+  { name: 'tonights-nine-hidden', mod: tonightsNineHidden },
   { name: 'recommendations', mod: recommendations },
   { name: 'ignore-shows', mod: ignoreShows },
   { name: 'search', mod: search },

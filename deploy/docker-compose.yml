@@ -1,4 +1,12 @@
 services:
+  goff:
+    image: gofeatureflag/go-feature-flag:latest
+    container_name: gogglebox-goff
+    restart: unless-stopped
+    volumes:
+      - ../tools/goff/goff-proxy.yaml:/goff/goff-proxy.yaml:ro
+      - ${GOFF_FLAGS_FILE:-../flags/goff.yaml}:/goff/flags.goff.yaml:ro
+
   gogglebox:
     image: ghcr.io/sycdan/gogglebox:${GOGGLEBOX_VERSION:-latest}
     pull_policy: always
@@ -13,10 +21,15 @@ services:
       - WATCHED_THRESHOLD
       - ACCESS_TOKEN
       - JELLYFIN_DEBUG
+      - GOFF_ENDPOINT=http://goff:1031
+      - GOFF_API_KEY=${GOFF_API_KEY:-gogglebox-local}
+      - GOFF_TIMEOUT_MS
     volumes:
       - ./config.json:/app/config.json:ro
       # writable app state; host-mounted so it survives redeploys
       - ${GOGGLEBOX_STATE_DIR:-./data}:/data
+    depends_on:
+      - goff
 
   proxy:
     image: caddy:2-alpine

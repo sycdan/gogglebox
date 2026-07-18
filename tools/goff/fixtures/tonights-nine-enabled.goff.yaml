@@ -1,0 +1,6 @@
+tonights-nine:
+  variations:
+    enabled: true
+    disabled: false
+  defaultRule:
+    variation: enabled

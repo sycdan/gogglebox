@@ -25,6 +25,15 @@ x-node: &node
     - node_modules:/app/node_modules
 
 services:
+  # Internal GO Feature Flag relay. It reads the checked-out flag file by
+  # default; tests can override GOFF_FLAGS_FILE to mount a complete alternate
+  # flag input without editing production-safe flags/goff.yaml.
+  goff:
+    image: gofeatureflag/go-feature-flag:latest
+    volumes:
+      - ./tools/goff/goff-proxy.yaml:/goff/goff-proxy.yaml:ro
+      - ${GOFF_FLAGS_FILE:-./flags/goff.yaml}:/goff/flags.goff.yaml:ro
+
   # One-shot: populate the node_modules volume. Other services wait on this.
   deps:
     <<: *node
@@ -41,9 +50,13 @@ services:
         required: false
     environment:
       - PORT=3000
+      - GOFF_ENDPOINT=http://goff:1031
+      - GOFF_API_KEY=gogglebox-local
     # No host port: the proxy (:8080) is the single entrypoint. Other services
     # reach the server as `server:3000` over the compose network.
     depends_on:
+      goff:
+        condition: service_started
       deps:
         condition: service_completed_successfully
 

@@ -23,11 +23,12 @@ compatibility aliases (see `src/server/server.ts`). Jellyfin remains the source
 of truth for library, metadata, and watch history; Gogglebox is a thin
 party-aware layer on top.
 
-The main discovery surface deals a finite Tonight's Nine set for the active
-party and shows it as three large cards: the selected card in the middle with
-readable neighbors on either side. The room can move focus, register lightweight
-positive sentiment, dismiss a pick for tonight, start a short play countdown, or
-hold play to launch the focused item immediately.
+When enabled by feature flag, the main discovery surface deals a finite
+Tonight's Nine set for the active party and shows it as three large cards: the
+selected card in the middle with readable neighbors on either side. The room can
+move focus, register lightweight positive sentiment, dismiss a pick for tonight,
+start a short play countdown, or hold play to launch the focused item
+immediately.
 
 ## Where it is going
 
@@ -101,6 +102,12 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
 ```
 
 Open `http://<host>:<GOGGLEBOX_PORT>`.
+
+The deployment compose starts a private GO Feature Flag sidecar next to the app.
+Gogglebox calls it internally and exposes only the app-owned `/api/flags`
+contract to the browser. The sidecar reads `flags/goff.yaml`, where
+`tonights-nine` is production-safe disabled by default; changing that file can
+update flag state without rebuilding the Gogglebox image.
 
 Useful deploy commands:
 
@@ -183,6 +190,10 @@ To run the full app, use one of the wrapper stacks:
 Both stacks serve the app through `http://localhost:8080` with `/api` routed to
 Gogglebox and `/player` routed to Jellyfin. The server and client services do
 not expose separate host ports.
+
+Local and sandbox stacks also run the GO Feature Flag sidecar. By default it
+mounts `flags/goff.yaml`; set `GOFF_FLAGS_FILE` to another complete GOFF file
+when a proof needs a different flag state.
 
 Common examples:
 
