@@ -2123,9 +2123,16 @@ export function App() {
         <div className="media-grid">
           {continuePager.visible.map((item) => (
             <article className="media-card" key={`continue-${item.id}-${item.sourceViewerId}`}>
-              <div className="poster" style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : undefined}>
+              <button
+                className="poster continue-poster-play"
+                style={item.imageUrl ? { backgroundImage: `url(${item.imageUrl})` } : undefined}
+                onClick={() => void startContinuePlayback(item)}
+                type="button"
+                aria-label={`${item.progressPercent > 0 ? 'Resume' : 'Play'} ${item.name}`}
+              >
                 {!item.imageUrl ? <span>No artwork</span> : null}
-              </div>
+                <span className="poster-play-badge" aria-hidden="true">Play</span>
+              </button>
               <div className="media-copy">
                 <div className="row spread top-align">
                   <h3>{item.name}</h3>

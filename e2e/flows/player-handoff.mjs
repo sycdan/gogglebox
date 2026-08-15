@@ -85,15 +85,21 @@ export async function run(page, ctx) {
   await page.reload({ waitUntil: 'networkidle' });
   await page.waitForLoadState('networkidle');
 
-  // ── Find a play affordance: prefer a Continue-watching Resume/Play, else a
-  //    library media-card Play. ──────────────────────────────────────────────
+  // ── Find a play affordance: prefer the Continue-watching thumbnail play
+  //    button, then its Resume/Play button, else a library media-card Play. ──
+  const continuePosterPlay = page
+    .locator('.section-block .media-card .continue-poster-play')
+    .first();
   const continuePlay = page
     .locator('.section-block .media-card button', { hasText: /^(Resume|Play)$/ })
     .first();
   const libraryPlay = page.locator('.media-card button', { hasText: /^Play$/ }).first();
 
   let target = null;
-  if (await continuePlay.count().then((n) => n > 0)) {
+  if (await continuePosterPlay.count().then((n) => n > 0)) {
+    target = continuePosterPlay;
+    console.log('[proof] player-handoff: using a Continue-watching thumbnail play button');
+  } else if (await continuePlay.count().then((n) => n > 0)) {
     target = continuePlay;
     console.log('[proof] player-handoff: using a Continue-watching Resume/Play button');
   } else if (await libraryPlay.count().then((n) => n > 0)) {

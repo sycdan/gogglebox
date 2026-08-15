@@ -522,6 +522,49 @@ h3 {
   color: rgba(255, 255, 255, 0.7);
 }
 
+.continue-poster-play {
+  position: relative;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  text-align: center;
+}
+
+.continue-poster-play::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.continue-poster-play:hover::before,
+.continue-poster-play:focus-visible::before {
+  opacity: 1;
+}
+
+.poster-play-badge {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.5rem;
+  min-height: 4.5rem;
+  border-radius: 999px;
+  background: rgba(244, 239, 232, 0.92);
+  color: #1c100b;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.continue-poster-play:hover .poster-play-badge,
+.continue-poster-play:focus-visible .poster-play-badge {
+  opacity: 1;
+  transform: scale(1);
+}
+
 .badge,
 .tag {
   display: inline-flex;
