@@ -2130,8 +2130,8 @@ export function App() {
                 type="button"
                 aria-label={`${item.progressPercent > 0 ? 'Resume' : 'Play'} ${item.name}`}
               >
-                {!item.imageUrl ? <span>No artwork</span> : null}
-                <span className="poster-play-badge" aria-hidden="true">Play</span>
+                {!item.imageUrl ? <span className="poster-empty">No artwork</span> : null}
+                <span className="poster-play-watermark" aria-hidden="true" />
               </button>
               <div className="media-copy">
                 <div className="row spread top-align">

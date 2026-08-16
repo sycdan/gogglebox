@@ -535,34 +535,55 @@ h3 {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.18);
-  opacity: 0;
-  transition: opacity 160ms ease;
+  opacity: 1;
+  transition: background 160ms ease;
 }
 
 .continue-poster-play:hover::before,
 .continue-poster-play:focus-visible::before {
-  opacity: 1;
+  background: rgba(0, 0, 0, 0.3);
 }
 
-.poster-play-badge {
+.poster-empty {
   position: relative;
+  z-index: 1;
+  transform: translateY(3rem);
+}
+
+.poster-play-watermark {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 4.5rem;
-  min-height: 4.5rem;
+  width: 5rem;
+  height: 5rem;
   border-radius: 999px;
-  background: rgba(244, 239, 232, 0.92);
-  color: #1c100b;
-  opacity: 0;
-  transform: scale(0.96);
-  transition: opacity 160ms ease, transform 160ms ease;
+  border: 1px solid rgba(244, 239, 232, 0.44);
+  background: rgba(17, 20, 23, 0.56);
+  box-shadow: 0 1rem 2.2rem rgba(0, 0, 0, 0.38);
+  color: rgba(244, 239, 232, 0.92);
+  opacity: 0.86;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.98);
+  transition: opacity 160ms ease, transform 160ms ease, background 160ms ease;
 }
 
-.continue-poster-play:hover .poster-play-badge,
-.continue-poster-play:focus-visible .poster-play-badge {
+.poster-play-watermark::before {
+  content: "\25B6";
+  margin-left: 0.25rem;
+  font-size: 2.15rem;
+  line-height: 1;
+}
+
+.continue-poster-play:hover .poster-play-watermark,
+.continue-poster-play:focus-visible .poster-play-watermark {
+  background: rgba(244, 239, 232, 0.92);
+  color: #1c100b;
   opacity: 1;
-  transform: scale(1);
+  transform: translate(-50%, -50%) scale(1.04);
 }
 
 .badge,
