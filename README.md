@@ -169,8 +169,8 @@ because Gogglebox cannot verify them.
 
 ### Git-backed config sync
 
-A deployment can mount a working Git clone at `/config-repo` and set
-`GOGGLEBOX_CONFIG_REPO=/config-repo`. Its `config.json` then replaces the local
+A deployment can mount a working Git clone at `/var/lib/gogglebox` and set
+`GOGGLEBOX_CONFIG_REPO=/var/lib/gogglebox`. Its `config.json` then replaces the local
 `/app/config.json`. The container needs Git and access to the clone's `origin`.
 The account picker shows **Sync config**: it fetches `origin/main`, accepts only
 a fast-forward into a clean clone, validates the config against live Jellyfin
