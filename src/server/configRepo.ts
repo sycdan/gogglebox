@@ -14,10 +14,13 @@ async function git(repoPath: string, ...args: string[]): Promise<string> {
 // Config is edited in another clone and pushed to the bare remote. The app only
 // pulls fast-forwards; a dirty or diverged production clone needs a person to
 // resolve it instead of silently losing a local edit.
-export async function syncConfigRepo(repoPath: string): Promise<{ changed: boolean; revision: string }> {
-  const branch = await git(repoPath, 'symbolic-ref', '--short', 'HEAD');
-  if (branch !== 'main') {
-    throw new Error(`Config clone is on ${branch}; switch to main before syncing.`);
+export async function syncConfigRepo(
+  repoPath: string,
+  branchName = 'main',
+): Promise<{ changed: boolean; revision: string }> {
+  const currentBranch = await git(repoPath, 'symbolic-ref', '--short', 'HEAD');
+  if (currentBranch !== branchName) {
+    throw new Error(`Config clone is on ${currentBranch}; switch to ${branchName} before syncing.`);
   }
 
   const status = await git(repoPath, 'status', '--porcelain', '--untracked-files=all');
@@ -26,7 +29,7 @@ export async function syncConfigRepo(repoPath: string): Promise<{ changed: boole
   }
 
   const before = await git(repoPath, 'rev-parse', 'HEAD');
-  await git(repoPath, 'fetch', '--no-tags', 'origin', 'main');
+  await git(repoPath, 'fetch', '--no-tags', 'origin', branchName);
   await git(repoPath, 'merge', '--ff-only', 'FETCH_HEAD');
   const revision = await git(repoPath, 'rev-parse', 'HEAD');
   return { changed: before !== revision, revision: revision.slice(0, 12) };

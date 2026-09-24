@@ -18,16 +18,16 @@ function commit(repo: string, value: string): void {
     'commit', '-m', 'Update config');
 }
 
-function fixture(t: test.TestContext): { writer: string; production: string } {
+function fixture(t: test.TestContext, branch = 'main'): { writer: string; production: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gogglebox-config-repo-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const remote = path.join(root, 'remote.git');
   const writer = path.join(root, 'writer');
   const production = path.join(root, 'production');
-  git('init', '--bare', '-b', 'main', remote);
+  git('init', '--bare', '-b', branch, remote);
   git('clone', remote, writer);
   commit(writer, '{"schemaVersion":2}');
-  git('-C', writer, 'push', '-u', 'origin', 'main');
+  git('-C', writer, 'push', '-u', 'origin', branch);
   git('clone', remote, production);
   return { writer, production };
 }
@@ -42,6 +42,16 @@ test('syncConfigRepo pulls a fast-forward and reports when it is up to date', as
   assert.equal(fs.readFileSync(path.join(production, 'config.json'), 'utf8'), '{"schemaVersion":2,"users":[]}');
   assert.equal(updated.revision, git('-C', production, 'rev-parse', '--short=12', 'HEAD'));
   assert.equal((await syncConfigRepo(production)).changed, false);
+});
+
+test('syncConfigRepo supports a machine-specific branch', async (t) => {
+  const { writer, production } = fixture(t, 'htpc');
+  commit(writer, '{"schemaVersion":2,"branch":"htpc"}');
+  git('-C', writer, 'push');
+
+  const updated = await syncConfigRepo(production, 'htpc');
+  assert.equal(updated.changed, true);
+  assert.equal(fs.readFileSync(path.join(production, 'config.json'), 'utf8'), '{"schemaVersion":2,"branch":"htpc"}');
 });
 
 test('syncConfigRepo preserves local edits and divergent commits', async (t) => {

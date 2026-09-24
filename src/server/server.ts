@@ -58,6 +58,7 @@ const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
 const featureFlags = createFeatureFlagReaderFromEnv();
 const appState = new AppState();
 const configRepoPath = process.env.GOGGLEBOX_CONFIG_REPO?.trim() || null;
+const configRepoBranch = process.env.GOGGLEBOX_CONFIG_BRANCH?.trim() || 'main';
 const configSourcePath = configRepoPath
   ? path.join(configRepoPath, 'config.json')
   : path.join(process.cwd(), 'config.json');
@@ -566,7 +567,7 @@ export function createApp(
     }
 
     try {
-      const sync = await syncConfigRepo(configRepository);
+      const sync = await syncConfigRepo(configRepository, configRepoBranch);
       const jellyfinUsers = await jellyfin.fetchUsers();
       const effective = buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), activeConfigPath);
       appState.setEffectiveConfig(effective);
