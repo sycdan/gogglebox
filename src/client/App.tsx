@@ -166,6 +166,7 @@ function ignorePayloadForMovieCard(item: ContinueWatchingItem): IgnorePayload {
 interface SessionResponse {
   authenticated: boolean;
   portalAutoLoginEnabled: boolean;
+  configSyncEnabled: boolean;
   appName: string;
   watchedThreshold: number;
   // The logged-in account's key, or null when not authenticated.
@@ -467,6 +468,7 @@ export function App() {
   const playerModalRef = useRef<HTMLDivElement | null>(null);
   const [autoMarked, setAutoMarked] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [configSyncMessage, setConfigSyncMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -1104,6 +1106,22 @@ export function App() {
       await loadSession();
     } catch (nextError) {
       setError(nextError instanceof Error ? nextError.message : 'Could not sign out');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function syncConfig() {
+    try {
+      setBusy(true);
+      setError(null);
+      setConfigSyncMessage(null);
+      const result = await apiRequest<{ changed: boolean }>('/api/config/sync', { method: 'POST' });
+      await loadSession();
+      await loadSavedParties();
+      setConfigSyncMessage(result.changed ? 'Config updated from the state repo.' : 'Config is up to date.');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not sync config');
     } finally {
       setBusy(false);
     }
@@ -1929,7 +1947,12 @@ export function App() {
               <p className="eyebrow">Who is watching?</p>
               <h1>Pick the party</h1>
             </div>
-            <button className="ghost" onClick={() => void logout()}>Log out</button>
+            <div className="row">
+              {session.configSyncEnabled ? (
+                <button className="ghost" disabled={busy} onClick={() => void syncConfig()} type="button">Sync config</button>
+              ) : null}
+              <button className="ghost" onClick={() => void logout()}>Log out</button>
+            </div>
           </div>
           <div className="viewer-grid">
             {/* Primaries (preselected), then secondaries, then any ADDED guests.
@@ -1992,6 +2015,7 @@ export function App() {
               Continue
             </button>
           </div>
+          {configSyncMessage ? <p className="muted" role="status">{configSyncMessage}</p> : null}
           {error ? <p className="error">{error}</p> : null}
         </div>
         {guestModalOpen ? (
