@@ -167,6 +167,21 @@ a wildcard over the remaining live Jellyfin users after higher-priority tiers
 are assigned. Guests without a configured `pin` in `users` are not addable,
 because Gogglebox cannot verify them.
 
+### Git-backed config sync
+
+A deployment can mount a working Git clone at `/config-repo` and set
+`GOGGLEBOX_CONFIG_REPO=/config-repo`. Its `config.json` then replaces the local
+`/app/config.json`. The container needs Git and access to the clone's `origin`.
+The account picker shows **Sync config**: it fetches `origin/main`, accepts only
+a fast-forward into a clean clone, validates the config against live Jellyfin
+users, and applies it without restarting the server or dropping sessions. The
+app only pulls; edit, commit, and push config from a trusted clone. A failed
+sync leaves the current in-memory config active.
+
+For Dan's home deployment, the private bare remote and working clone are
+documented in `my-home-server/etc/gogglebox/README.md`. Other deployments can
+continue using `deploy/config.json` without Git sync.
+
 ## Development
 
 Development also runs through Docker Compose. The host should not need Node,

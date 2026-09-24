@@ -14,6 +14,7 @@ import {
 import { AppState } from './appState';
 import { buildEffectiveConfig, loadConfig, readSourceHash, resolveViewers } from './config';
 import { CachedEffectiveConfig } from './appState';
+import { syncConfigRepo } from './configRepo';
 import { CURRENT_SCHEMA_VERSION } from './configMigrations';
 import {
   ContinueWatchingCandidate,
@@ -56,6 +57,10 @@ const config = loadConfig();
 const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
 const featureFlags = createFeatureFlagReaderFromEnv();
 const appState = new AppState();
+const configRepoPath = process.env.GOGGLEBOX_CONFIG_REPO?.trim() || null;
+const configSourcePath = configRepoPath
+  ? path.join(configRepoPath, 'config.json')
+  : path.join(process.cwd(), 'config.json');
 const clientDist = path.resolve(process.cwd(), 'dist/client');
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
 
@@ -74,12 +79,12 @@ function readPackageVersion(): string {
 // Apply a derived/cached effective config to the live config object: the
 // validated users/accounts/accessTokens plus the resolved playback/
 // recommendation values.
-function applyEffectiveConfig(effective: CachedEffectiveConfig): void {
-  config.users = effective.users as typeof config.users;
-  config.accounts = effective.accounts as typeof config.accounts;
-  config.accessTokens = effective.accessTokens;
-  config.watchedThreshold = effective.watchedThreshold;
-  config.recommendations = { count: effective.recommendationCount };
+function applyEffectiveConfig(target: AppConfig, effective: CachedEffectiveConfig): void {
+  target.users = effective.users as typeof target.users;
+  target.accounts = effective.accounts as typeof target.accounts;
+  target.accessTokens = effective.accessTokens;
+  target.watchedThreshold = effective.watchedThreshold;
+  target.recommendations = { count: effective.recommendationCount };
 }
 
 function isKidsContent(item: LibraryItem): boolean {
@@ -290,8 +295,12 @@ export function createApp(
   jellyfin: JellyfinClient,
   appState: AppState,
   featureFlags: FeatureFlagReader = createFeatureFlagReaderFromEnv(),
+  configRepository: string | null = configRepoPath,
 ): express.Express {
   const app = express();
+  const activeConfigPath = configRepository
+    ? path.join(configRepository, 'config.json')
+    : configSourcePath;
 
   function isKidsContent(item: LibraryItem): boolean {
     const rating = item.officialRating?.toUpperCase() ?? '';
@@ -538,6 +547,7 @@ export function createApp(
       appName: config.appName,
       watchedThreshold: config.watchedThreshold,
       account: auth ? auth.accountKey : null,
+      configSyncEnabled: Boolean(configRepository),
       viewers,
       activeViewerIds: req.session.activeViewerIds ?? [],
       // The active party's human-readable alias (never the raw gbx-grp-<hash>),
@@ -547,6 +557,26 @@ export function createApp(
       // reading the old name. Never diverges from activePartyAlias above.
       activeGroupAlias: partyAlias,
     });
+  });
+
+  app.post('/api/config/sync', requireAuth, async (_req, res) => {
+    if (!configRepository) {
+      res.status(404).json({ error: 'Config sync is not configured' });
+      return;
+    }
+
+    try {
+      const sync = await syncConfigRepo(configRepository);
+      const jellyfinUsers = await jellyfin.fetchUsers();
+      const effective = buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), activeConfigPath);
+      appState.setEffectiveConfig(effective);
+      applyEffectiveConfig(config, effective);
+      config.viewersByName = resolveViewers(jellyfinUsers);
+      res.json({ ok: true, ...sync });
+    } catch (error) {
+      console.error('[config] sync failed:', error);
+      res.status(502).json({ error: error instanceof Error ? error.message : 'Config sync failed' });
+    }
   });
 
   app.get('/api/flags', requireAuth, async (req, res) => {
@@ -1176,13 +1206,13 @@ if (isEntryPoint) {
       // (builtForPackage) — otherwise reuse the cached effective config.
       const jellyfinUsers = await jellyfin.fetchUsers();
       const packageVersion = readPackageVersion();
-      const sourceHash = readSourceHash();
+      const sourceHash = readSourceHash(configSourcePath);
 
       let effective = appState.getEffectiveConfig();
       if (effective && appState.isEffectiveConfigFresh(sourceHash, packageVersion, CURRENT_SCHEMA_VERSION)) {
         console.log('[startup] reusing cached effective config (source + image unchanged).');
       } else {
-        const built = buildEffectiveConfig({ jellyfinUsers }, packageVersion);
+        const built = buildEffectiveConfig({ jellyfinUsers }, packageVersion, configSourcePath);
         appState.setEffectiveConfig(built);
         effective = built;
         console.log(
@@ -1191,7 +1221,7 @@ if (isEntryPoint) {
         );
       }
 
-      applyEffectiveConfig(effective);
+      applyEffectiveConfig(config, effective);
 
       // Keep the name -> Jellyfin viewer mapping for ALL live Jellyfin users in
       // the app's own (writable) in-memory state — v2 wildcard tiers can include
