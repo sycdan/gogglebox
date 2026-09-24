@@ -567,8 +567,10 @@ export function createApp(
     }
 
     try {
-      const sync = await syncConfigRepo(configRepository, configRepoBranch);
       const jellyfinUsers = await jellyfin.fetchUsers();
+      const sync = await syncConfigRepo(configRepository, configRepoBranch, async (candidatePath) => {
+        buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), candidatePath);
+      });
       const effective = buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), activeConfigPath);
       appState.setEffectiveConfig(effective);
       applyEffectiveConfig(config, effective);

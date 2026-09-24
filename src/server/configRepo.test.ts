@@ -67,3 +67,20 @@ test('syncConfigRepo preserves local edits and divergent commits', async (t) => 
   await assert.rejects(syncConfigRepo(production));
   assert.equal(git('-C', production, 'rev-parse', 'HEAD'), localHead);
 });
+
+test('syncConfigRepo leaves the working config untouched when the fetched config is invalid', async (t) => {
+  const { writer, production } = fixture(t);
+  const originalHead = git('-C', production, 'rev-parse', 'HEAD');
+  const originalConfig = fs.readFileSync(path.join(production, 'config.json'), 'utf8');
+  commit(writer, '{invalid json');
+  git('-C', writer, 'push');
+
+  await assert.rejects(
+    syncConfigRepo(production, 'main', async (candidatePath) => {
+      JSON.parse(fs.readFileSync(candidatePath, 'utf8'));
+    }),
+    SyntaxError,
+  );
+  assert.equal(git('-C', production, 'rev-parse', 'HEAD'), originalHead);
+  assert.equal(fs.readFileSync(path.join(production, 'config.json'), 'utf8'), originalConfig);
+});

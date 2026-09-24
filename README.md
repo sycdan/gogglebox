@@ -169,19 +169,19 @@ because Gogglebox cannot verify them.
 
 ### Git-backed config sync
 
-A deployment can mount a working Git clone at `/var/lib/gogglebox` and set
-`GOGGLEBOX_CONFIG_REPO=/var/lib/gogglebox`. Set `GOGGLEBOX_CONFIG_BRANCH` when
+A deployment can mount a working Git clone at `/var/lib/gogglebox/config-repo` and set
+`GOGGLEBOX_CONFIG_REPO=/var/lib/gogglebox/config-repo`. Set `GOGGLEBOX_CONFIG_BRANCH` when
 the deployment follows a machine branch such as `htpc`; it defaults to `main`.
 Its `config.json` then replaces the local
 `/app/config.json`. The container needs Git and access to the clone's `origin`.
-The account picker shows **Sync config**: it fetches `origin/main`, accepts only
-a fast-forward into a clean clone, validates the config against live Jellyfin
+The account picker shows **Sync config**: it fetches the configured branch from
+`origin`, accepts only a fast-forward into a clean clone, validates the config against live Jellyfin
 users, and applies it without restarting the server or dropping sessions. The
 app only pulls; edit, commit, and push config from a trusted clone. A failed
 sync leaves the current in-memory config active.
 
 For Dan's home deployment, the private bare remote and working clone are
-documented in `my-home-server/etc/gogglebox/README.md`. Other deployments can
+documented in the `whh-gogglebox-config` state repo README. Other deployments can
 continue using `deploy/config.json` without Git sync.
 
 ## Development
