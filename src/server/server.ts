@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import express from 'express';
@@ -58,12 +59,43 @@ const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
 const featureFlags = createFeatureFlagReaderFromEnv();
 const appState = new AppState();
 const configRepoPath = process.env.GOGGLEBOX_CONFIG_REPO?.trim() || null;
+const configManagerUrl = process.env.GOGGLEBOX_CONFIG_MANAGER_URL?.trim().replace(/\/$/, '') || null;
 const configRepoBranch = process.env.GOGGLEBOX_CONFIG_BRANCH?.trim() || 'main';
-const configSourcePath = configRepoPath
+const configSourcePath = configManagerUrl
+  ? '/data/config-manager.json'
+  : configRepoPath
   ? path.join(configRepoPath, 'config.json')
   : path.join(process.cwd(), 'config.json');
 const clientDist = path.resolve(process.cwd(), 'dist/client');
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
+
+async function managerRequest<T>(managerUrl: string, route: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${managerUrl}${route}`, {
+    ...init,
+    signal: AbortSignal.timeout(10_000),
+  });
+  const result = await response.json() as T & { error?: string };
+  if (!response.ok) throw new Error(result.error || `Config manager returned ${response.status}`);
+  return result;
+}
+
+function writeManagerConfig(configValue: unknown, target: string): void {
+  const temp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(configValue), { mode: 0o600 });
+  fs.renameSync(temp, target);
+}
+
+async function waitForManagerConfig(): Promise<void> {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
+    try {
+      writeManagerConfig(await managerRequest<unknown>(configManagerUrl as string, '/config'), configSourcePath);
+      return;
+    } catch (error) {
+      if (attempt === 59) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  }
+}
 
 // The running image's package version. Stamped onto the cached effective config
 // so a new/rolled-back image (whose migrations may differ) re-derives it.
@@ -297,6 +329,7 @@ export function createApp(
   appState: AppState,
   featureFlags: FeatureFlagReader = createFeatureFlagReaderFromEnv(),
   configRepository: string | null = configRepoPath,
+  configManager: string | null = configManagerUrl,
 ): express.Express {
   const app = express();
   const activeConfigPath = configRepository
@@ -549,6 +582,7 @@ export function createApp(
       watchedThreshold: config.watchedThreshold,
       account: auth ? auth.accountKey : null,
       configSyncEnabled: Boolean(configRepository),
+      configUpdateEnabled: Boolean(configManager),
       viewers,
       activeViewerIds: req.session.activeViewerIds ?? [],
       // The active party's human-readable alias (never the raw gbx-grp-<hash>),
@@ -579,6 +613,39 @@ export function createApp(
     } catch (error) {
       console.error('[config] sync failed:', error);
       res.status(502).json({ error: error instanceof Error ? error.message : 'Config sync failed' });
+    }
+  });
+
+  app.get('/api/config/update', requireAuth, async (_req, res) => {
+    if (!configManager) return res.status(404).json({ error: 'Config manager is not configured' });
+    try {
+      res.json(await managerRequest<unknown>(configManager, '/status'));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'Config manager unavailable' });
+    }
+  });
+
+  app.post('/api/config/update', requireAuth, async (req, res) => {
+    if (!configManager) return res.status(404).json({ error: 'Config manager is not configured' });
+    const revision = (req.body as { revision?: unknown })?.revision;
+    if (typeof revision !== 'string' || !/^[0-9a-f]{40}$/.test(revision)) {
+      return res.status(400).json({ error: 'Expected a full commit SHA' });
+    }
+    const candidatePath = path.join(os.tmpdir(), `gogglebox-candidate-${crypto.randomUUID()}.json`);
+    try {
+      const candidate = await managerRequest<unknown>(configManager, `/candidate?revision=${revision}`);
+      writeManagerConfig(candidate, candidatePath);
+      const jellyfinUsers = await jellyfin.fetchUsers();
+      buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), candidatePath);
+      res.status(202).json(await managerRequest<unknown>(configManager, '/update', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision }),
+      }));
+    } catch (error) {
+      res.status(502).json({ error: error instanceof Error ? error.message : 'Update failed' });
+    } finally {
+      try { fs.unlinkSync(candidatePath); } catch { /* No candidate was written. */ }
     }
   });
 
@@ -1209,6 +1276,7 @@ if (isEntryPoint) {
       // (builtForPackage) — otherwise reuse the cached effective config.
       const jellyfinUsers = await jellyfin.fetchUsers();
       const packageVersion = readPackageVersion();
+      if (configManagerUrl) await waitForManagerConfig();
       const sourceHash = readSourceHash(configSourcePath);
 
       let effective = appState.getEffectiveConfig();

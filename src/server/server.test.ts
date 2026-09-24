@@ -175,9 +175,10 @@ async function startTestServerWithFlags(
   featureFlags: FeatureFlagReader,
   configRepository?: string,
   jellyfinOverride?: JellyfinClient,
+  configManager?: string,
 ): Promise<TestServer> {
   const jellyfin = jellyfinOverride ?? new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
-  const app = createApp(config, jellyfin, appState, featureFlags, configRepository);
+  const app = createApp(config, jellyfin, appState, featureFlags, configRepository, configManager);
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -235,6 +236,74 @@ test('Sync config fast-forwards and updates the viewer picker without losing the
     assert.deepEqual(body.viewers.map((viewer) => viewer.name), ['Alice', 'Bob']);
   } finally {
     await testServer.close();
+  }
+});
+
+test('Restart and update requires authentication and forwards only a validated pending SHA', async () => {
+  const revision = 'a'.repeat(40);
+  let candidateSchema = 2;
+  let forwarded: string | null = null;
+  const manager = http.createServer(async (req, res) => {
+    res.setHeader('content-type', 'application/json');
+    if (req.url === '/status') {
+      res.end(JSON.stringify({ active: 'b'.repeat(40), pending: revision, changedFiles: ['config.json'], phase: 'idle', error: null }));
+    } else if (req.url === `/candidate?revision=${revision}`) {
+      res.end(JSON.stringify({
+        schemaVersion: candidateSchema,
+        users: [{ jellyfin_name: 'Alice' }, { jellyfin_name: 'Bob' }],
+        accounts: { household: { primary_users: ['Alice', 'Bob'], secondary_users: [], tertiary_users: [] } },
+        access_tokens: { 'test-token': 'household' },
+      }));
+    } else if (req.url === '/update' && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      forwarded = (JSON.parse(body) as { revision: string }).revision;
+      res.statusCode = 202;
+      res.end(JSON.stringify({ accepted: forwarded }));
+    } else {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'Not found' }));
+    }
+  });
+  await new Promise<void>((resolve) => manager.listen(0, '127.0.0.1', resolve));
+  const address = manager.address();
+  assert.ok(address && typeof address !== 'string');
+  const config = buildConfig();
+  const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
+  jellyfin.fetchUsers = async () => [ALICE, BOB];
+  const testServer = await startTestServerWithFlags(
+    config, new AppState(tempStatePath()), new MapFeatureFlags(), undefined, jellyfin,
+    `http://127.0.0.1:${address.port}`,
+  );
+  try {
+    assert.equal((await fetch(`${testServer.baseUrl}/api/config/update`)).status, 401);
+    const cookie = await login(testServer.baseUrl, 'test-token');
+    const status = await fetch(`${testServer.baseUrl}/api/config/update`, { headers: { cookie } });
+    assert.equal(status.status, 200);
+    assert.equal((await json<{ pending: string }>(status)).pending, revision);
+    const invalid = await fetch(`${testServer.baseUrl}/api/config/update`, {
+      method: 'POST', headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ revision: 'bad' }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(forwarded, null);
+    candidateSchema = 999;
+    const badCandidate = await fetch(`${testServer.baseUrl}/api/config/update`, {
+      method: 'POST', headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ revision }),
+    });
+    assert.equal(badCandidate.status, 502);
+    assert.equal(forwarded, null);
+    candidateSchema = 2;
+    const accepted = await fetch(`${testServer.baseUrl}/api/config/update`, {
+      method: 'POST', headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ revision }),
+    });
+    assert.equal(accepted.status, 202);
+    assert.equal(forwarded, revision);
+  } finally {
+    await testServer.close();
+    await new Promise<void>((resolve, reject) => manager.close((error) => error ? reject(error) : resolve()));
   }
 });
 
