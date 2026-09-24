@@ -167,22 +167,21 @@ a wildcard over the remaining live Jellyfin users after higher-priority tiers
 are assigned. Guests without a configured `pin` in `users` are not addable,
 because Gogglebox cannot verify them.
 
-### Git-backed config sync
+### Config manager deployment
 
-A deployment can mount a working Git clone at `/var/lib/gogglebox/config-repo` and set
-`GOGGLEBOX_CONFIG_REPO=/var/lib/gogglebox/config-repo`. Set `GOGGLEBOX_CONFIG_BRANCH` when
-the deployment follows a machine branch such as `htpc`; it defaults to `main`.
-Its `config.json` then replaces the local
-`/app/config.json`. The container needs Git and access to the clone's `origin`.
-The account picker shows **Sync config**: it fetches the configured branch from
-`origin`, accepts only a fast-forward into a clean clone, validates the config against live Jellyfin
-users, and applies it without restarting the server or dropping sessions. The
-app only pulls; edit, commit, and push config from a trusted clone. A failed
-sync leaves the current in-memory config active.
+Set `GOGGLEBOX_CONFIG_MANAGER_URL` to the manager's internal Compose URL (for
+example, `http://config-manager:3001`). At startup Gogglebox reads the active
+`config.json` from that API and validates it against live Jellyfin users. It
+does not need a Git or Docker mount. An authenticated page shows a pending
+config commit and offers **Restart and update**. Gogglebox validates the
+candidate config and sends the exact SHA to the manager, which owns the Git
+checkout and redeploys the ordinary Compose services. The manager is not
+exposed through Caddy. The private `whh-gogglebox-config` README describes
+the HTPC setup, rollout, and recovery.
 
-For Dan's home deployment, the private bare remote and working clone are
-documented in the `whh-gogglebox-config` state repo README. Other deployments can
-continue using `deploy/config.json` without Git sync.
+Other deployments can continue using their local `config.json`. The older
+`GOGGLEBOX_CONFIG_REPO` and **Sync config** path remains available for existing
+deployments during migration, but the HTPC Compose file no longer uses it.
 
 ## Development
 

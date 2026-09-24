@@ -167,6 +167,7 @@ interface SessionResponse {
   authenticated: boolean;
   portalAutoLoginEnabled: boolean;
   configSyncEnabled: boolean;
+  configUpdateEnabled: boolean;
   appName: string;
   watchedThreshold: number;
   // The logged-in account's key, or null when not authenticated.
@@ -179,6 +180,15 @@ interface SessionResponse {
 
 interface AppFlags {
   tonightsNine: boolean;
+}
+
+interface ConfigUpdateStatus {
+  active: string;
+  pending: string | null;
+  changedFiles: string[];
+  phase: 'idle' | 'updating' | 'error';
+  error: string | null;
+  lastResult: { revision: string; completedAt: string } | null;
 }
 
 const DEFAULT_APP_FLAGS: AppFlags = {
@@ -469,6 +479,8 @@ export function App() {
   const [autoMarked, setAutoMarked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [configSyncMessage, setConfigSyncMessage] = useState<string | null>(null);
+  const [configUpdateStatus, setConfigUpdateStatus] = useState<ConfigUpdateStatus | null>(null);
+  const [updateStarting, setUpdateStarting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -628,6 +640,15 @@ export function App() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!session?.authenticated || !session.configUpdateEnabled) return;
+    void loadConfigUpdateStatus().catch((nextError) => setError(nextError instanceof Error ? nextError.message : 'Could not check updates'));
+    const timer = window.setInterval(() => {
+      void loadConfigUpdateStatus().catch(() => {});
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [session?.authenticated, session?.configUpdateEnabled]);
 
   useEffect(() => {
     setPendingDismissal(null);
@@ -1125,6 +1146,80 @@ export function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function loadConfigUpdateStatus() {
+    setConfigUpdateStatus(await apiRequest<ConfigUpdateStatus>('/api/config/update'));
+  }
+
+  async function restartAndUpdate() {
+    const revision = configUpdateStatus?.pending;
+    if (!revision) return;
+    try {
+      setUpdateStarting(true);
+      setError(null);
+      await apiRequest('/api/config/update', {
+        method: 'POST',
+        body: JSON.stringify({ revision }),
+      });
+      setConfigSyncMessage(`Restarting with ${revision.slice(0, 12)}. This page will reconnect.`);
+      let sawOutage = false;
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 3000));
+        try {
+          const health = await fetch('/api/health', { cache: 'no-store' });
+          if (!health.ok) {
+            sawOutage = true;
+            continue;
+          }
+          const sessionResponse = await fetch('/api/session', { cache: 'no-store' });
+          if (sessionResponse.ok && !(await sessionResponse.json() as SessionResponse).authenticated) {
+            window.location.reload();
+            return;
+          }
+          const updateResponse = await fetch('/api/config/update', { cache: 'no-store' });
+          if (updateResponse.ok) {
+            const update = await updateResponse.json() as ConfigUpdateStatus;
+            if (update.lastResult?.revision === revision || (sawOutage && update.phase === 'idle')) {
+              window.location.reload();
+              return;
+            }
+            if (update.phase === 'error') {
+              setError(update.error || 'Update failed');
+              return;
+            }
+          }
+        } catch {
+          sawOutage = true;
+        }
+      }
+      setConfigSyncMessage('The update was requested. Refresh this page when Gogglebox is back.');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not start update');
+    } finally {
+      setUpdateStarting(false);
+    }
+  }
+
+  function updateNotice() {
+    if (!session?.configUpdateEnabled) return null;
+    return (
+      <div className="panel section-block" role="status">
+        {configUpdateStatus?.pending ? (
+          <div className="row spread">
+            <div>
+              <strong>Update available: {configUpdateStatus.pending.slice(0, 12)}</strong>
+              <p className="muted">{configUpdateStatus.changedFiles.join(', ') || 'Config repo changed'}</p>
+            </div>
+            <button disabled={updateStarting || configUpdateStatus.phase === 'updating'} onClick={() => void restartAndUpdate()} type="button">
+              Restart and update
+            </button>
+          </div>
+        ) : <p className="muted">{configUpdateStatus?.phase === 'updating' ? 'Updating Gogglebox…' : 'Config is up to date.'}</p>}
+        {configUpdateStatus?.error ? <p className="error">{configUpdateStatus.error}</p> : null}
+        {configSyncMessage ? <p className="muted">{configSyncMessage}</p> : null}
+      </div>
+    );
   }
 
   async function markWatched(itemId: string) {
@@ -1954,6 +2049,7 @@ export function App() {
               <button className="ghost" onClick={() => void logout()}>Log out</button>
             </div>
           </div>
+          {updateNotice()}
           <div className="viewer-grid">
             {/* Primaries (preselected), then secondaries, then any ADDED guests.
                 No PIN badges — guest pins are collected at Continue time. */}
@@ -2125,6 +2221,8 @@ export function App() {
           <button className="ghost compact" onClick={() => void logout()} type="button">Log out</button>
         </div>
       </header>
+
+      {updateNotice()}
 
       <section className="panel section-block">
         <div className="row spread">
