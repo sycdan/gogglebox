@@ -884,10 +884,6 @@ export function App() {
     () => (session?.viewers ?? []).filter((viewer) => selectedViewerIds.includes(viewer.id)),
     [session?.viewers, selectedViewerIds],
   );
-  const activeViewers = useMemo(
-    () => (session?.viewers ?? []).filter((viewer) => session?.activeViewerIds.includes(viewer.id)),
-    [session?.viewers, session?.activeViewerIds],
-  );
   const selectedViewerNames = formatViewerNames(selectedViewers);
 
   // Guests offered by the modal: mid-Continue it collects pins for EXACTLY the
@@ -1327,11 +1323,8 @@ export function App() {
 
   function accountMenu() {
     if (!session) return null;
-    const menuViewer = activeViewers[0] ?? primaryViewers[0] ?? session.viewers[0];
-    const accountLabel = session.activePartyAlias
-      || activeViewers.map((viewer) => viewer.name).join(' + ')
-      || session.account
-      || 'Household account';
+    const menuViewer = primaryViewers[0] ?? session.viewers[0];
+    const accountLabel = menuViewer?.name || session.account || 'Household account';
     const configNeedsAttention = Boolean(configUpdateStatus?.pending || configUpdateStatus?.error);
 
     return (
