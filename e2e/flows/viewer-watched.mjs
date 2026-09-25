@@ -2,7 +2,7 @@ import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
 // ── viewer-watched flow ────────────────────────────────────────────────────
 // Proves the per-viewer watched-state pills on Continue-watching cards:
-//   1. Primary button reads "Play" (was "Continue").
+//   1. Primary button reads "Play", or "Resume" when the item has progress.
 //   2. A .viewer-pills group renders next to Play, one .viewer-pill per viewer.
 //   3. A viewer whose current episode is marked played shows a .viewer-pill-check
 //      overlay (the .watched modifier).
@@ -52,12 +52,12 @@ export async function run(page, ctx) {
     fail('viewer-watched: no continue-watching card rendered any .viewer-pill — feature not visible.');
   }
 
-  // Assert the primary button label is "Play" (point 1).
+  // Assert the primary button label (point 1).
   const playBtn = targetCard.locator('.play-row > button').first();
   const playLabel = (await playBtn.innerText().catch(() => '')).trim();
   console.log(`[proof] viewer-watched: primary button label = "${playLabel}"`);
-  if (!/^Play$/i.test(playLabel)) {
-    console.error(`[proof] viewer-watched: FAIL — primary button label is "${playLabel}", expected "Play"`);
+  if (!/^(Play|Resume)$/.test(playLabel)) {
+    fail(`viewer-watched: primary button label is "${playLabel}", expected "Play" or "Resume"`);
   }
 
   // Scroll the card into view and full-page shot for overall context.
