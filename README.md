@@ -173,11 +173,13 @@ Set `GOGGLEBOX_CONFIG_MANAGER_URL` to the manager's internal Compose URL (for
 example, `http://config-manager:3001`). At startup Gogglebox reads the active
 `config.json` from that API and validates it against live Jellyfin users. It
 does not need a Git or Docker mount. An authenticated page shows a pending
-config commit and offers **Restart and update**. Gogglebox validates the
-candidate config and sends the exact SHA to the manager, which owns the Git
-checkout and redeploys the ordinary Compose services. The manager is not
-exposed through Caddy. The private `whh-gogglebox-config` README describes
-the HTPC setup, rollout, and recovery.
+config commit as an alert on the top-right account menu. Open
+**Administration** from that menu to review the active and available revisions
+and choose **Restart and update**. Gogglebox validates the candidate config and
+sends the exact SHA to the manager, which owns the Git checkout and redeploys
+the ordinary Compose services. The manager is not exposed through Caddy. The
+private `whh-gogglebox-config` README describes the HTPC setup, rollout, and
+recovery.
 
 Other deployments can continue using their local `config.json`. The older
 `GOGGLEBOX_CONFIG_REPO` and **Sync config** path remains available for existing
