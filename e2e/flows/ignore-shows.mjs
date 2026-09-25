@@ -1,7 +1,7 @@
 import { pickEveryonePartyAndContinue } from '../lib/viewer.mjs';
 
 // Proves the per-party Ignore feature against the current manual search path:
-// an ignored search-result card disappears, the hero Ignored modal lists it,
+// an ignored search-result card disappears, the account-menu Ignored modal lists it,
 // and Unignore makes the card available to search again.
 export const match = /ignore/i;
 
@@ -106,13 +106,14 @@ export async function run(page, ctx) {
   }
   console.log(`[proof] ignore-shows: PASS - "${targetTitle}" disappeared from Search results after Ignore`);
 
-  const heroOpen = page.getByRole('button', { name: /^Ignored/ }).first();
   try {
-    await heroOpen.waitFor({ state: 'visible', timeout: 10_000 });
-    await heroOpen.click();
+    await page.getByRole('button', { name: 'Open account menu' }).first().click({ timeout: 10_000 });
+    const menuOpen = page.getByRole('menuitem', { name: /^Ignored/ }).first();
+    await menuOpen.waitFor({ state: 'visible', timeout: 10_000 });
+    await menuOpen.click();
   } catch (error) {
     await shoot(page, `${flowName}-05-no-ignored-button`);
-    fail('ignore-shows: hero "Ignored" button not found', error);
+    fail('ignore-shows: account-menu "Ignored" item not found', error);
   }
 
   const ignoredModal = page
