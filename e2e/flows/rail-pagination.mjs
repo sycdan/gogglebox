@@ -42,7 +42,7 @@ export async function run(page, ctx) {
   await shoot(page, `${flowName}-01-page1`);
 
   if (prevDisabledBefore !== true) {
-    console.error('[proof] rail-pagination: FAIL — prev arrow NOT disabled on page 1');
+    fail('rail-pagination: prev arrow NOT disabled on page 1');
   }
 
   if (await next.isDisabled().catch(() => true)) {
@@ -64,6 +64,6 @@ export async function run(page, ctx) {
   if (changed && prevDisabledAfter === false) {
     console.log('[proof] rail-pagination: PASS — Next advanced to a new tile set and enabled prev');
   } else {
-    console.error(`[proof] rail-pagination: FAIL — changed=${changed} prevDisabledAfter=${prevDisabledAfter}`);
+    fail(`rail-pagination: changed=${changed} prevDisabledAfter=${prevDisabledAfter}`);
   }
 }

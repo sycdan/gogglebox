@@ -38,9 +38,7 @@ export async function run(page, ctx) {
   if (browseHeadings.length === 0) {
     console.log('[proof] search: PASS — no full library grid on load (no "Browse" section header)');
   } else {
-    console.error(
-      `[proof] search: FAIL — no full library grid on load: found "Browse" header(s) ${JSON.stringify(browseHeadings)}`,
-    );
+    fail(`search: no full library grid on load: found "Browse" header(s) ${JSON.stringify(browseHeadings)}`);
   }
 
   // Screenshot the home near the top so the toolbar is visible.
@@ -95,9 +93,11 @@ export async function run(page, ctx) {
   }
 
   // ── Type the query and wait for debounced results ─────────────────────────
-  console.log('[proof] search: typing "planet" into the search input');
+  // "show" matches several sandbox fixtures (tools/sandbox/fixtures.mjs).
+  const query = 'show';
+  console.log(`[proof] search: typing "${query}" into the search input`);
   await searchInput.click();
-  await searchInput.fill('planet');
+  await searchInput.fill(query);
 
   // Debounce is ~1s; give it the debounce + the server round-trip.
   await page.waitForTimeout(1_300);
@@ -115,7 +115,7 @@ export async function run(page, ctx) {
   }
 
   const titles = await resultTitles();
-  console.log(`[proof] search: result titles for q="planet" [${titles.length}] =`, JSON.stringify(titles));
+  console.log(`[proof] search: result titles for q="${query}" [${titles.length}] =`, JSON.stringify(titles));
 
   await page.evaluate(() => {
     const h = [...document.querySelectorAll('.section-block h2')].find(
@@ -127,18 +127,19 @@ export async function run(page, ctx) {
   await shootView(page, `${flowName}-02-results`);
 
   if (resultsShown && titles.length > 0) {
-    const allMatch = titles.every((t) => /planet/i.test(t));
+    const matches = (t) => t.toLowerCase().includes(query);
+    const allMatch = titles.every(matches);
     if (allMatch) {
-      console.log('[proof] search: PASS — results shown on query (every visible title contains "planet")');
+      console.log(`[proof] search: PASS — results shown on query (every visible title contains "${query}")`);
     } else {
-      const nonMatching = titles.filter((t) => !/planet/i.test(t));
+      const nonMatching = titles.filter((t) => !matches(t));
       console.log(
         `[proof] search: PASS — results shown on query (${titles.length} card(s)); ` +
-          `note: ${nonMatching.length} title(s) do not contain "planet": ${JSON.stringify(nonMatching)}`,
+          `note: ${nonMatching.length} title(s) do not contain "${query}": ${JSON.stringify(nonMatching)}`,
       );
     }
   } else {
-    console.error('[proof] search: FAIL — results shown on query (no Search results cards appeared for q="planet")');
+    fail(`search: no Search results cards appeared for q="${query}"`);
   }
 
   // ── Clear the search and confirm results disappear ────────────────────────
@@ -165,8 +166,6 @@ export async function run(page, ctx) {
     console.log('[proof] search: PASS — clearing search clears results (Search results section gone / no cards)');
   } else {
     const remaining = await resultTitles();
-    console.error(
-      `[proof] search: FAIL — clearing search clears results (Search results still showing ${remaining.length} card(s): ${JSON.stringify(remaining)})`,
-    );
+    fail(`search: clearing search left ${remaining.length} Search results card(s): ${JSON.stringify(remaining)}`);
   }
 }

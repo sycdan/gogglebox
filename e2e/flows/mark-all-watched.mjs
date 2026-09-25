@@ -60,10 +60,33 @@ function cardByPredicate(page, predicate) {
   };
 }
 
-// Find a card index live, by predicate, returning -1 if absent.
+// The rail shows 3 cards per page (RAIL_PAGE_SIZE in App.tsx). Returns false
+// when the arrow is missing (single page) or disabled (at the end).
+async function turnPage(page, label) {
+  const arrow = rail(page).locator(`.rail-pager .rail-arrow[aria-label="${label}"]`);
+  if (!(await arrow.count()) || (await arrow.isDisabled())) return false;
+  await arrow.click();
+  await page.waitForTimeout(300);
+  return true;
+}
+
+// Find a card index live, by predicate, returning -1 if absent. Searches every
+// rail page and leaves the rail on the page holding the match.
 async function findCardIndex(page, predicate) {
-  const snap = await snapshotRail(page);
-  return snap.findIndex(predicate);
+  while (await turnPage(page, 'Previous'));
+  do {
+    const idx = (await snapshotRail(page)).findIndex(predicate);
+    if (idx !== -1) return idx;
+  } while (await turnPage(page, 'Next'));
+  return -1;
+}
+
+async function snapshotAllPages(page) {
+  while (await turnPage(page, 'Previous'));
+  const out = [];
+  do out.push(...(await snapshotRail(page)));
+  while (await turnPage(page, 'Next'));
+  return out;
 }
 
 // Mark EVERY viewer on a card watched. Because the instant-advance feature
@@ -290,7 +313,7 @@ export async function run(page, ctx) {
     } else if (!liveStill) {
       console.log('[proof] mark-all-watched: INSTANT - show ' + JSON.stringify(before.name) + ' removed live (no reload); likely last episode.');
     } else {
-      console.error('[proof] mark-all-watched: INSTANT advance FAILED - card unchanged after toggle (was ' + JSON.stringify(before.meta) + '). Part A refetch may not be wired up.');
+      fail('mark-all-watched: INSTANT advance FAILED - card unchanged after toggle (was ' + JSON.stringify(before.meta) + '). Part A refetch may not be wired up.');
     }
 
     // Backstop: reload and re-assert the server-side resolution agrees.
@@ -305,7 +328,7 @@ export async function run(page, ctx) {
     } else if (!stillSame) {
       console.log('[proof] mark-all-watched: reload confirms show ' + JSON.stringify(before.name) + ' gone (last episode REMOVE).');
     } else {
-      console.error('[proof] mark-all-watched: reload shows SHOW did NOT advance - still ' + JSON.stringify(stillSame.meta) + '.');
+      fail('mark-all-watched: reload shows SHOW did NOT advance - still ' + JSON.stringify(stillSame.meta) + '.');
     }
   }
 
@@ -346,7 +369,7 @@ export async function run(page, ctx) {
     if (!liveThere) {
       console.log('[proof] mark-all-watched: PASS INSTANT movie removal (no reload) - ' + JSON.stringify(before.name) + ' gone from rail.');
     } else {
-      console.error('[proof] mark-all-watched: INSTANT movie removal FAILED - ' + JSON.stringify(before.name) + ' still in rail after toggle.');
+      fail('mark-all-watched: INSTANT movie removal FAILED - ' + JSON.stringify(before.name) + ' still in rail after toggle.');
     }
 
     // Backstop: reload and confirm the server agrees.
@@ -358,7 +381,7 @@ export async function run(page, ctx) {
     if (!stillThere) {
       console.log('[proof] mark-all-watched: reload confirms movie removed - ' + JSON.stringify(before.name) + ' gone.');
     } else {
-      console.error('[proof] mark-all-watched: reload shows MOVIE NOT removed - ' + JSON.stringify(before.name) + ' still in rail.');
+      fail('mark-all-watched: reload shows MOVIE NOT removed - ' + JSON.stringify(before.name) + ' still in rail.');
     }
   }
 
@@ -410,7 +433,7 @@ export async function run(page, ctx) {
     if (partial.watchedPills >= 1 && partial.watchedPills < partial.pillCount) {
       console.log('[proof] mark-all-watched: PASS partial - card stays on the rail with ' + partial.watchedPills + '/' + partial.pillCount + ' pills LIT (subset watched).');
     } else {
-      console.error('[proof] mark-all-watched: partial FAILED - need 1<=watched<' + partial.pillCount + ' for a lit/unlit split, got watched=' + partial.watchedPills + '.');
+      fail('mark-all-watched: partial FAILED - need 1<=watched<' + partial.pillCount + ' for a lit/unlit split, got watched=' + partial.watchedPills + '.');
     }
   }
 
@@ -424,11 +447,13 @@ export async function run(page, ctx) {
     console.warn('[proof] mark-all-watched: no interactive-show seed; skipping step 5.');
   } else {
     const seriesName = interactiveSeed.seriesName;
+    // Target the seeded episode: the pre-watched viewer's next episode fans out
+    // onto its own card for the same series.
+    const seededCode = interactiveSeed.target.code;
+    let idx = await findCardIndex(page, (c) => seriesOf(c.meta) === seriesName && c.meta.endsWith(seededCode));
     cur = await snapshotRail(page);
-    const findIdx = (snap) => snap.findIndex((c) => isShowMeta(c.meta) && seriesOf(c.meta) === seriesName);
-    let idx = findIdx(cur);
     if (idx === -1) {
-      console.error('[proof] mark-all-watched: step 5 - seeded interactive show ' + JSON.stringify(seriesName) + ' not on the rail; cannot prove mid-transition.');
+      fail('mark-all-watched: step 5 - seeded interactive show ' + JSON.stringify(seriesName) + ' not on the rail; cannot prove mid-transition.');
     } else {
       const before = cur[idx];
       const N = before.pillCount; // household size on the actual anchored card
@@ -441,7 +466,7 @@ export async function run(page, ctx) {
       // (so there are clicks left to reach N/N). If it desynced to 0 lit, that is
       // still a valid mid-transition start (we just have N clicks instead of N-1).
       if (before.watchedPills >= N) {
-        console.error('[proof] mark-all-watched: step 5 - card already all-watched at start (' + before.watchedPills + '/' + N + '); cannot show mid-transition.');
+        fail('mark-all-watched: step 5 - card already all-watched at start (' + before.watchedPills + '/' + N + '); cannot show mid-transition.');
       } else {
         if (before.watchedPills < 1) {
           console.warn('[proof] mark-all-watched: step 5 - expected a pre-watched pill at start, got 0/' + N + ' (anchor likely differs from the seeded episode); proceeding with full N clicks.');
@@ -472,7 +497,7 @@ export async function run(page, ctx) {
           if (!isFinalClick) {
             // Should STILL be the same episode, with one more pill lit.
             if (sameIdx === -1) {
-              console.error('[proof] mark-all-watched: step 5 FAILED at click ' + k + '/' + clicksToAll + ' - card left episode ' + JSON.stringify(before.meta) + ' BEFORE all-watched.');
+              fail('mark-all-watched: step 5 FAILED at click ' + k + '/' + clicksToAll + ' - card left episode ' + JSON.stringify(before.meta) + ' BEFORE all-watched.');
               stayedSame = false;
               break;
             }
@@ -486,13 +511,14 @@ export async function run(page, ctx) {
             }
           } else {
             // Final click: card should ADVANCE (or be removed if last episode).
-            const after = await waitForRailChange(page, before);
-            const ai = after.findIndex((c) => isShowMeta(c.meta) && c.meta !== before.meta && seriesOf(c.meta) === seriesName);
-            advancedMeta = ai === -1 ? null : after[ai].meta;
-            removed = !after.find((c) => c.name === before.name && c.meta === before.meta) && ai === -1;
-            stayedSame = Boolean(after.find((c) => c.name === before.name && c.meta === before.meta));
+            await waitForRailChange(page, before);
+            // The advanced episode can sort onto a different page.
+            const ai = await findCardIndex(page, (c) => isShowMeta(c.meta) && c.meta !== before.meta && seriesOf(c.meta) === seriesName);
+            advancedMeta = ai === -1 ? null : (await snapshotRail(page))[ai].meta;
+            stayedSame = (await findCardIndex(page, (c) => c.name === before.name && c.meta === before.meta)) !== -1;
+            removed = !stayedSame && ai === -1;
             if (ai !== -1) {
-              const advCard = cards(page).nth(ai);
+              const advCard = cards(page).nth(await findCardIndex(page, (c) => c.meta === advancedMeta));
               await advCard.scrollIntoViewIfNeeded();
               await advCard.locator('.play-row').first().screenshot({ path: ctx.outDir + '/' + flowName + '-05c-allwatched-advanced.png' });
               console.log('[proof] screenshot: ' + ctx.outDir + '/' + flowName + '-05c-allwatched-advanced.png');
@@ -506,9 +532,9 @@ export async function run(page, ctx) {
         } else if (removed) {
           console.log('[proof] mark-all-watched: PASS step 5 - ' + N + '/' + N + ' watched removed the card (last episode); gate fired after staying put on partials.');
         } else if (stayedSame) {
-          console.error('[proof] mark-all-watched: step 5 FAILED - card did NOT advance/remove after all ' + N + ' viewers watched (still ' + JSON.stringify(before.meta) + ').');
+          fail('mark-all-watched: step 5 FAILED - card did NOT advance/remove after all ' + N + ' viewers watched (still ' + JSON.stringify(before.meta) + ').');
         } else {
-          console.error('[proof] mark-all-watched: step 5 FAILED - card advanced/left BEFORE all viewers watched (premature).');
+          fail('mark-all-watched: step 5 FAILED - card advanced/left BEFORE all viewers watched (premature).');
         }
       }
     }
@@ -527,18 +553,17 @@ export async function run(page, ctx) {
   } else {
     const seriesName = staggeredSeed.seriesName;
     const findAll = (snap) => snap.filter((c) => isShowMeta(c.meta) && seriesOf(c.meta) === seriesName);
-    cur = await snapshotRail(page);
-    const seriesCardsBefore = findAll(cur);
+    const seriesCardsBefore = findAll(await snapshotAllPages(page));
     if (seriesCardsBefore.length === 0) {
-      console.error('[proof] mark-all-watched: step 6 - staggered show ' + JSON.stringify(seriesName) + ' not on the rail.');
+      fail('mark-all-watched: step 6 - staggered show ' + JSON.stringify(seriesName) + ' not on the rail.');
     } else {
       console.log(
         '[proof] mark-all-watched: step 6 fan-out cards for ' + JSON.stringify(seriesName) + ' = ' +
         JSON.stringify(seriesCardsBefore.map((c) => c.meta)),
       );
       const start = seriesCardsBefore[0];
-      const idx = cur.findIndex((c) => c.name === start.name && c.meta === start.meta);
-      let card = cards(page).nth(idx);
+      const findStart = (c) => c.name === start.name && c.meta === start.meta;
+      let card = cards(page).nth(await findCardIndex(page, findStart));
       await card.scrollIntoViewIfNeeded();
       await card.locator('.play-row').first().screenshot({ path: ctx.outDir + '/' + flowName + '-06a-fanout-card.png' });
       console.log('[proof] screenshot: ' + ctx.outDir + '/' + flowName + '-06a-fanout-card.png');
@@ -558,16 +583,15 @@ export async function run(page, ctx) {
           await pill.click();
           await page.waitForTimeout(800);
           await page.waitForLoadState('networkidle').catch(() => {});
-          cur = await snapshotRail(page);
-          const seriesCardsAfter = findAll(cur);
+          const seriesCardsAfter = findAll(await snapshotAllPages(page));
           const otherMetasAfter = seriesCardsAfter.filter((c) => c.meta !== start.meta).map((c) => c.meta);
           const stillHasOthers = otherMetasBefore.every((m) => otherMetasAfter.includes(m));
           if (stillHasOthers) {
             console.log('[proof] mark-all-watched: PASS fan-out (' + phase + ') - other episode-card(s) for ' + JSON.stringify(seriesName) + ' unaffected: ' + JSON.stringify(otherMetasAfter));
           } else {
-            console.error('[proof] mark-all-watched: step 6 FAILED (' + phase + ') - other episode-card(s) changed/disappeared. before=' + JSON.stringify(otherMetasBefore) + ' after=' + JSON.stringify(otherMetasAfter));
+            fail('mark-all-watched: step 6 FAILED (' + phase + ') - other episode-card(s) changed/disappeared. before=' + JSON.stringify(otherMetasBefore) + ' after=' + JSON.stringify(otherMetasAfter));
           }
-          const reIdx = cur.findIndex((c) => c.name === start.name && c.meta === start.meta);
+          const reIdx = await findCardIndex(page, findStart);
           card = reIdx === -1 ? card : cards(page).nth(reIdx);
         }
       }
