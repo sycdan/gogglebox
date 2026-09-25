@@ -85,9 +85,10 @@ export async function run(page, ctx) {
   // token, and with auto-login disabled via the patched session, the logged-out
   // page renders the login form. Wait on the DOM load event (element waits
   // below are the real gate).
-  const logoutBtn = page.getByRole('button', { name: 'Log out' }).first();
-  if (await logoutBtn.count().then((n) => n > 0)) {
-    await logoutBtn.click().catch(() => {});
+  const accountMenuBtn = page.getByRole('button', { name: 'Open account menu' }).first();
+  if (await accountMenuBtn.count().then((n) => n > 0)) {
+    await accountMenuBtn.click().catch(() => {});
+    await page.getByRole('menuitem', { name: 'Log out' }).first().click().catch(() => {});
   }
   await page.reload({ waitUntil: 'load' });
 

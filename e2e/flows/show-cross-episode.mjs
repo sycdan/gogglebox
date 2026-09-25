@@ -196,14 +196,15 @@ export async function run(page, ctx) {
   // flow (that only resets Jellyfin, not Gogglebox's own ignore list). Leaving
   // it ignored would permanently hide this episode from every FUTURE run of
   // this flow (it would look like a fan-out regression: "only 3 cards" forever
-  // after the first run), so restore it via the hero "Ignored" modal's
-  // Unignore control before finishing, exactly like ignore-shows.mjs does.
-  const heroOpen = page.getByRole('button', { name: /^Ignored/ }).first();
+  // after the first run), so restore it via the account menu's "Ignored"
+  // modal Unignore control before finishing, exactly like ignore-shows.mjs does.
   try {
-    await heroOpen.waitFor({ state: 'visible', timeout: 10000 });
-    await heroOpen.click();
+    await page.getByRole('button', { name: 'Open account menu' }).first().click({ timeout: 10000 });
+    const menuOpen = page.getByRole('menuitem', { name: /^Ignored/ }).first();
+    await menuOpen.waitFor({ state: 'visible', timeout: 10000 });
+    await menuOpen.click();
   } catch (error) {
-    fail('show-cross-episode: hero "Ignored" button not found for cleanup unignore.', error);
+    fail('show-cross-episode: account-menu "Ignored" item not found for cleanup unignore.', error);
   }
 
   const ignoredModal = page

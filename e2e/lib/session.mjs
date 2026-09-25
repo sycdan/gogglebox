@@ -91,16 +91,16 @@ export async function startSession({ url, accessToken, flowName, shoot, fail }) 
   await page.waitForLoadState('networkidle');
 
   // Assert a REAL authenticated app element rather than treating "no login
-  // form" as success. The "Log out" button is rendered on both the
+  // form" as success. The account-menu trigger is rendered on both the
   // viewer-selection screen and the main app (see src/client/App.tsx).
-  const loggedIn = page.getByRole('button', { name: 'Log out' });
+  const loggedIn = page.getByRole('button', { name: 'Open account menu' });
   try {
     await loggedIn.first().waitFor({ state: 'visible', timeout: 20_000 });
   } catch (error) {
     await shoot(page, `${flowName}-02-not-authenticated`);
     const appError = await page.locator('.error').first().textContent().catch(() => null);
     fail(
-      'authenticated app never appeared (no "Log out" control)' +
+      'authenticated app never appeared (no account-menu control)' +
         (appError ? ` — app error: ${appError.trim()}` : ''),
       error,
     );
