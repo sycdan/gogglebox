@@ -93,6 +93,8 @@ label span {
 }
 
 .hero {
+  position: relative;
+  z-index: 30;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -107,6 +109,117 @@ label span {
   font-size: 1.15rem;
   letter-spacing: 0.02em;
   color: #f4efe8;
+}
+
+.brand-button {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.account-menu {
+  position: relative;
+  z-index: 40;
+}
+
+.account-menu-trigger {
+  position: relative;
+  display: grid;
+  width: 2.65rem;
+  height: 2.65rem;
+  padding: 0;
+  place-items: center;
+  overflow: visible;
+  border: 2px solid rgba(242, 195, 141, 0.55);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4efe8;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+
+.account-menu-trigger .viewer-avatar {
+  width: 100%;
+  height: 100%;
+  font-size: 1rem;
+  object-fit: cover;
+}
+
+.account-menu-alert {
+  position: absolute;
+  right: -0.15rem;
+  bottom: -0.1rem;
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid #17191b;
+  border-radius: 50%;
+  background: #e7a35f;
+  box-shadow: 0 0 0 2px rgba(231, 163, 95, 0.18);
+}
+
+.account-flyout {
+  position: absolute;
+  top: calc(100% + 0.65rem);
+  right: 0;
+  display: grid;
+  width: min(22rem, calc(100vw - 3rem));
+  padding: 0.8rem;
+  gap: 0.35rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: rgba(24, 29, 34, 0.98);
+  box-shadow: 0 22px 65px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(22px);
+}
+
+.account-flyout-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.7rem 0.75rem 1rem;
+}
+
+.account-flyout-identity .viewer-avatar {
+  flex: 0 0 auto;
+  width: 3.25rem;
+}
+
+.account-flyout-identity > div strong,
+.account-flyout-identity > div span,
+.account-menu-copy span,
+.account-menu-copy small {
+  display: block;
+}
+
+.account-flyout-identity > div span,
+.account-menu-copy small {
+  margin-top: 0.2rem;
+  color: #cfbfaf;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.account-menu-item {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr;
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 14px;
+  background: transparent;
+  color: #f4efe8;
+  text-align: left;
+  font-weight: 650;
+}
+
+.account-menu-item:hover,
+.account-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.account-menu-divider {
+  height: 1px;
+  margin: 0.45rem -0.8rem;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .hero-actions,
@@ -269,6 +382,107 @@ h3 {
 
 .section-block {
   margin-bottom: 1.25rem;
+}
+
+.administration-view {
+  width: min(920px, 100%);
+  margin: 2rem auto 0;
+}
+
+.administration-heading {
+  margin-bottom: 1.5rem;
+}
+
+.administration-heading h1 {
+  margin-bottom: 0.7rem;
+}
+
+.administration-heading .lead {
+  margin-bottom: 0;
+}
+
+.administration-grid {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.admin-card-heading {
+  gap: 1.25rem;
+}
+
+.admin-card-heading .muted {
+  max-width: 42rem;
+  margin: 0.65rem 0 0;
+}
+
+.status-pill {
+  flex: 0 0 auto;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid rgba(111, 191, 124, 0.4);
+  border-radius: 999px;
+  background: rgba(111, 191, 124, 0.12);
+  color: #bfe8c5;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.status-pill.attention {
+  border-color: rgba(231, 163, 95, 0.5);
+  background: rgba(231, 163, 95, 0.14);
+  color: #f2c38d;
+}
+
+.status-pill.neutral {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #cfbfaf;
+}
+
+.status-pill.danger {
+  border-color: rgba(255, 122, 94, 0.45);
+  background: rgba(255, 122, 94, 0.12);
+  color: #ffb8a0;
+}
+
+.config-admin-body {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.config-revisions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  margin: 0;
+  gap: 0.75rem;
+}
+
+.config-revisions div,
+.config-change-list {
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.config-revisions dt {
+  color: #cfbfaf;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.config-revisions dd {
+  margin: 0.35rem 0 0;
+}
+
+.config-change-list p,
+.admin-card-note {
+  margin: 0.4rem 0 0;
+}
+
+.admin-card-actions {
+  align-items: center;
 }
 
 .media-grid {
@@ -844,5 +1058,18 @@ img.viewer-pill-avatar {
   .hero {
     flex-wrap: wrap;
     padding: 0.7rem 0.9rem;
+  }
+
+  .administration-view {
+    margin-top: 1.25rem;
+  }
+
+  .administration-heading,
+  .admin-card-heading {
+    align-items: flex-start;
+  }
+
+  .administration-heading h1 {
+    font-size: clamp(2.3rem, 12vw, 3.4rem);
   }
 }

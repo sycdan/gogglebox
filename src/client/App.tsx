@@ -26,6 +26,7 @@ const playerHideStartingOverlay =
   import.meta.env.VITE_PLAYER_HIDE_STARTING_OVERLAY === 'true';
 
 type LibraryKind = 'movie' | 'show';
+type AppView = 'browse' | 'administration';
 
 // Config v2 account tiers: primaries are preselected on the picker, secondaries
 // listed after them, tertiaries are pin-gated guests (only addable via the
@@ -481,6 +482,9 @@ export function App() {
   const [configSyncMessage, setConfigSyncMessage] = useState<string | null>(null);
   const [configUpdateStatus, setConfigUpdateStatus] = useState<ConfigUpdateStatus | null>(null);
   const [updateStarting, setUpdateStarting] = useState(false);
+  const [appView, setAppView] = useState<AppView>('browse');
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [libraryLoading, setLibraryLoading] = useState(false);
@@ -649,6 +653,29 @@ export function App() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [session?.authenticated, session?.configUpdateEnabled]);
+
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+
+    function closeOnOutsidePress(event: PointerEvent) {
+      if (!accountMenuRef.current?.contains(event.target as Node)) {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setAccountMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePress);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [accountMenuOpen]);
 
   useEffect(() => {
     setPendingDismissal(null);
@@ -1201,23 +1228,236 @@ export function App() {
     }
   }
 
-  function updateNotice() {
-    if (!session?.configUpdateEnabled) return null;
+  function configurationCard() {
+    const changedFiles = configUpdateStatus?.changedFiles.filter(Boolean) ?? [];
+    const updateAvailable = Boolean(configUpdateStatus?.pending);
+    const statusLabel = !session?.configUpdateEnabled
+      ? session?.configSyncEnabled ? 'Manual sync' : 'Not connected'
+      : configUpdateStatus?.phase === 'updating'
+        ? 'Updating'
+        : updateAvailable
+          ? 'Update available'
+          : configUpdateStatus?.error
+            ? 'Needs attention'
+            : configUpdateStatus
+              ? 'Up to date'
+              : 'Checking';
+
     return (
-      <div className="panel section-block" role="status">
-        {configUpdateStatus?.pending ? (
-          <div className="row spread">
-            <div>
-              <strong>Update available: {configUpdateStatus.pending.slice(0, 12)}</strong>
-              <p className="muted">{configUpdateStatus.changedFiles.join(', ') || 'Config repo changed'}</p>
+      <section className="panel admin-card" aria-labelledby="config-admin-title">
+        <div className="row spread top-align admin-card-heading">
+          <div>
+            <p className="eyebrow">Configuration</p>
+            <h2 id="config-admin-title">Config repository</h2>
+            <p className="muted">Review the active revision and restart Gogglebox when a new configuration is ready.</p>
+          </div>
+          <span className={`status-pill${!session?.configUpdateEnabled ? ' neutral' : ''}${updateAvailable ? ' attention' : ''}${configUpdateStatus?.error ? ' danger' : ''}`} role="status">
+            {statusLabel}
+          </span>
+        </div>
+
+        {session?.configUpdateEnabled ? (
+          <div className="config-admin-body">
+            {configUpdateStatus ? (
+              <dl className="config-revisions">
+                <div>
+                  <dt>Active</dt>
+                  <dd><code>{configUpdateStatus.active.slice(0, 12)}</code></dd>
+                </div>
+                {configUpdateStatus.pending ? (
+                  <div>
+                    <dt>Available</dt>
+                    <dd><code>{configUpdateStatus.pending.slice(0, 12)}</code></dd>
+                  </div>
+                ) : null}
+              </dl>
+            ) : <p className="muted">Checking the config manager…</p>}
+
+            {updateAvailable ? (
+              <div className="config-change-list">
+                <strong>Changed files</strong>
+                <p className="muted">{changedFiles.join(', ') || 'Repository metadata only'}</p>
+              </div>
+            ) : null}
+
+            {configUpdateStatus?.lastResult ? (
+              <p className="muted admin-card-note">
+                Last applied <code>{configUpdateStatus.lastResult.revision.slice(0, 12)}</code>
+                {' '}on {new Date(configUpdateStatus.lastResult.completedAt).toLocaleString()}.
+              </p>
+            ) : null}
+
+            <div className="row admin-card-actions">
+              <button
+                className="ghost"
+                disabled={updateStarting || configUpdateStatus?.phase === 'updating'}
+                onClick={() => void loadConfigUpdateStatus().catch((nextError) =>
+                  setError(nextError instanceof Error ? nextError.message : 'Could not check updates'))}
+                type="button"
+              >
+                Check for updates
+              </button>
+              {configUpdateStatus?.pending ? (
+                <button disabled={updateStarting || configUpdateStatus.phase === 'updating'} onClick={() => void restartAndUpdate()} type="button">
+                  Restart and update
+                </button>
+              ) : null}
+              {session.configSyncEnabled ? (
+                <button className="ghost" disabled={busy} onClick={() => void syncConfig()} type="button">Sync config</button>
+              ) : null}
             </div>
-            <button disabled={updateStarting || configUpdateStatus.phase === 'updating'} onClick={() => void restartAndUpdate()} type="button">
-              Restart and update
+          </div>
+        ) : session?.configSyncEnabled ? (
+          <div className="row admin-card-actions">
+            <button disabled={busy} onClick={() => void syncConfig()} type="button">Sync config</button>
+          </div>
+        ) : (
+          <p className="muted">This deployment does not have a config manager connected.</p>
+        )}
+
+        {configUpdateStatus?.error ? <p className="error">{configUpdateStatus.error}</p> : null}
+        {configSyncMessage ? <p className="muted" role="status">{configSyncMessage}</p> : null}
+      </section>
+    );
+  }
+
+  function accountMenu() {
+    if (!session) return null;
+    const menuViewer = primaryViewers[0] ?? session.viewers[0];
+    const accountLabel = menuViewer?.name || session.account || 'Household account';
+    const configNeedsAttention = Boolean(configUpdateStatus?.pending || configUpdateStatus?.error);
+
+    return (
+      <div className="account-menu" ref={accountMenuRef}>
+        <button
+          className="account-menu-trigger"
+          type="button"
+          aria-label="Open account menu"
+          aria-expanded={accountMenuOpen}
+          aria-haspopup="menu"
+          onClick={() => setAccountMenuOpen((open) => !open)}
+        >
+          {menuViewer ? <ViewerAvatar viewer={menuViewer} /> : <span className="viewer-avatar">{accountLabel.slice(0, 1)}</span>}
+          {configNeedsAttention ? <span className="account-menu-alert" aria-label="Administration needs attention" /> : null}
+        </button>
+
+        {accountMenuOpen ? (
+          <div className="account-flyout" role="menu">
+            <div className="account-flyout-identity">
+              {menuViewer ? <ViewerAvatar viewer={menuViewer} /> : null}
+              <div>
+                <strong>{accountLabel}</strong>
+                <span>{session.account}</span>
+              </div>
+            </div>
+
+            {appView === 'administration' ? (
+              <button
+                className="account-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setAppView('browse');
+                  setAccountMenuOpen(false);
+                }}
+                type="button"
+              >
+                <span aria-hidden="true">←</span>
+                <span>Back to Gogglebox</span>
+              </button>
+            ) : (
+              <button
+                className="account-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setAppView('administration');
+                  setAccountMenuOpen(false);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                type="button"
+              >
+                <span aria-hidden="true">⚙</span>
+                <span className="account-menu-copy">
+                  <span>Administration</span>
+                  {configUpdateStatus?.pending ? <small>Config update available</small> : null}
+                  {configUpdateStatus?.error ? <small>Config needs attention</small> : null}
+                </span>
+              </button>
+            )}
+
+            {session.activeViewerIds.length > 0 ? (
+              <>
+                <button
+                  className="account-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setAppView('browse');
+                    setAccountMenuOpen(false);
+                    setIgnoredOpen(true);
+                  }}
+                  type="button"
+                >
+                  <span aria-hidden="true">⊘</span>
+                  <span>Ignored{ignoredItems.length > 0 ? ` (${ignoredItems.length})` : ''}</span>
+                </button>
+              </>
+            ) : null}
+
+            <div className="account-menu-divider" />
+            <button
+              className="account-menu-item"
+              role="menuitem"
+              onClick={() => {
+                setAppView('browse');
+                setAccountMenuOpen(false);
+                void logout();
+              }}
+              type="button"
+            >
+              <span aria-hidden="true">↪</span>
+              <span>Log out</span>
             </button>
           </div>
-        ) : <p className="muted">{configUpdateStatus?.phase === 'updating' ? 'Updating Gogglebox…' : 'Config is up to date.'}</p>}
-        {configUpdateStatus?.error ? <p className="error">{configUpdateStatus.error}</p> : null}
-        {configSyncMessage ? <p className="muted">{configSyncMessage}</p> : null}
+        ) : null}
+      </div>
+    );
+  }
+
+  function appHeader() {
+    if (!session) return null;
+    return (
+      <header className="hero">
+        <button className="brand brand-button" onClick={() => setAppView('browse')} type="button">{session.appName}</button>
+        <div className="hero-actions">
+          {appView === 'browse' && session.activePartyAlias ? (
+            <span className="muted group-alias">{session.activePartyAlias}</span>
+          ) : null}
+          {appView === 'browse' && session.activeViewerIds.length > 0 ? (
+            <button className="ghost compact" onClick={() => void clearParty()} type="button">Change viewers</button>
+          ) : null}
+          {accountMenu()}
+        </div>
+      </header>
+    );
+  }
+
+  function administrationView() {
+    return (
+      <div className="shell">
+        {appHeader()}
+        <main className="administration-view">
+          <div className="row spread administration-heading">
+            <div>
+              <p className="eyebrow">Administration</p>
+              <h1>Manage Gogglebox</h1>
+              <p className="lead">Deployment controls and household settings live here.</p>
+            </div>
+            <button className="ghost" onClick={() => setAppView('browse')} type="button">Back</button>
+          </div>
+          <div className="administration-grid">
+            {configurationCard()}
+          </div>
+          {error ? <div className="panel error">{error}</div> : null}
+        </main>
       </div>
     );
   }
@@ -2033,23 +2273,21 @@ export function App() {
     );
   }
 
+  if (appView === 'administration') {
+    return administrationView();
+  }
+
   if (session.activeViewerIds.length === 0) {
     return (
       <div className="shell">
+        {appHeader()}
         <div className="panel">
           <div className="row spread">
             <div>
               <p className="eyebrow">Who is watching?</p>
               <h1>Pick the party</h1>
             </div>
-            <div className="row">
-              {session.configSyncEnabled ? (
-                <button className="ghost" disabled={busy} onClick={() => void syncConfig()} type="button">Sync config</button>
-              ) : null}
-              <button className="ghost" onClick={() => void logout()}>Log out</button>
-            </div>
           </div>
-          {updateNotice()}
           <div className="viewer-grid">
             {/* Primaries (preselected), then secondaries, then any ADDED guests.
                 No PIN badges — guest pins are collected at Continue time. */}
@@ -2208,21 +2446,7 @@ export function App() {
 
   return (
     <div className="shell">
-      <header className="hero">
-        <span className="brand">{session.appName}</span>
-        <div className="hero-actions">
-          {session.activePartyAlias ? (
-            <span className="muted group-alias">{session.activePartyAlias}</span>
-          ) : null}
-          <button className="ghost compact" onClick={() => setIgnoredOpen(true)} type="button">
-            Ignored{ignoredItems.length > 0 ? ` (${ignoredItems.length})` : ''}
-          </button>
-          <button className="ghost compact" onClick={() => void clearParty()} type="button">Change viewers</button>
-          <button className="ghost compact" onClick={() => void logout()} type="button">Log out</button>
-        </div>
-      </header>
-
-      {updateNotice()}
+      {appHeader()}
 
       <section className="panel section-block">
         <div className="row spread">
