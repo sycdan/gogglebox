@@ -1399,19 +1399,6 @@ export function App() {
                   onClick={() => {
                     setAppView('browse');
                     setAccountMenuOpen(false);
-                    void clearParty();
-                  }}
-                  type="button"
-                >
-                  <span aria-hidden="true">◉</span>
-                  <span>Change viewers</span>
-                </button>
-                <button
-                  className="account-menu-item"
-                  role="menuitem"
-                  onClick={() => {
-                    setAppView('browse');
-                    setAccountMenuOpen(false);
                     setIgnoredOpen(true);
                   }}
                   type="button"
@@ -1450,6 +1437,9 @@ export function App() {
         <div className="hero-actions">
           {appView === 'browse' && session.activePartyAlias ? (
             <span className="muted group-alias">{session.activePartyAlias}</span>
+          ) : null}
+          {appView === 'browse' && session.activeViewerIds.length > 0 ? (
+            <button className="ghost compact" onClick={() => void clearParty()} type="button">Change viewers</button>
           ) : null}
           {accountMenu()}
         </div>
