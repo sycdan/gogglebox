@@ -115,9 +115,9 @@ docker compose down
 Runtime state, such as ignored items, lives in the stack's `state` volume and
 survives upgrades.
 
-Flag defaults ship with the stack (`tonights-nine` is disabled). To override
-them, put a complete GOFF flag file in the folder and add to
-`docker-compose.yml`:
+Flag defaults ship with the stack (`tonights-nine` is disabled). To manage
+flags yourself, put a complete GOFF flag file at `flags/flags.goff.yaml` in the
+folder and add to `docker-compose.yml`:
 
 ```yaml
 services:
@@ -125,12 +125,13 @@ services:
     configs: !override
       - source: goff-relay
         target: /goff/goff-proxy.yaml
-      - source: my-flags
-        target: /goff/flags.goff.yaml
-configs:
-  my-flags:
-    file: ./flags.goff.yaml
+    volumes:
+      - ./flags:/goff/flags:ro
 ```
+
+Edits to that file, including a `git pull`, take effect within about a second
+with no restart. Mount the directory, not the file: a single-file mount keeps
+the old file when it is replaced, as `git pull` does.
 
 ### Auth config
 

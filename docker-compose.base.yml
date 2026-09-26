@@ -16,9 +16,11 @@ services:
     configs:
       - source: goff-relay
         target: /goff/goff-proxy.yaml
-      # Override with `configs: !override` pointing at your own file config.
+      # To manage flags yourself, drop this entry and mount a directory holding
+      # flags.goff.yaml at /goff/flags (a directory, so edits and git pulls
+      # that replace the file are seen; the relay re-reads it every second).
       - source: goff-flags
-        target: /goff/flags.goff.yaml
+        target: /goff/flags/flags.goff.yaml
 
   gogglebox:
     image: ghcr.io/sycdan/gogglebox:${GOGGLEBOX_VERSION:?pin a version}
@@ -100,7 +102,7 @@ configs:
           pollingInterval: 1000
           retrievers:
             - kind: file
-              path: /goff/flags.goff.yaml
+              path: /goff/flags/flags.goff.yaml
 
   # Production-safe defaults.
   goff-flags:
