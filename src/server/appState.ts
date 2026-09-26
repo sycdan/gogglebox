@@ -28,13 +28,10 @@ export interface PartyPlayerUser {
 // old type name. Structurally identical — never diverge these.
 export type GroupPlayerUser = PartyPlayerUser;
 
-// The cached "effective config" derived from the read-only config.json: the
-// migrated + merged + validated users/accounts/accessTokens plus provenance for
-// cache invalidation. We re-derive (and overwrite this) when sourceHash changes
-// (the user edited config.json), builtForPackage != the running package version
-// (a new/rolled-back image whose migrations may differ), OR schemaVersion !=
-// the image's current schema (a cached v1 shape must never be consumed by a v2
-// runtime).
+// The "effective config" startup derived from the read-only config.json and the
+// live Jellyfin users: the migrated + merged + validated users/accounts/
+// accessTokens plus provenance. Written at every startup as a record for
+// inspection; never read back to skip deriving.
 export interface CachedEffectiveConfig {
   schemaVersion: number;
   builtForPackage: string;
@@ -68,8 +65,7 @@ interface AppStateFile {
   // Pre-rename key (formerly "groupAliases"). Read as a fallback for any state
   // file written before this rename; never written again.
   groupAliases?: Record<string, string>;
-  // The cached effective config + provenance (see CachedEffectiveConfig). Re-
-  // derived on startup when the source hash or package version changed.
+  // The last derived effective config + provenance (see CachedEffectiveConfig).
   effectiveConfig?: CachedEffectiveConfig;
 }
 
@@ -294,25 +290,10 @@ export class AppState {
     writeState(this.filePath, state, { partyAliases });
   }
 
-  // The cached effective config, or undefined when none has been derived yet.
+  // The recorded effective config, or undefined when none has been derived yet.
   getEffectiveConfig(): CachedEffectiveConfig | undefined {
     const state = readState(this.filePath);
     return state.effectiveConfig;
-  }
-
-  // Whether the cached effective config can be reused: present AND derived from
-  // the same source (sourceHash) by the same image (builtForPackage) INTO the
-  // schema shape this image consumes (schemaVersion). A mismatch (user edited
-  // config.json, a new/rolled-back image, or a cached older-schema shape)
-  // means re-derive.
-  isEffectiveConfigFresh(sourceHash: string, packageVersion: string, schemaVersion: number): boolean {
-    const cached = this.getEffectiveConfig();
-    return Boolean(
-      cached &&
-      cached.sourceHash === sourceHash &&
-      cached.builtForPackage === packageVersion &&
-      cached.schemaVersion === schemaVersion,
-    );
   }
 
   // Persist the derived effective config + provenance (write-then-rename via
