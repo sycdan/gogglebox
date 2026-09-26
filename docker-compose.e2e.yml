@@ -1,4 +1,4 @@
-# End-to-end stack: the self-host stack (deploy/docker-compose.yml) with the
+# End-to-end stack: the published stack (docker-compose.base.yml) with the
 # image built from this checkout, a seeded offline sandbox Jellyfin, and the
 # Playwright proof runner. CI runs exactly this; run it locally the same way:
 #
@@ -10,7 +10,7 @@
 #   ./scripts/e2e.sh run --rm -e PROOF_FLOW=all proof
 #   ./scripts/e2e.sh down -v
 #
-# Always go through the wrapper: deploy's required variables are interpolated
+# Always go through the wrapper: the base's required variables are interpolated
 # before any override applies, and the wrapper supplies them (.env.e2e, then
 # the provisioned .env.sbx). For hot reload, layer docker-compose.dev.yml on
 # top with ./scripts/dev.sh. The project name comes from the checkout's
@@ -40,23 +40,18 @@ x-sandbox-tools: &sandbox-tools
   profiles: ["tools"]
 
 services:
-  # Deploy's fixed container names would collide with any other stack on the
-  # host, so every extended service drops them.
   goff:
-    extends: { file: deploy/docker-compose.yml, service: goff }
-    container_name: !reset null
     restart: !reset null
 
   gogglebox:
-    extends: { file: deploy/docker-compose.yml, service: gogglebox }
-    container_name: !reset null
     restart: !reset null
     build: .
     image: gogglebox:e2e
     pull_policy: build
+    # A tmpfs keeps each run's app state fresh; it is a new filesystem, so it
+    # needs the image user's uid.
     volumes: !override
       - ./config.sbx.json:/app/config.json:ro
-    # The image runs as node (uid 1000) and ships no /data.
     tmpfs:
       - /data:uid=1000,gid=1000
     healthcheck:
@@ -66,15 +61,11 @@ services:
       retries: 12
       start_period: 30s
     depends_on:
-      - goff
       - jellyfin-sandbox
 
   proxy:
-    extends: { file: deploy/docker-compose.yml, service: proxy }
-    container_name: !reset null
     restart: !reset null
     depends_on:
-      - gogglebox
       - jellyfin-sandbox
 
   jellyfin-sandbox:

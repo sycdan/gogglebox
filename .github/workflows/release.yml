@@ -84,6 +84,19 @@ jobs:
             "${IMG}:${FULL}"
           echo "Promoted ${IMG}:${FULL} -> ${IMG}:${BASE} (+ latest)"
 
+      - name: Set up ORAS
+        uses: oras-project/setup-oras@v1
+
+      # Deploy folders include the stack by version, so the release tag needs
+      # the compose artifact publish.yml pushed for FULL, copied like the image.
+      - name: Promote the stack's compose artifact
+        env:
+          FULL: ${{ steps.ver.outputs.full }}
+          BASE: ${{ steps.ver.outputs.base }}
+        run: |
+          STACK="${REGISTRY}/${IMAGE_NAME,,}-compose"
+          oras cp "${STACK}:${FULL}" "${STACK}:${BASE}"
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:

@@ -51,7 +51,7 @@ specs.
 ## Deployment
 
 Gogglebox is meant to be simple to run on a LAN. A deployment host needs Docker
-Compose, git, access to your Jellyfin server, and a small amount of local config.
+Compose, access to your Jellyfin server, and a small amount of local config.
 The published image is served behind Caddy so the browser reaches one origin:
 
 - `/` for the Gogglebox client
@@ -62,64 +62,79 @@ That single origin is what lets Gogglebox prepare the Jellyfin player handoff.
 
 ### Basic deploy flow
 
-Clone the repo on the machine that will host Gogglebox:
+Copy the [`deploy/`](deploy/) folder to the machine that will host Gogglebox,
+then in that folder:
 
 ```bash
-git clone <repo-url>
-cd gogglebox
+cp .env.example .env
+cp config.example.json config.json
 ```
 
-Copy and edit the deploy config:
-
-```bash
-cp deploy/config.example.json deploy/config.json
-cp deploy/.env.example deploy/.env
-```
-
-In `deploy/config.json`, configure schemaVersion 2 auth: list the Jellyfin users
+In `config.json`, configure schemaVersion 2 auth: list the Jellyfin users
 Gogglebox may show, define one or more household accounts, and map login tokens
 to those accounts. Use Jellyfin user names, not UUIDs. Older supported config
 shapes are migrated automatically by the app on startup.
 
-In `deploy/.env`, set the required deployment values:
+In `.env`, set the required deployment values:
 
-| Var                | Purpose                                   |
-| ------------------ | ----------------------------------------- |
-| `GOGGLEBOX_PORT`   | Host port for the Gogglebox front door    |
-| `JELLYFIN_URL`     | Normal Jellyfin origin, without `/player` |
-| `JELLYFIN_API_KEY` | Jellyfin API key                          |
-| `SESSION_SECRET`   | Long random string for session cookies    |
+| Var                 | Purpose                                   |
+| ------------------- | ----------------------------------------- |
+| `GOGGLEBOX_VERSION` | Release to run (image and stack together) |
+| `GOGGLEBOX_PORT`    | Host port for the Gogglebox front door    |
+| `JELLYFIN_URL`      | Normal Jellyfin origin, without `/player` |
+| `JELLYFIN_API_KEY`  | Jellyfin API key                          |
+| `SESSION_SECRET`    | Long random string for session cookies    |
 
-`ACCESS_TOKEN` is optional. When set to a token that exists in
-`deploy/config.json`, Gogglebox automatically logs the browser into that token's
-account and skips the token form. Leave it unset when you want visitors to type
-their token.
+`ACCESS_TOKEN` is optional. When set to a token that exists in `config.json`,
+Gogglebox automatically logs the browser into that token's account and skips the
+token form. Leave it unset when you want visitors to type their token.
 
-Start Gogglebox from the repo root:
+Start Gogglebox:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d
+docker compose up -d -y
 ```
 
 Open `http://<host>:<GOGGLEBOX_PORT>`.
 
-The deployment compose starts a private GO Feature Flag sidecar next to the app.
-Gogglebox calls it internally and exposes only the app-owned `/api/flags`
-contract to the browser. The sidecar reads `flags/goff.yaml`, where
-`tonights-nine` is production-safe disabled by default; changing that file can
-update flag state without rebuilding the Gogglebox image.
+The folder holds only your settings. The stack itself (the app, a private GO
+Feature Flag sidecar, and the same-origin proxy) is published for each release
+and pulled for the `GOGGLEBOX_VERSION` in `.env`, so upgrading or rolling back
+is changing that value and running `docker compose up -d -y` again. `-y` accepts
+Compose's prompt to confirm the variables a remote stack uses.
 
-Useful deploy commands:
+This needs Docker Compose v5 or newer (`docker compose version`). Compose 2.40
+and earlier reject the folder's `docker-compose.yml` with "conflicts with
+imported resource", because it extends a service it includes.
+
+Useful commands, run in the folder:
 
 ```bash
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env ps
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env down
+docker compose ps
+docker compose logs -f
+docker compose down
 ```
 
-Runtime state, such as ignored items, is stored under the configured state
-directory. For a real deployment, set `GOGGLEBOX_STATE_DIR` to a durable host
-path that is writable by container uid `1000`.
+Runtime state, such as ignored items, lives in the stack's `state` volume and
+survives upgrades.
+
+Flag defaults ship with the stack (`tonights-nine` is disabled). To manage
+flags yourself, put a complete GOFF flag file at `flags/flags.goff.yaml` in the
+folder and add to `docker-compose.yml`:
+
+```yaml
+services:
+  goff:
+    configs: !override
+      - source: goff-relay
+        target: /goff/goff-proxy.yaml
+    volumes:
+      - ./flags:/goff/flags:ro
+```
+
+Edits to that file, including a `git pull`, take effect within about a second
+with no restart. Mount the directory, not the file: a single-file mount keeps
+the old file when it is replaced, as `git pull` does.
 
 ### Auth config
 
@@ -187,19 +202,20 @@ deployments during migration, but the HTPC Compose file no longer uses it.
 
 ## Development
 
-Development also runs through Docker Compose. The host should not need Node,
-npm, or a host `node_modules`; dependencies live in Docker volumes.
+Everything runs in Docker, so the host needs only Docker with Compose, git, and
+a bash shell for the scripts (Git Bash or WSL on Windows). There is no host
+Node, npm or `node_modules`; dependencies live in Docker volumes.
 
-Every local stack is the self-host stack in `deploy/docker-compose.yml`, layered:
+### One-time setup
 
-| Wrapper             | Layers                                  | Use                                           |
-| ------------------- | --------------------------------------- | --------------------------------------------- |
-| `./scripts/e2e.sh`  | deploy + `docker-compose.e2e.yml`       | The production image against a seeded sandbox Jellyfin; what CI runs |
-| `./scripts/dev.sh`  | the above + `docker-compose.dev.yml`    | The same stack with hot-reloading server and client |
+```bash
+git clone https://github.com/sycdan/gogglebox.git
+cd gogglebox
+git config core.hooksPath .githooks   # pre-push runs the typecheck and unit tests
+```
 
-Both take any `docker compose` arguments and serve the app at
-`http://localhost:8080` (`GOGGLEBOX_PORT` changes it) through the same proxy
-self-hosters run. Bootstrap the sandbox once:
+Build the sandbox: an offline Jellyfin seeded with a tiny library and the users
+Alice, Bob, Carol and Dave.
 
 ```bash
 ./scripts/e2e.sh up -d jellyfin-sandbox
@@ -207,28 +223,79 @@ self-hosters run. Bootstrap the sandbox once:
 ./scripts/e2e.sh run --rm sandbox-provision
 ```
 
-Then iterate with hot reload, and prove against the production image before
-pushing:
+Provisioning writes `.env.sbx` (the sandbox's API key and a login token) and
+`config.sbx.json` (the household config), both gitignored. The sandbox lives
+in Docker volumes and survives restarts; you only repeat this after wiping it.
+
+### Daily loop
 
 ```bash
 ./scripts/dev.sh up -d
-./scripts/dev.sh run --rm -e PROOF_FLOW=mark-all-watched proof
+```
 
+Open `http://localhost:8080`; you are logged in as the sandbox household. Edits
+under `src/` take effect without restarting anything: the browser hot-reloads
+client changes, and the server restarts itself within a couple of seconds on
+server changes. Keep port 8080 for dev, because Vite's hot reload connects to
+it.
+
+```bash
+./scripts/dev.sh logs -f gogglebox client   # follow the server and client
+./scripts/dev.sh down                       # stop; the sandbox is kept
+```
+
+### Checks and proofs
+
+```bash
+./scripts/e2e.sh run --rm check   # typecheck
+./scripts/e2e.sh run --rm test    # unit tests
+```
+
+The Playwright flows in `e2e/flows/` drive the app through the browser and
+write screenshots to `./artifacts/`. Run one against the dev stack by name, or
+all of them:
+
+```bash
+./scripts/dev.sh run --rm -e PROOF_FLOW=mark-all-watched proof
+./scripts/dev.sh run --rm -e PROOF_FLOW=all proof
+```
+
+Flows change watched state in the sandbox; `./scripts/e2e.sh run --rm
+sandbox-reset` clears it, which is worth doing before a full run.
+
+### Before pushing
+
+CI builds the production image and runs every flow against it, not against the
+dev servers. Do the same locally:
+
+```bash
+./scripts/dev.sh down
 ./scripts/e2e.sh run --rm sandbox-reset
 ./scripts/e2e.sh up -d --build --wait
 ./scripts/e2e.sh run --rm -e PROOF_FLOW=all proof
+./scripts/e2e.sh down
 ```
 
-Checks that need no Jellyfin: `./scripts/e2e.sh run --rm check` and
-`./scripts/e2e.sh run --rm test`. `./scripts/e2e.sh down -v` discards the sandbox.
+### How the stacks fit together
 
-The GO Feature Flag sidecar mounts `flags/goff.yaml`; set `GOFF_FLAGS_FILE`
-(relative to `deploy/`) to another complete GOFF file when a proof needs a
-different flag state.
+Both scripts wrap `docker compose` and take any of its arguments. They share
+one stack per checkout (the project is named after the folder) and one sandbox:
 
-See the [agent guide](kb/00000000-0000-0000-0000-000000000000.md)
-for the agent workflow and the Docker-specific rules that keep local
-development consistent.
+| Script             | Files                                                  | Runs the app as                     |
+| ------------------ | ------------------------------------------------------ | ----------------------------------- |
+| `./scripts/e2e.sh` | `docker-compose.base.yml` + `docker-compose.e2e.yml`   | The production image, built locally |
+| `./scripts/dev.sh` | the above + `docker-compose.dev.yml`                   | Source with hot reload              |
+
+`docker-compose.base.yml` is the same stack self-hosters run, so dev, CI and
+deployments share one proxy and one flag sidecar. `./scripts/e2e.sh down -v`
+wipes everything, including the sandbox; bootstrap it again afterwards.
+
+When a proof needs a different flag state, override the flags the way a
+deployment does (see "Basic deploy flow") in an extra `-f` file; complete GOFF
+fixtures live under `tools/goff/fixtures/`.
+
+See the [agent guide](kb/00000000-0000-0000-0000-000000000000.md) for the agent
+workflow.
 
 ## Releases
 

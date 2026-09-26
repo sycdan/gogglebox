@@ -11,7 +11,7 @@ if you need to make any changes or are blocked, report as such in your output.
 
 ## Available Commands
 
-Both stacks are deploy/docker-compose.yml with a seeded sandbox Jellyfin:
+Both stacks are docker-compose.base.yml with a seeded sandbox Jellyfin:
 `./scripts/dev.sh` (hot-reload source) or `./scripts/e2e.sh` (the production
 image, as CI runs it). Default to dev.sh if unspecified. On a fresh machine,
 bootstrap the sandbox first as README "Development" describes.
