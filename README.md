@@ -101,8 +101,11 @@ The folder holds only your settings. The stack itself (the app, a private GO
 Feature Flag sidecar, and the same-origin proxy) is published for each release
 and pulled for the `GOGGLEBOX_VERSION` in `.env`, so upgrading or rolling back
 is changing that value and running `docker compose up -d -y` again. `-y` accepts
-Compose's prompt to confirm the variables a remote stack uses. Tested with Docker
-Compose v5.
+Compose's prompt to confirm the variables a remote stack uses.
+
+This needs Docker Compose v5 or newer (`docker compose version`). Compose 2.40
+and earlier reject the folder's `docker-compose.yml` with "conflicts with
+imported resource", because it extends a service it includes.
 
 Useful commands, run in the folder:
 
@@ -199,19 +202,20 @@ deployments during migration, but the HTPC Compose file no longer uses it.
 
 ## Development
 
-Development also runs through Docker Compose. The host should not need Node,
-npm, or a host `node_modules`; dependencies live in Docker volumes.
+Everything runs in Docker, so the host needs only Docker with Compose, git, and
+a bash shell for the scripts (Git Bash or WSL on Windows). There is no host
+Node, npm or `node_modules`; dependencies live in Docker volumes.
 
-Every local stack is the published stack in `docker-compose.base.yml`, layered:
+### One-time setup
 
-| Wrapper             | Layers                                  | Use                                           |
-| ------------------- | --------------------------------------- | --------------------------------------------- |
-| `./scripts/e2e.sh`  | base + `docker-compose.e2e.yml`         | The production image against a seeded sandbox Jellyfin; what CI runs |
-| `./scripts/dev.sh`  | the above + `docker-compose.dev.yml`    | The same stack with hot-reloading server and client |
+```bash
+git clone https://github.com/sycdan/gogglebox.git
+cd gogglebox
+git config core.hooksPath .githooks   # pre-push runs the typecheck and unit tests
+```
 
-Both take any `docker compose` arguments and serve the app at
-`http://localhost:8080` (`GOGGLEBOX_PORT` changes it) through the same proxy
-self-hosters run. Bootstrap the sandbox once:
+Build the sandbox: an offline Jellyfin seeded with a tiny library and the users
+Alice, Bob, Carol and Dave.
 
 ```bash
 ./scripts/e2e.sh up -d jellyfin-sandbox
@@ -219,28 +223,79 @@ self-hosters run. Bootstrap the sandbox once:
 ./scripts/e2e.sh run --rm sandbox-provision
 ```
 
-Then iterate with hot reload, and prove against the production image before
-pushing:
+Provisioning writes `.env.sbx` (the sandbox's API key and a login token) and
+`config.sbx.json` (the household config), both gitignored. The sandbox lives
+in Docker volumes and survives restarts; you only repeat this after wiping it.
+
+### Daily loop
 
 ```bash
 ./scripts/dev.sh up -d
-./scripts/dev.sh run --rm -e PROOF_FLOW=mark-all-watched proof
+```
 
+Open `http://localhost:8080`; you are logged in as the sandbox household. Edits
+under `src/` take effect without restarting anything: the browser hot-reloads
+client changes, and the server restarts itself within a couple of seconds on
+server changes. Keep port 8080 for dev, because Vite's hot reload connects to
+it.
+
+```bash
+./scripts/dev.sh logs -f gogglebox client   # follow the server and client
+./scripts/dev.sh down                       # stop; the sandbox is kept
+```
+
+### Checks and proofs
+
+```bash
+./scripts/e2e.sh run --rm check   # typecheck
+./scripts/e2e.sh run --rm test    # unit tests
+```
+
+The Playwright flows in `e2e/flows/` drive the app through the browser and
+write screenshots to `./artifacts/`. Run one against the dev stack by name, or
+all of them:
+
+```bash
+./scripts/dev.sh run --rm -e PROOF_FLOW=mark-all-watched proof
+./scripts/dev.sh run --rm -e PROOF_FLOW=all proof
+```
+
+Flows change watched state in the sandbox; `./scripts/e2e.sh run --rm
+sandbox-reset` clears it, which is worth doing before a full run.
+
+### Before pushing
+
+CI builds the production image and runs every flow against it, not against the
+dev servers. Do the same locally:
+
+```bash
+./scripts/dev.sh down
 ./scripts/e2e.sh run --rm sandbox-reset
 ./scripts/e2e.sh up -d --build --wait
 ./scripts/e2e.sh run --rm -e PROOF_FLOW=all proof
+./scripts/e2e.sh down
 ```
 
-Checks that need no Jellyfin: `./scripts/e2e.sh run --rm check` and
-`./scripts/e2e.sh run --rm test`. `./scripts/e2e.sh down -v` discards the sandbox.
+### How the stacks fit together
 
-When a proof needs a different flag state, override the flags the same way as
-a deployment (see "Basic deploy flow") in an extra `-f` file; complete GOFF
+Both scripts wrap `docker compose` and take any of its arguments. They share
+one stack per checkout (the project is named after the folder) and one sandbox:
+
+| Script             | Files                                                  | Runs the app as                     |
+| ------------------ | ------------------------------------------------------ | ----------------------------------- |
+| `./scripts/e2e.sh` | `docker-compose.base.yml` + `docker-compose.e2e.yml`   | The production image, built locally |
+| `./scripts/dev.sh` | the above + `docker-compose.dev.yml`                   | Source with hot reload              |
+
+`docker-compose.base.yml` is the same stack self-hosters run, so dev, CI and
+deployments share one proxy and one flag sidecar. `./scripts/e2e.sh down -v`
+wipes everything, including the sandbox; bootstrap it again afterwards.
+
+When a proof needs a different flag state, override the flags the way a
+deployment does (see "Basic deploy flow") in an extra `-f` file; complete GOFF
 fixtures live under `tools/goff/fixtures/`.
 
-See the [agent guide](kb/00000000-0000-0000-0000-000000000000.md)
-for the agent workflow and the Docker-specific rules that keep local
-development consistent.
+See the [agent guide](kb/00000000-0000-0000-0000-000000000000.md) for the agent
+workflow.
 
 ## Releases
 
