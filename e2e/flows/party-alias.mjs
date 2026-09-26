@@ -15,7 +15,7 @@
 //      duplicate party created (same deterministic key)            -> party-alias-reused.png
 //
 // Run it with:
-//   PROOF_FLOW=party-alias ./scripts/sbx.sh run --rm proof
+//   PROOF_FLOW=party-alias ./scripts/e2e.sh run --rm proof
 //
 // NOTE on auto-login: run.mjs logs in (auto-login household in sbx) BEFORE
 // flows. We do NOT log out here — household is exactly the account we want. We

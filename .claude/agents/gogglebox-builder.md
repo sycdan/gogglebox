@@ -11,23 +11,18 @@ in the dev Docker stack — never run `npm`/`node`/`tsc` on the host.
 
 ## Dev commands (run via the Bash tool)
 
-- Typecheck: `docker compose run --rm check`
-- Unit tests: `docker compose run --rm test`
-- Stack up (manual look): `./scripts/sbx.sh up -d server client` (seeded sandbox)
-  or `./scripts/uat.sh up -d server client` (real Jellyfin)
-- Logs: `./scripts/sbx.sh logs --tail=50 server`
-
-(`docker-compose.yml` is the compose default — no `-f` needed — but the bare base
-only does check/test; it ships no Jellyfin + no config. Running the app needs a
-run stack: `./scripts/sbx.sh` (seeded) or `./scripts/uat.sh` (real JF), which
-mount their own config over `/app/config.json`.)
+- Typecheck: `./scripts/e2e.sh run --rm check`
+- Unit tests: `./scripts/e2e.sh run --rm test`
+- Stack up with hot reload (manual look): `./scripts/dev.sh up -d` (seeded
+  sandbox Jellyfin; bootstrap it first as README "Development" describes)
+- Logs: `./scripts/dev.sh logs --tail=50 gogglebox client`
 
 ## Constraints
 
 - Keep changes minimal and match existing code style (see `src/server`, `src/client`).
 - Do NOT run destructive git commands. Do NOT touch `.env` secrets.
-- `npm test` and `npm run check` need no Jellyfin. Anything that boots the server
-  (`server` service) needs a reachable real Jellyfin from `.env`.
+- `npm test` and `npm run check` need no Jellyfin. Anything that boots the app
+  (`gogglebox` service) needs the provisioned sandbox (`.env.sbx`).
 - If a requirement is ambiguous, make the smallest safe assumption and state it.
 
 ## Workflow

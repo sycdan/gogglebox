@@ -4,10 +4,8 @@ A deterministic, **offline** Jellyfin for testing Gogglebox's continue-watching
 features against a **real** Jellyfin with controlled, repeatable data — ending the
 "unit tests pass but real behavior fails" cycle.
 
-It is **additive and opt-in**: everything lives in the `docker-compose.sbx.yml`
-overlay, driven by `./scripts/sbx.sh` (which layers it on the base file). The base
-stack (`docker compose …` against your `.env`) is unaffected unless you use the
-overlay.
+It is part of the e2e stack (`docker-compose.e2e.yml`, driven by
+`./scripts/e2e.sh`) and so of the dev stack layered on it (`./scripts/dev.sh`).
 
 The model: an **immutable** library + users + API key persist in named volumes;
 only the **mutable** per-user played-state is reset between tests.
@@ -25,25 +23,24 @@ only the **mutable** per-user played-state is reset between tests.
 
 ```bash
 # 1. Boot the sandbox Jellyfin (official image, internal hostname jellyfin-sandbox:8096)
-./scripts/sbx.sh up -d jellyfin-sandbox
+./scripts/e2e.sh up -d jellyfin-sandbox
 
 # 2. Generate the tiny media library (ffmpeg stubs + .nfo) into the sandbox_media volume
-./scripts/sbx.sh run --rm sandbox-generate
+./scripts/e2e.sh run --rm sandbox-generate
 
 # 3. Provision: run the first-run wizard, create users, add libraries (online
 #    metadata DISABLED), scan + wait, mint a stable API key, emit env + config
-./scripts/sbx.sh run --rm sandbox-provision
+./scripts/e2e.sh run --rm sandbox-provision
 ```
 
 After step 3 you have, at the project root:
 
-- `.env.sbx` — the **overrides-only** env file layered on top of the shared
-  `.env` (later file wins). It carries only per-env override keys:
-  `JELLYFIN_URL=http://jellyfin-sandbox:8096`, the minted `JELLYFIN_API_KEY`, and
-  `ACCESS_TOKEN=sbx-household-token`. (Auto-login is implicit: with that token
-  set and matching an `access_tokens` entry, the app logs in automatically as
-  the `household` account — there is no separate auto-login env var.) Shared
-  keys (e.g. `WATCHED_THRESHOLD`, `JELLYFIN_DEBUG`) stay in `.env`.
+- `.env.sbx` — the wrapper loads it after `.env.e2e` (later file wins). It
+  carries `JELLYFIN_URL=http://jellyfin-sandbox:8096`, the minted
+  `JELLYFIN_API_KEY`, and `ACCESS_TOKEN=sbx-household-token`. (Auto-login is
+  implicit: with that token set and matching an `access_tokens` entry, the app
+  logs in automatically as the `household` account — there is no separate
+  auto-login env var.)
 - `config.sbx.json` — **schemaVersion 2** (`schemaVersion: 2`): name-based
   `users[]` (Alice/Bob/Carol/Dave, with Carol carrying `pin: "5678"`), two
   tiered accounts, and their access tokens:
@@ -62,71 +59,50 @@ Sandbox volumes are disposable. If provisioning or proof ever looks wedged from
 old Jellyfin state, reset from scratch instead of migrating it:
 
 ```bash
-./scripts/sbx.sh down -v
-./scripts/sbx.sh up -d jellyfin-sandbox
-./scripts/sbx.sh run --rm sandbox-generate
-./scripts/sbx.sh run --rm sandbox-provision
+./scripts/e2e.sh down -v
+./scripts/e2e.sh up -d jellyfin-sandbox
+./scripts/e2e.sh run --rm sandbox-generate
+./scripts/e2e.sh run --rm sandbox-provision
 ```
 
 Re-running any step is **idempotent**: generate skips existing files (`FORCE=1`
 to re-encode), provision skips existing users/libraries and reuses the existing
 API key.
 
-## Point the server / proof at the sandbox (one command)
+## Run the app and proof against it
 
-The `docker-compose.sbx.yml` overlay **re-points the base `server`/`proof`
-services** at the sandbox, baking in everything that previously had to be wired by
-hand (the `.env.sbx` overrides + the `config.sbx.json` mount over
-`/app/config.json`). Because it overrides the same service names, the client's
-`http://server:3000` proxy and the proof's `http://client:5173` already resolve —
-no network aliases needed. Drive it all with `./scripts/sbx.sh`; the base stack
-(`docker compose …` with `.env` + `config.json`) is untouched.
+The e2e stack mounts `config.sbx.json` over `/app/config.json` in both the app
+and `proof`, and feeds `.env.sbx` to `proof` so seeders get the sandbox
+Jellyfin credentials and scope themselves to Alice/Bob/Carol/Dave (not
+`gogglebox-admin`, whose stray played-state would desync the rail).
 
 ```bash
 # 0. (once) sandbox Jellyfin must be up + provisioned (see "Bring it up" above).
 
 # 1. Reset every user to a clean played-state slate.
-./scripts/sbx.sh run --rm sandbox-reset
+./scripts/e2e.sh run --rm sandbox-reset
 
-# 2. Bring up the stack: jellyfin + server + client + proxy. (Use up -d, NOT
-#    `run`, so the services are reachable by name for the proxy + proof. Bare
-#    `up -d` skips the one-shot sandbox-generate/provision/reset `tools`-profile
-#    services.) The proxy (:8080) is the single entrypoint; server/client bind no
-#    host ports.
-./scripts/sbx.sh up -d
+# 2. Bring up the stack. Bare `up -d` skips the one-shot tools-profile services.
+#    The proxy (:8080) is the single entrypoint. dev.sh instead runs the source
+#    with hot reload.
+./scripts/e2e.sh up -d --build --wait
 
 # 3. Run a flow against the sandbox (writes screenshots to ./artifacts):
-PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
+PROOF_FLOW=mark-all-watched ./scripts/e2e.sh run --rm proof
 
 # For a multi-flow prover pass, reuse one PROOF_RUN_ID for every proof command so
 # all screenshots stay grouped under ./artifacts/<PROOF_RUN_ID>/.
 PROOF_RUN_ID="$(date -u +%Y-%m-%dT%H-%M-%SZ)-sbx" \
-  PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
+  PROOF_FLOW=mark-all-watched ./scripts/e2e.sh run --rm proof
 
 # 4. Tear down when done.
-./scripts/sbx.sh down
+./scripts/e2e.sh down
 ```
 
-What the overlay bakes into `server`/`proof` (so you never hand-hack again):
-
-- **`server`**: `env_file: [.env, .env.sbx]` (the ordered list layers the sandbox
-  `JELLYFIN_URL`/`JELLYFIN_API_KEY` + creds over the shared `.env`; later wins)
-  **and** a compose-managed mount of
-  `./config.sbx.json` → `/app/config.json:ro`. The mount target is an
-  absolute **in-container** path, so Git Bash never path-mangles it (a mangled
-  target silently leaves the live `config.json` in place → `viewers: []` /
-  "Unknown viewer"). It also depends on `jellyfin-sandbox`.
-- **`client`**: unchanged from base — its `http://server:3000` proxy now resolves
-  to the sandbox-pointed `server` because the overlay overrides that same service.
-- **`proof`**: `env_file: [.env, .env.sbx]` (so seeders get the sandbox Jellyfin
-  creds layered over the shared `.env`) and the same `config.sbx.json` mount, so the flow reads the
-  **household party** and scopes seeders to Alice/Bob/Carol/Dave only — not the
-  `gogglebox-admin` user, whose stray played-state would desync the rail.
-
 > Gotcha: if a container ever comes up with **no network** (can happen if a prior
-> start aborted on a port conflict — symptom: server logs
+> start aborted on a port conflict — symptom: app logs
 > `Failed to load viewers from Jellyfin: fetch failed`), recreate it:
-> `./scripts/sbx.sh up -d --force-recreate server`.
+> `./scripts/e2e.sh up -d --force-recreate gogglebox`.
 
 ## Deterministic reset (between flows)
 
@@ -135,7 +111,7 @@ clean played-state slate — clears every user's `PlayedItems` and zeroes every
 Movie/Episode `PlaybackPositionTicks` — fast, no rescan:
 
 ```bash
-./scripts/sbx.sh run --rm sandbox-reset
+./scripts/e2e.sh run --rm sandbox-reset
 ```
 
 In e2e code the same logic is on the shared client

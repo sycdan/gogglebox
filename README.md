@@ -190,38 +190,41 @@ deployments during migration, but the HTPC Compose file no longer uses it.
 Development also runs through Docker Compose. The host should not need Node,
 npm, or a host `node_modules`; dependencies live in Docker volumes.
 
-The base compose file is for checks that do not need Jellyfin:
+Every local stack is the self-host stack in `deploy/docker-compose.yml`, layered:
+
+| Wrapper             | Layers                                  | Use                                           |
+| ------------------- | --------------------------------------- | --------------------------------------------- |
+| `./scripts/e2e.sh`  | deploy + `docker-compose.e2e.yml`       | The production image against a seeded sandbox Jellyfin; what CI runs |
+| `./scripts/dev.sh`  | the above + `docker-compose.dev.yml`    | The same stack with hot-reloading server and client |
+
+Both take any `docker compose` arguments and serve the app at
+`http://localhost:8080` (`GOGGLEBOX_PORT` changes it) through the same proxy
+self-hosters run. Bootstrap the sandbox once:
 
 ```bash
-docker compose run --rm check
-docker compose run --rm test
-docker compose down
+./scripts/e2e.sh up -d jellyfin-sandbox
+./scripts/e2e.sh run --rm sandbox-generate
+./scripts/e2e.sh run --rm sandbox-provision
 ```
 
-To run the full app, use one of the wrapper stacks:
-
-| Stack              | Purpose                                                   |
-| ------------------ | --------------------------------------------------------- |
-| `./scripts/sbx.sh` | Seeded offline sandbox Jellyfin for repeatable local work |
-| `./scripts/uat.sh` | A developer's real Jellyfin for user-acceptance testing   |
-
-Both stacks serve the app through `http://localhost:8080` with `/api` routed to
-Gogglebox and `/player` routed to Jellyfin. The server and client services do
-not expose separate host ports.
-
-Local and sandbox stacks also run the GO Feature Flag sidecar. By default it
-mounts `flags/goff.yaml`; set `GOFF_FLAGS_FILE` to another complete GOFF file
-when a proof needs a different flag state.
-
-Common examples:
+Then iterate with hot reload, and prove against the production image before
+pushing:
 
 ```bash
-./scripts/sbx.sh up -d
-PROOF_FLOW=mark-all-watched ./scripts/sbx.sh run --rm proof
+./scripts/dev.sh up -d
+./scripts/dev.sh run --rm -e PROOF_FLOW=mark-all-watched proof
 
-./scripts/uat.sh up -d
-PROOF_FLOW=continue-watching ./scripts/uat.sh run --rm proof
+./scripts/e2e.sh run --rm sandbox-reset
+./scripts/e2e.sh up -d --build --wait
+./scripts/e2e.sh run --rm -e PROOF_FLOW=all proof
 ```
+
+Checks that need no Jellyfin: `./scripts/e2e.sh run --rm check` and
+`./scripts/e2e.sh run --rm test`. `./scripts/e2e.sh down -v` discards the sandbox.
+
+The GO Feature Flag sidecar mounts `flags/goff.yaml`; set `GOFF_FLAGS_FILE`
+(relative to `deploy/`) to another complete GOFF file when a proof needs a
+different flag state.
 
 See the [agent guide](kb/00000000-0000-0000-0000-000000000000.md)
 for the agent workflow and the Docker-specific rules that keep local

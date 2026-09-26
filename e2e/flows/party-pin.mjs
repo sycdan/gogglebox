@@ -30,7 +30,7 @@
 //      party forms, app proceeds                        -> party-pin-success.png
 //
 // Run it with:
-//   PROOF_FLOW=party-pin ./scripts/sbx.sh run --rm proof
+//   PROOF_FLOW=party-pin ./scripts/e2e.sh run --rm proof
 //
 // NOTE: run.mjs logs in (auto-login household in sbx) BEFORE dispatching flows.
 // To log in as a DIFFERENT account we first log out, then defeat the client's

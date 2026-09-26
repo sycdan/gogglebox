@@ -17,24 +17,23 @@ fixes to `gogglebox-builder`. Write access is limited to `efforts/**/.artifacts/
   `./artifacts/<PROOF_RUN_ID>/<timestamp-flow>/` when batching multiple flows
   into one prover run. The suite is split into one module per flow under
   `e2e/flows/`, with shared helpers under `e2e/lib/`.
-- Proof always runs via a run stack, never the bare base (which ships no Jellyfin
-  - no config). Use the same `proof` service through a wrapper:
-    `./scripts/sbx.sh run --rm -e PROOF_FLOW=<flow> proof` (seeded sandbox) or
-    `./scripts/uat.sh run --rm -e PROOF_FLOW=<flow> proof` (real Jellyfin). No
-    `--profile proof` needed — the overlays re-point the same `proof` service.
+- Run the `proof` service through a wrapper:
+    `./scripts/dev.sh run --rm -e PROOF_FLOW=<flow> proof` (hot-reload source) or
+    `./scripts/e2e.sh run --rm -e PROOF_FLOW=<flow> proof` (the production image,
+    as CI runs it). Both use the seeded sandbox Jellyfin.
     (The optional `PROOF_FLOW` prefixes the screenshot files; passing a bare arg
     after `proof` would override the service command, so use the env var instead.)
     When running several flows, set one shared `PROOF_RUN_ID` on every proof
     invocation so all screenshots remain visible under one artifact directory.
 - The stack must be up first (delegate/confirm via gogglebox-runtime), with the
-  matching wrapper: `./scripts/sbx.sh up -d server client` (or `./scripts/uat.sh …`).
+  matching wrapper: `./scripts/dev.sh up -d` (or `./scripts/e2e.sh up -d --build --wait`).
 
 ## Constraints
 
 - Only claim the UI is proved if you actually Read the screenshot and it shows the
   expected state. The proof script exits non-zero on nav/login failure — treat a
   non-zero exit as NOT proved.
-- The proof container logs in with the `ACCESS_TOKEN` from the layered env
+- The proof container logs in with the `ACCESS_TOKEN` from `.env.sbx`
   (auto-login when the app reports it; otherwise the harness fills the token form).
 - If you need a feature-specific screen, ask gogglebox-builder to add or extend a
   flow module under `e2e/flows/` (e.g. navigate + screenshot the new flow) and wire

@@ -16,7 +16,8 @@
 		reverse_proxy {$JELLYFIN_URL}
 	}
 
+	# WEB_UPSTREAM lets the dev stack send the web app to its Vite client.
 	handle {
-		reverse_proxy gogglebox:3000
+		reverse_proxy {$WEB_UPSTREAM:gogglebox:3000}
 	}
 }

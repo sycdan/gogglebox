@@ -30,7 +30,7 @@ version="${base}-${ms}"
 
 # npm version updates package.json AND package-lock.json; --no-git-tag-version
 # keeps it from creating its own commit/tag (we commit on the host below).
-docker compose run --rm --no-deps -T deps npm version "$version" --no-git-tag-version >/dev/null
+./scripts/e2e.sh run --rm --no-deps -T deps npm version "$version" --no-git-tag-version >/dev/null
 
 git add package.json package-lock.json
 git commit -m "chore: bump to ${version}"

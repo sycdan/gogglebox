@@ -1,0 +1,71 @@
+# Hot-reload layer over docker-compose.e2e.yml: same sandbox, proxy and proof,
+# but the app runs from this checkout's source (tsx watch + Vite). Use:
+#
+#   ./scripts/dev.sh up -d
+#   ./scripts/dev.sh run --rm -e PROOF_FLOW=search proof
+#
+# Bootstrap the sandbox first as docker-compose.e2e.yml describes (dev.sh takes
+# the same commands).
+
+x-node: &node
+  image: node:22-alpine
+  working_dir: /app
+
+services:
+  gogglebox:
+    <<: *node
+    build: !reset null
+    pull_policy: !reset null
+    command: npm run dev:server
+    # Windows bind mounts deliver no inotify events; tsx's watcher must poll.
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+    volumes: !override
+      - .:/app
+      - node_modules:/app/node_modules
+      - ./config.sbx.json:/app/config.json:ro
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  client:
+    <<: *node
+    command: npm run dev:client
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+    environment:
+      - VITE_API_PROXY=http://gogglebox:3000
+      # Dev-only browser autoplay workaround. Production builds leave this unset.
+      - VITE_PLAYER_START_MUTED=${VITE_PLAYER_START_MUTED:-true}
+      # Dev-only escape hatch for debugging Jellyfin-web behind the launch cover.
+      - VITE_PLAYER_HIDE_STARTING_OVERLAY=${VITE_PLAYER_HIDE_STARTING_OVERLAY:-false}
+    # Vite's dep-optimizer cache (cacheDir=/tmp/vite) on tmpfs, so a cache
+    # half-written by a SIGKILL cannot wedge the next boot.
+    tmpfs:
+      - /tmp/vite
+    # Healthy only once Vite serves the app shell; a wedged client (504
+    # Outdated Optimize Dep) stays unhealthy and holds back proof.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:5173/"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  proxy:
+    environment:
+      - WEB_UPSTREAM=client:5173
+    depends_on:
+      - client
+
+  deps:
+    profiles: !reset []
+
+  proof:
+    depends_on:
+      client:
+        condition: service_healthy
