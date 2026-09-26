@@ -297,15 +297,6 @@ export interface EffectiveConfig extends EffectiveConfigProvenance {
   recommendationCount: number;
 }
 
-// The stable hash of the raw config source file. Used to decide whether the
-// cached effective config in /data is still fresh BEFORE doing the (async) build.
-export function readSourceHash(
-  configPath: string = path.join(process.cwd(), 'config.json'),
-): string {
-  const { raw } = readRequiredJsonFile<RawConfigFile>(configPath);
-  return hashRawConfig(raw);
-}
-
 // Build the EFFECTIVE config from the read-only source file + the live Jellyfin
 // user list. Steps:
 //   1. Read raw config.json (overrides); detect schemaVersion; hash the raw text.
@@ -313,7 +304,7 @@ export function readSourceHash(
 //   3. Seed defaults from the bundled example; deep-merge migrated overrides.
 //   4. Skip+warn validate against Jellyfin users (fail only if unusable).
 //   5. Return the derived effective config + provenance.
-// The caller (server startup) persists/caches this in /data via AppState.
+// The caller (server startup) records this in /data via AppState.
 export function buildEffectiveConfig(
   ctx: { jellyfinUsers: FamilyMember[]; warn?: (message: string) => void },
   packageVersion: string,

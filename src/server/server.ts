@@ -13,9 +13,8 @@ import {
   visibleViewersForAccount,
 } from './accounts';
 import { AppState } from './appState';
-import { buildEffectiveConfig, loadConfig, readSourceHash, resolveViewers } from './config';
+import { buildEffectiveConfig, loadConfig, resolveViewers } from './config';
 import { CachedEffectiveConfig } from './appState';
-import { CURRENT_SCHEMA_VERSION } from './configMigrations';
 import {
   ContinueWatchingCandidate,
   getProgressPropagationTargets,
@@ -1224,27 +1223,18 @@ const isEntryPoint = require.main === module;
 if (isEntryPoint) {
   void (async () => {
     try {
-      // Build (or reuse) the EFFECTIVE config: the read-only config.json is a source
-      // of overrides that we migrate forward, seed from the bundled example, validate
-      // (skip+warn), and cache in /data with provenance. We re-derive only when the
-      // source file changed (sourceHash) OR the running image version changed
-      // (builtForPackage) — otherwise reuse the cached effective config.
+      // Build the EFFECTIVE config: the read-only config.json is a source of
+      // overrides that we migrate forward, seed from the bundled example, and
+      // validate (skip+warn) against the live Jellyfin users. Derived at every
+      // startup, never reused, so a user created in Jellyfin since the last
+      // start takes effect; the copy in /data is only a record for inspection.
       const jellyfinUsers = await jellyfin.fetchUsers();
-      const packageVersion = readPackageVersion();
-      const sourceHash = readSourceHash(configSourcePath);
-
-      let effective = appState.getEffectiveConfig();
-      if (effective && appState.isEffectiveConfigFresh(sourceHash, packageVersion, CURRENT_SCHEMA_VERSION)) {
-        console.log('[startup] reusing cached effective config (source + image unchanged).');
-      } else {
-        const built = buildEffectiveConfig({ jellyfinUsers }, packageVersion, configSourcePath);
-        appState.setEffectiveConfig(built);
-        effective = built;
-        console.log(
-          `[startup] derived effective config (schemaVersion ${built.schemaVersion}, ` +
-          `package ${built.builtForPackage}); cached to /data.`,
-        );
-      }
+      const effective = buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), configSourcePath);
+      appState.setEffectiveConfig(effective);
+      console.log(
+        `[startup] derived effective config (schemaVersion ${effective.schemaVersion}, ` +
+        `package ${effective.builtForPackage}); recorded in /data.`,
+      );
 
       applyEffectiveConfig(config, effective);
 
