@@ -39,6 +39,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compose version
+        run: docker compose version
+
       # publish.yml ships docker-compose.base.yml as an OCI artifact. Relative
       # paths in it would resolve inside Compose's cache on the operator's host,
       # so it must not bind-mount anything; the dry run catches the rest of what

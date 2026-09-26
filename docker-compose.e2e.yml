@@ -39,9 +39,6 @@ x-sandbox-tools: &sandbox-tools
     - SANDBOX_MEDIA_ROOT=/media
   profiles: ["tools"]
 
-include:
-  - docker-compose.base.yml
-
 services:
   goff:
     restart: !reset null
