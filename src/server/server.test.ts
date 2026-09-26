@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -173,12 +172,11 @@ async function startTestServerWithFlags(
   config: AppConfig,
   appState: AppState,
   featureFlags: FeatureFlagReader,
-  configRepository?: string,
   jellyfinOverride?: JellyfinClient,
   configManager?: string,
 ): Promise<TestServer> {
   const jellyfin = jellyfinOverride ?? new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
-  const app = createApp(config, jellyfin, appState, featureFlags, configRepository, configManager);
+  const app = createApp(config, jellyfin, appState, featureFlags, configManager);
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -190,54 +188,6 @@ async function startTestServerWithFlags(
     close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
   };
 }
-
-test('Sync config fast-forwards and updates the viewer picker without losing the session', async (t) => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gogglebox-config-route-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const remote = path.join(root, 'remote.git');
-  const writer = path.join(root, 'writer');
-  const production = path.join(root, 'production');
-  const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  const writeConfig = (secondaryUsers: string[]) => {
-    fs.writeFileSync(path.join(writer, 'config.json'), JSON.stringify({
-      schemaVersion: 2,
-      users: [{ jellyfin_name: 'Alice' }, { jellyfin_name: 'Bob' }],
-      accounts: { household: { primary_users: ['Alice'], secondary_users: secondaryUsers, tertiary_users: [] } },
-      access_tokens: { 'test-token': 'household' },
-    }));
-    git('-C', writer, 'add', 'config.json');
-    git('-C', writer, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'Update config');
-  };
-  git('init', '--bare', '-b', 'main', remote);
-  git('clone', remote, writer);
-  writeConfig([]);
-  git('-C', writer, 'push', '-u', 'origin', 'main');
-  git('clone', remote, production);
-
-  const config = buildConfig();
-  config.accounts.household = { primary_users: ['Alice'], secondary_users: [], tertiary_users: [] };
-  const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
-  jellyfin.fetchUsers = async () => [ALICE, BOB];
-  const testServer = await startTestServerWithFlags(
-    config, new AppState(tempStatePath()), new MapFeatureFlags(), production, jellyfin,
-  );
-  try {
-    const cookie = await login(testServer.baseUrl, 'test-token');
-    writeConfig(['Bob']);
-    git('-C', writer, 'push');
-
-    const sync = await fetch(`${testServer.baseUrl}/api/config/sync`, { method: 'POST', headers: { cookie } });
-    assert.equal(sync.status, 200);
-    assert.equal((await json<{ changed: boolean }>(sync)).changed, true);
-
-    const session = await fetch(`${testServer.baseUrl}/api/session`, { headers: { cookie } });
-    const body = await json<{ authenticated: boolean; viewers: { name: string }[] }>(session);
-    assert.equal(body.authenticated, true);
-    assert.deepEqual(body.viewers.map((viewer) => viewer.name), ['Alice', 'Bob']);
-  } finally {
-    await testServer.close();
-  }
-});
 
 test('Restart and update requires authentication and forwards only a validated pending SHA', async () => {
   const revision = 'a'.repeat(40);
@@ -272,7 +222,7 @@ test('Restart and update requires authentication and forwards only a validated p
   const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
   jellyfin.fetchUsers = async () => [ALICE, BOB];
   const testServer = await startTestServerWithFlags(
-    config, new AppState(tempStatePath()), new MapFeatureFlags(), undefined, jellyfin,
+    config, new AppState(tempStatePath()), new MapFeatureFlags(), jellyfin,
     `http://127.0.0.1:${address.port}`,
   );
   try {
