@@ -105,7 +105,10 @@ Compose's prompt to confirm the variables a remote stack uses.
 
 This needs Docker Compose v5 or newer (`docker compose version`). Compose 2.40
 and earlier reject the folder's `docker-compose.yml` with "conflicts with
-imported resource", because it extends a service it includes.
+imported resource", because it extends a service it includes. On Windows with
+Docker Desktop, Compose v5.1.4 cannot download the stack ("proxyconnect tcp:
+open ./pipe/dockerHttpProxy: The system cannot find the path specified");
+update Docker Desktop to a release with Compose v5.2.0 or newer.
 
 Useful commands, run in the folder:
 
