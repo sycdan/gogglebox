@@ -15,12 +15,11 @@ import { selectExactViewersByName, continueFromPicker, viewerCards } from '../li
 //     This flow scopes the locator to a SINGLE chosen .media-card (the first
 //     one that has a Play or Resume button) rather than matching page-wide.
 //
-// Works against both sbx and uat (any account/library shape); does not depend
+// Works against any Jellyfin (any account/library shape); does not depend
 // on continue-watching data, an exact primary count, or a specific title.
 //
 // Run it with:
-//   PROOF_FLOW=player-uat ./scripts/sbx.sh run --rm proof
-//   PROOF_FLOW=player-uat ./scripts/uat.sh run --rm proof
+//   PROOF_FLOW=player-uat ./scripts/e2e.sh run --rm proof
 export const match = /player-uat|uat-player/i;
 
 async function pickAnyPartyAndContinue(page, label) {

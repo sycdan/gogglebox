@@ -15,7 +15,7 @@
 # Install (once, per clone):  git config core.hooksPath .githooks
 set -euo pipefail
 
-compose="docker compose -f docker-compose.yml"
+compose="./scripts/e2e.sh"
 
 # Files that actually go INTO the image — keep in lockstep with the Dockerfile's
 # COPY sources. This is the single source of truth for "publish-worthy": the CI
@@ -103,10 +103,6 @@ if only_docs_or_efforts_changed; then
 fi
 
 echo "[pre-push] 3/4 typecheck (lint)…"
-# `check`/`test` need no Jellyfin/token, but compose parses the whole file
-# and some services declare required (:?) vars — stub them so interpolation
-# doesn't abort the run.
-export ACCESS_TOKEN="${ACCESS_TOKEN:-prepush}"
 $compose run --rm check
 
 echo "[pre-push] 4/4 unit tests…"

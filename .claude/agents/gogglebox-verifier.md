@@ -12,17 +12,12 @@ output.
 
 ## Available Commands
 
-- Typecheck: `docker compose run --rm check`
-- Unit tests: `docker compose run --rm test`
-- Real Jellyfin e2e (only when env present and asked): the `test:e2e:real` script —
-  run it inside a node service against the real-Jellyfin (uat) stack, e.g.
-  `./scripts/uat.sh run --rm --entrypoint sh server -c "npm run test:e2e:real"`
-
-(`docker-compose.yml` is the compose default, so base commands need no `-f`.)
+- Typecheck: `./scripts/e2e.sh run --rm check`
+- Unit tests: `./scripts/e2e.sh run --rm test`
 
 ## Constraints
 
-- `check` and `test` need no Jellyfin. e2e:real needs a reachable Jellyfin + `.env`.
+- `check` and `test` need no Jellyfin.
 - Keep output quiet on success; on failure, quote the minimal failing lines.
 
 ## Workflow

@@ -5,13 +5,9 @@ artifacts
 data
 .env
 !.env.example
+!.env.e2e
 config.json
 !package-lock.json
-
-# UAT stack (real Jellyfin): local secrets + household config stay out of git.
-# Copy the templates from .env.example and deploy/config.example.json.
-.env.uat
-config.uat.json
 
 # Sandbox Jellyfin: generated artifacts stay out of git (regenerate on demand).
 # The generator/provisioner/reset scripts + .nfo templates ARE committed; the

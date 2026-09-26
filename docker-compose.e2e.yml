@@ -1,0 +1,169 @@
+# End-to-end stack: the self-host stack (deploy/docker-compose.yml) with the
+# image built from this checkout, a seeded offline sandbox Jellyfin, and the
+# Playwright proof runner. CI runs exactly this; run it locally the same way:
+#
+#   ./scripts/e2e.sh up -d jellyfin-sandbox
+#   ./scripts/e2e.sh run --rm sandbox-generate
+#   ./scripts/e2e.sh run --rm sandbox-provision
+#   ./scripts/e2e.sh run --rm sandbox-reset
+#   ./scripts/e2e.sh up -d --build --wait
+#   ./scripts/e2e.sh run --rm -e PROOF_FLOW=all proof
+#   ./scripts/e2e.sh down -v
+#
+# Always go through the wrapper: deploy's required variables are interpolated
+# before any override applies, and the wrapper supplies them (.env.e2e, then
+# the provisioned .env.sbx). For hot reload, layer docker-compose.dev.yml on
+# top with ./scripts/dev.sh. The project name comes from the checkout's
+# directory, so separate checkouts get separate stacks.
+
+x-node: &node
+  image: node:22-alpine
+  working_dir: /app
+  volumes:
+    - .:/app
+    - node_modules:/app/node_modules
+
+# Node + ffmpeg one-shots that generate, provision and reset the sandbox. They
+# reach Jellyfin on the compose network at jellyfin-sandbox:8096.
+x-sandbox-tools: &sandbox-tools
+  build:
+    context: .
+    dockerfile: tools/sandbox/Dockerfile
+  working_dir: /app
+  volumes:
+    - .:/app
+    - sandbox_media:/media
+  environment:
+    - JELLYFIN_URL=http://jellyfin-sandbox:8096
+    - MEDIA_ROOT=/media
+    - SANDBOX_MEDIA_ROOT=/media
+  profiles: ["tools"]
+
+services:
+  # Deploy's fixed container names would collide with any other stack on the
+  # host, so every extended service drops them.
+  goff:
+    extends: { file: deploy/docker-compose.yml, service: goff }
+    container_name: !reset null
+    restart: !reset null
+
+  gogglebox:
+    extends: { file: deploy/docker-compose.yml, service: gogglebox }
+    container_name: !reset null
+    restart: !reset null
+    build: .
+    image: gogglebox:e2e
+    pull_policy: build
+    volumes: !override
+      - ./config.sbx.json:/app/config.json:ro
+    # The image runs as node (uid 1000) and ships no /data.
+    tmpfs:
+      - /data:uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/api/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    depends_on:
+      - goff
+      - jellyfin-sandbox
+
+  proxy:
+    extends: { file: deploy/docker-compose.yml, service: proxy }
+    container_name: !reset null
+    restart: !reset null
+    depends_on:
+      - gogglebox
+      - jellyfin-sandbox
+
+  jellyfin-sandbox:
+    image: jellyfin/jellyfin:10.9.11
+    hostname: jellyfin-sandbox
+    environment:
+      - JELLYFIN_PublishedServerUrl=http://jellyfin-sandbox:8096
+    volumes:
+      # Provisioned state (users, libraries, api key) persists across restarts.
+      - sandbox_config:/config
+      - sandbox_cache:/cache
+      - sandbox_media:/media:ro
+
+  # Generate the tiny media library (ffmpeg stubs + .nfo). Idempotent; FORCE=1
+  # re-encodes.
+  sandbox-generate:
+    <<: *sandbox-tools
+    command: node tools/sandbox/generate-fixtures.mjs
+
+  # Run the Jellyfin first-run wizard, create users and libraries, mint the API
+  # key, and emit .env.sbx + config.sbx.json.
+  sandbox-provision:
+    <<: *sandbox-tools
+    command: node tools/sandbox/provision.mjs
+    depends_on:
+      - jellyfin-sandbox
+
+  # Reset every user's played-state between runs.
+  sandbox-reset:
+    <<: *sandbox-tools
+    command: node tools/sandbox/reset.mjs
+    env_file:
+      - path: .env.sbx
+        required: true
+    depends_on:
+      - jellyfin-sandbox
+
+  # Populate the node_modules volume for proof, check and test.
+  deps:
+    <<: *node
+    command: npm ci
+    profiles: ["ci", "proof"]
+
+  check:
+    <<: *node
+    command: npm run check
+    profiles: ["ci"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  test:
+    <<: *node
+    # Config-repo tests exercise real Git fetch/fast-forward behavior.
+    command: sh -c "apk add --no-cache git >/dev/null && npm test"
+    profiles: ["ci"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+
+  # Playwright drives the app through the proxy and writes screenshots to
+  # ./artifacts. Pick flows with PROOF_FLOW (an extra `run` arg would replace the
+  # command). .env.sbx gives the seeders the sandbox Jellyfin credentials.
+  proof:
+    image: mcr.microsoft.com/playwright:v1.49.0-jammy
+    working_dir: /app
+    command: node e2e/run.mjs
+    env_file:
+      - path: .env.sbx
+        required: true
+    environment:
+      - PROOF_URL=http://proxy:8080
+      - PROOF_FLOW=${PROOF_FLOW:-app}
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - ./artifacts:/app/artifacts
+      - ./config.sbx.json:/app/config.json:ro
+    profiles: ["proof"]
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      gogglebox:
+        condition: service_healthy
+      proxy:
+        condition: service_started
+
+volumes:
+  node_modules:
+  sandbox_config:
+  sandbox_cache:
+  sandbox_media:

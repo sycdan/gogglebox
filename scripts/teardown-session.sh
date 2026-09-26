@@ -25,9 +25,9 @@ worktree="./sessions/${session_name}"
 
 if [ -d "$worktree" ]; then
   # No -p: compose auto-derives the project name from this directory, which is
-  # the same auto-derivation subagents get from plain `docker compose ...` run
+  # the same auto-derivation subagents get from `./scripts/e2e.sh ...` run
   # inside the worktree (per AGENTS.md's examples, which never pass -p).
-  ( cd "$worktree" && docker compose down -v --remove-orphans ) || true
+  ( cd "$worktree" && ./scripts/e2e.sh down -v --remove-orphans ) || true
 fi
 
 delay=1

@@ -11,26 +11,23 @@ if you need to make any changes or are blocked, report as such in your output.
 
 ## Available Commands
 
-The bare base does NOT run the app — it ships no Jellyfin + no config. Bring the
-app up via a run stack: `./scripts/sbx.sh` (seeded sandbox) or `./scripts/uat.sh`
-(real Jellyfin). Pick the one the request targets (default to sbx if unspecified).
+Both stacks are deploy/docker-compose.yml with a seeded sandbox Jellyfin:
+`./scripts/dev.sh` (hot-reload source) or `./scripts/e2e.sh` (the production
+image, as CI runs it). Default to dev.sh if unspecified. On a fresh machine,
+bootstrap the sandbox first as README "Development" describes.
 
-- Bring up: `./scripts/sbx.sh up -d` (or `./scripts/uat.sh …`) — bare `up -d`
-  starts server + client + proxy (+ sandbox Jellyfin under sbx); skips the
-  one-shot `tools`-profile services.
-- Status: `./scripts/sbx.sh ps`
+- Bring up: `./scripts/dev.sh up -d` (or `./scripts/e2e.sh up -d --build --wait`)
+  — starts gogglebox + proxy + goff + sandbox Jellyfin (+ client under dev.sh);
+  skips the one-shot `tools`-profile services.
+- Status: `./scripts/dev.sh ps`
 - Health: `curl -s http://localhost:8080/api/health` (via the proxy — the single
-  entrypoint; server/client bind no host ports)
-- Logs: `./scripts/sbx.sh logs --tail=80 server client`
-- Stop: `./scripts/sbx.sh down`
-
-(`docker-compose.yml` is the compose default — no `-f` needed — but it only does
-typecheck/tests. The wrapper scripts layer the sbx/uat overlay so `server`/`proof`
-get their Jellyfin creds + config mounted over `/app/config.json`.)
+  entrypoint; the app binds no host port)
+- Logs: `./scripts/dev.sh logs --tail=80 gogglebox client`
+- Stop: `./scripts/dev.sh down`
 
 ## Notes
 
-- Boot depends ONLY on Jellyfin. The `server` service calls `fetchUsers()` at
+- Boot depends ONLY on Jellyfin. The `gogglebox` service calls `fetchUsers()` at
   startup and `process.exit(1)` if Jellyfin is unreachable. It needs
   `JELLYFIN_URL` + `JELLYFIN_API_KEY` set and a reachable Jellyfin. If one of
   those is empty/missing, report the exact key and stop.
