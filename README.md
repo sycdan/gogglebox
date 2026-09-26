@@ -185,6 +185,14 @@ a wildcard over the remaining live Jellyfin users after higher-priority tiers
 are assigned. Guests without a configured `pin` in `users` are not addable,
 because Gogglebox cannot verify them.
 
+### Config warnings and Reboot
+
+At each start Gogglebox checks `config.json` against the live Jellyfin users
+and skips what it cannot use, such as a user Jellyfin does not have. Those
+warnings, each with its fix, show as an alert on the top-right account menu
+and are listed under **Administration**. After fixing `config.json` or
+Jellyfin, press **Reboot** there: the app restarts and reads both again.
+
 ### Managing config remotely
 
 The deploy folder is the whole configuration: Gogglebox reads only the
@@ -195,9 +203,10 @@ A config manager can then apply those changes from the app. Set
 `GOGGLEBOX_CONFIG_MANAGER_URL` to its internal Compose URL (for example,
 `http://config-manager:3001`). A pending commit shows as an alert on the
 top-right account menu; **Administration** lists the active and available
-revisions and offers **Restart and update**. Gogglebox validates the candidate
-`config.json` against live Jellyfin users, then the manager fast-forwards the
-folder and recreates the stack. The manager is not exposed through Caddy and
+revisions and offers **Rebuild**, which asks for the PIN of one of the
+account's primary users (set in `config.json`) to prevent accidents. Gogglebox
+validates the candidate `config.json` against live Jellyfin users, then the
+manager fast-forwards the folder and recreates the stack. The manager is not exposed through Caddy and
 does not ship with the stack yet; the private `whh-gogglebox-config` README
 describes the HTPC one.
 

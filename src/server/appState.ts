@@ -41,6 +41,7 @@ export interface CachedEffectiveConfig {
   accessTokens: Record<string, string>;
   watchedThreshold: number;
   recommendationCount: number;
+  warnings?: string[];
 }
 
 // Writable runtime state — distinct from the read-only config.json. Stores a

@@ -485,6 +485,26 @@ h3 {
   align-items: center;
 }
 
+.config-warnings {
+  margin: 0;
+  padding: 0.85rem 1rem 0.85rem 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  display: grid;
+  gap: 0.5rem;
+}
+
+.rebuild-pin {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.rebuild-pin input {
+  width: 7rem;
+}
+
 .media-grid {
   /* Rails page 3 at a time, so give each tile a full third of the row. */
   grid-template-columns: repeat(3, 1fr);

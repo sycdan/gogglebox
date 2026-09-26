@@ -66,6 +66,25 @@ test('buildEffectiveConfig reads a valid schemaVersion-2 config and stamps prove
   }
 });
 
+test('buildEffectiveConfig returns its warnings, naming the fix for a user missing from Jellyfin', async () => {
+  const workspace = setupWorkspace();
+
+  try {
+    process.chdir(workspace);
+    process.env = { ...originalEnv, JELLYFIN_URL: 'https://example.test', JELLYFIN_API_KEY: 'key' };
+
+    const { buildEffectiveConfig: build } = await import('./config.js');
+    const logged: string[] = [];
+    const effective = build({ jellyfinUsers: jellyfin('Alice'), warn: (message) => logged.push(message) }, '2026.6.29');
+
+    assert.deepEqual(effective.warnings, logged);
+    assert.ok(effective.warnings.some((warning) => warning.includes('"Bob"') && warning.includes('Create them in Jellyfin')));
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('buildEffectiveConfig throws a clear error when config.json is missing', async () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'gogglebox-config-test-'));
 

@@ -114,7 +114,7 @@ export function validateAndResolveConfig(
       continue;
     }
     if (!jellyfinNames.has(name)) {
-      warn(`dropped user "${name}": no matching Jellyfin user (check Jellyfin admin -> Users).`);
+      warn(`dropped user "${name}": no matching Jellyfin user. Create them in Jellyfin (Dashboard -> Users) and Reboot, or remove them from config.json.`);
       continue;
     }
     usersByName.set(name, {
@@ -158,7 +158,7 @@ export function validateAndResolveConfig(
           continue;
         }
         if (!jellyfinNames.has(name)) {
-          warn(`account "${accountKey}": dropped ${label} "${name}" (no matching Jellyfin user).`);
+          warn(`account "${accountKey}": dropped ${label} "${name}": no matching Jellyfin user. Create them in Jellyfin (Dashboard -> Users) and Reboot, or remove them from config.json.`);
           continue;
         }
         out.push(name);
@@ -295,6 +295,8 @@ export interface EffectiveConfig extends EffectiveConfigProvenance {
   accessTokens: Record<string, string>;
   watchedThreshold: number;
   recommendationCount: number;
+  // Every warning deriving raised, for the app to show with its fix.
+  warnings: string[];
 }
 
 // Build the EFFECTIVE config from the read-only source file + the live Jellyfin
@@ -310,7 +312,12 @@ export function buildEffectiveConfig(
   packageVersion: string,
   configPath: string = path.join(process.cwd(), 'config.json'),
 ): EffectiveConfig {
-  const warn = ctx.warn ?? defaultWarn;
+  const warnings: string[] = [];
+  const log = ctx.warn ?? defaultWarn;
+  const warn = (message: string) => {
+    warnings.push(message);
+    log(message);
+  };
   const { value: rawConfig, raw } = readRequiredJsonFile<RawConfigFile>(configPath);
   const sourceHash = hashRawConfig(raw);
 
@@ -342,6 +349,7 @@ export function buildEffectiveConfig(
     recommendationCount: clampRecommendationCount(
       Number(merged.recommendations?.count ?? CONFIG_DEFAULTS.recommendations.count),
     ),
+    warnings,
   };
 }
 
@@ -371,5 +379,6 @@ export function loadConfig(): AppConfig {
     accounts: {},
     accessTokens: {},
     viewersByName: {},
+    configWarnings: [],
   };
 }

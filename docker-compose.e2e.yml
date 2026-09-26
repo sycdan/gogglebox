@@ -43,8 +43,9 @@ services:
   goff:
     restart: !reset null
 
+  # gogglebox keeps the base's restart policy: Reboot exits the app and relies
+  # on it to come back.
   gogglebox:
-    restart: !reset null
     build: .
     image: gogglebox:e2e
     pull_policy: build

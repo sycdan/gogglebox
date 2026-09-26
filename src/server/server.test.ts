@@ -71,6 +71,7 @@ function buildConfig(): AppConfig {
     },
     accessTokens: { 'test-token': 'household' },
     viewersByName: { Alice: ALICE, Bob: BOB },
+    configWarnings: [],
   };
 }
 
@@ -174,9 +175,10 @@ async function startTestServerWithFlags(
   featureFlags: FeatureFlagReader,
   jellyfinOverride?: JellyfinClient,
   configManager?: string,
+  reboot?: () => void,
 ): Promise<TestServer> {
   const jellyfin = jellyfinOverride ?? new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
-  const app = createApp(config, jellyfin, appState, featureFlags, configManager);
+  const app = createApp(config, jellyfin, appState, featureFlags, configManager ?? null, reboot);
   const server = http.createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -189,7 +191,7 @@ async function startTestServerWithFlags(
   };
 }
 
-test('Restart and update requires authentication and forwards only a validated pending SHA', async () => {
+test('Rebuild requires authentication and a primary user PIN, and forwards only a validated pending SHA', async () => {
   const revision = 'a'.repeat(40);
   let candidateSchema = 2;
   let forwarded: string | null = null;
@@ -225,6 +227,9 @@ test('Restart and update requires authentication and forwards only a validated p
     config, new AppState(tempStatePath()), new MapFeatureFlags(), jellyfin,
     `http://127.0.0.1:${address.port}`,
   );
+  const rebuild = (cookie: string, body: unknown) => fetch(`${testServer.baseUrl}/api/config/update`, {
+    method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
   try {
     assert.equal((await fetch(`${testServer.baseUrl}/api/config/update`)).status, 401);
     const cookie = await login(testServer.baseUrl, 'test-token');
@@ -237,23 +242,59 @@ test('Restart and update requires authentication and forwards only a validated p
     });
     assert.equal(invalid.status, 400);
     assert.equal(forwarded, null);
+    // No primary user of the account has a PIN yet: Rebuild is refused.
+    const noPins = await rebuild(cookie, { revision, pin: '1234' });
+    assert.equal(noPins.status, 403);
+    assert.match((await json<{ error: string }>(noPins)).error, /give a primary user/);
+    // Bob is primary; a non-primary user's PIN does not count.
+    config.users = [{ jellyfin_name: 'Alice' }, { jellyfin_name: 'Bob', pin: '1234' }, { jellyfin_name: 'Carol', pin: '9999' }];
+    assert.equal((await rebuild(cookie, { revision })).status, 403);
+    assert.equal((await rebuild(cookie, { revision, pin: '9999' })).status, 403);
+    assert.equal(forwarded, null);
     candidateSchema = 999;
-    const badCandidate = await fetch(`${testServer.baseUrl}/api/config/update`, {
-      method: 'POST', headers: { cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ revision }),
-    });
+    const badCandidate = await rebuild(cookie, { revision, pin: '1234' });
     assert.equal(badCandidate.status, 502);
     assert.equal(forwarded, null);
     candidateSchema = 2;
-    const accepted = await fetch(`${testServer.baseUrl}/api/config/update`, {
-      method: 'POST', headers: { cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ revision }),
-    });
+    const accepted = await rebuild(cookie, { revision, pin: '1234' });
     assert.equal(accepted.status, 202);
     assert.equal(forwarded, revision);
   } finally {
     await testServer.close();
     await new Promise<void>((resolve, reject) => manager.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('Reboot requires authentication, answers, then exits the process', async () => {
+  let rebooted = 0;
+  const config = buildConfig();
+  const testServer = await startTestServerWithFlags(
+    config, new AppState(tempStatePath()), new MapFeatureFlags(), undefined, undefined, () => { rebooted += 1; },
+  );
+  try {
+    assert.equal((await fetch(`${testServer.baseUrl}/api/admin/reboot`, { method: 'POST' })).status, 401);
+    const cookie = await login(testServer.baseUrl, 'test-token');
+    const response = await fetch(`${testServer.baseUrl}/api/admin/reboot`, { method: 'POST', headers: { cookie } });
+    assert.equal(response.status, 202);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(rebooted, 1);
+  } finally {
+    await testServer.close();
+  }
+});
+
+test('the session carries the startup config warnings only once logged in', async () => {
+  const config = buildConfig();
+  config.configWarnings = ['dropped user "Matt": no matching Jellyfin user.'];
+  const testServer = await startTestServerWithFlags(config, new AppState(tempStatePath()), new MapFeatureFlags());
+  try {
+    const anonymous = await json<{ configWarnings: string[] }>(await fetch(`${testServer.baseUrl}/api/session`));
+    assert.deepEqual(anonymous.configWarnings, []);
+    const cookie = await login(testServer.baseUrl, 'test-token');
+    const session = await json<{ configWarnings: string[] }>(await fetch(`${testServer.baseUrl}/api/session`, { headers: { cookie } }));
+    assert.deepEqual(session.configWarnings, config.configWarnings);
+  } finally {
+    await testServer.close();
   }
 });
 
