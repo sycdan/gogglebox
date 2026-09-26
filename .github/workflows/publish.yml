@@ -117,3 +117,13 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # The stack deploy folders include, under the image's exact version. The
+      # file ships verbatim (its ${VAR}s stay unresolved); .env.e2e only
+      # satisfies the required variables while Compose validates it.
+      - name: Publish the stack's compose file
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          STACK="${REGISTRY}/${IMAGE_NAME,,}-compose:${VERSION}"
+          docker compose --env-file .env.e2e -f docker-compose.base.yml publish -y "$STACK"

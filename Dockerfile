@@ -27,6 +27,9 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 
+# App state. A fresh named volume copies this ownership, so it starts writable.
+RUN mkdir /data && chown node:node /data
+
 EXPOSE 3000
 
 USER node

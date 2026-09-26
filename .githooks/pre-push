@@ -18,13 +18,14 @@ set -euo pipefail
 compose="./scripts/e2e.sh"
 
 # Files that actually go INTO the image — keep in lockstep with the Dockerfile's
-# COPY sources. This is the single source of truth for "publish-worthy": the CI
+# COPY sources — plus docker-compose.base.yml, which publish.yml ships beside the
+# image under the same version. This is the single source of truth for "publish-worthy": the CI
 # publish workflow triggers only on package.json, so a change to any of these must
 # be accompanied by a version bump (which edits package.json) to get published.
 # (case globs: `*` matches `/`, so src/* covers nested paths.)
 is_image_input() {
 	case "$1" in
-		src/*|public/*|index.html|vite.config.ts|tsconfig*.json|package.json|package-lock.json|Dockerfile|.dockerignore) return 0 ;;
+		src/*|public/*|index.html|vite.config.ts|tsconfig*.json|package.json|package-lock.json|Dockerfile|.dockerignore|docker-compose.base.yml) return 0 ;;
 		*) return 1 ;;
 	esac
 }

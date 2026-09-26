@@ -39,6 +39,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # publish.yml ships docker-compose.base.yml as an OCI artifact. Relative
+      # paths in it would resolve inside Compose's cache on the operator's host,
+      # so it must not bind-mount anything; the dry run catches the rest of what
+      # publish rejects.
+      - name: Base stack is publishable
+        run: |
+          base="docker compose --env-file .env.e2e -f docker-compose.base.yml"
+          $base config --format json | jq -e '[.services[].volumes[]? | select(.type == "bind")] | length == 0'
+          $base publish --dry-run -y ghcr.io/sycdan/gogglebox-compose:check
+
       # Provisioning talks to Jellyfin directly, before the app exists.
       - name: Boot sandbox Jellyfin
         run: ./scripts/e2e.sh up -d jellyfin-sandbox

@@ -1,0 +1,113 @@
+# The Gogglebox stack: app, GO Feature Flag relay, and the same-origin proxy.
+# publish.yml publishes this file as an OCI artifact under the image's version,
+# and deploy/docker-compose.yml includes it from there, so a deployment's
+# topology moves with GOGGLEBOX_VERSION. docker-compose.e2e.yml includes this
+# local copy, so CI tests what ships.
+#
+# Keep it free of host paths: relative paths in a published file resolve inside
+# Compose's cache on the operator's machine, not their deploy folder. Files
+# ship as inline `configs:`; operator-owned files (config.json) are mounted by
+# the deploy folder. CI rejects any bind mount here.
+
+services:
+  goff:
+    image: gofeatureflag/go-feature-flag:v1.55.1
+    restart: unless-stopped
+    configs:
+      - source: goff-relay
+        target: /goff/goff-proxy.yaml
+      # Override with `configs: !override` pointing at your own file config.
+      - source: goff-flags
+        target: /goff/flags.goff.yaml
+
+  gogglebox:
+    image: ghcr.io/sycdan/gogglebox:${GOGGLEBOX_VERSION:?pin a version}
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      # required
+      - JELLYFIN_URL=${JELLYFIN_URL:?required}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:?required}
+      - SESSION_SECRET=${SESSION_SECRET:?use a strong secret for production}
+      # optional pass-through (only set if present in the env file / shell)
+      - WATCHED_THRESHOLD
+      - ACCESS_TOKEN
+      - JELLYFIN_DEBUG
+      - GOFF_ENDPOINT=http://goff:1031
+      - GOFF_API_KEY=${GOFF_API_KEY:-gogglebox-local}
+      - GOFF_TIMEOUT_MS
+    volumes:
+      # Writable app state; the image creates /data owned by its node user, so
+      # a fresh named volume starts writable.
+      - state:/data
+    depends_on:
+      - goff
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      - JELLYFIN_URL=${JELLYFIN_URL:?required}
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    ports:
+      - target: 8080
+        published: "${GOGGLEBOX_PORT:?host port to expose}"
+    depends_on:
+      - gogglebox
+
+volumes:
+  state:
+
+# `$$` keeps Caddy's own {$VAR} placeholders out of Compose interpolation.
+configs:
+  # One origin for the browser: /api and the web app go to Gogglebox, /player
+  # is stripped and forwarded to the normal Jellyfin origin. WEB_UPSTREAM lets
+  # the dev stack send the web app to its Vite client.
+  caddyfile:
+    content: |
+      {
+      	auto_https off
+      	admin off
+      }
+
+      :8080 {
+      	handle /api/* {
+      		reverse_proxy gogglebox:3000
+      	}
+
+      	handle_path /player/* {
+      		reverse_proxy {$$JELLYFIN_URL}
+      	}
+
+      	handle {
+      		reverse_proxy {$$WEB_UPSTREAM:gogglebox:3000}
+      	}
+      }
+
+  goff-relay:
+    content: |
+      hideBanner: true
+      logLevel: info
+      server:
+        mode: http
+        port: 1031
+      flagSets:
+        - name: gogglebox
+          apiKeys:
+            - gogglebox-local
+          pollingInterval: 1000
+          retrievers:
+            - kind: file
+              path: /goff/flags.goff.yaml
+
+  # Production-safe defaults.
+  goff-flags:
+    content: |
+      tonights-nine:
+        variations:
+          enabled: true
+          disabled: false
+        defaultRule:
+          variation: disabled

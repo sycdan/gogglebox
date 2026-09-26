@@ -1,45 +1,15 @@
-services:
-  goff:
-    image: gofeatureflag/go-feature-flag:v1.55.1
-    container_name: gogglebox-goff
-    restart: unless-stopped
-    volumes:
-      - ../tools/goff/goff-proxy.yaml:/goff/goff-proxy.yaml:ro
-      - ${GOFF_FLAGS_FILE:-../flags/goff.yaml}:/goff/flags.goff.yaml:ro
+# Self-host Gogglebox from this folder: copy it to the host, copy .env.example
+# to .env and config.example.json to config.json, fill both in, then
+#
+#   docker compose up -d -y
+#
+# The stack itself (docker-compose.base.yml in the Gogglebox repo) is pulled
+# for the GOGGLEBOX_VERSION set in .env, so upgrading is changing that version.
+# -y accepts Compose's prompt to confirm variables for a remote stack.
+include:
+  - oci://ghcr.io/sycdan/gogglebox-compose:${GOGGLEBOX_VERSION:?pin a version in .env}
 
+services:
   gogglebox:
-    image: ghcr.io/sycdan/gogglebox:${GOGGLEBOX_VERSION:-latest}
-    pull_policy: always
-    container_name: gogglebox
-    restart: unless-stopped
-    environment:
-      # required
-      - JELLYFIN_URL=${JELLYFIN_URL:?required}
-      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:?required}
-      - SESSION_SECRET=${SESSION_SECRET:?use a strong secret for production}
-      # optional pass-through (only set if present in the env file / shell)
-      - WATCHED_THRESHOLD
-      - ACCESS_TOKEN
-      - JELLYFIN_DEBUG
-      - GOFF_ENDPOINT=http://goff:1031
-      - GOFF_API_KEY=${GOFF_API_KEY:-gogglebox-local}
-      - GOFF_TIMEOUT_MS
     volumes:
       - ./config.json:/app/config.json:ro
-      # writable app state; host-mounted so it survives redeploys
-      - ${GOGGLEBOX_STATE_DIR:-./data}:/data
-    depends_on:
-      - goff
-
-  proxy:
-    image: caddy:2-alpine
-    container_name: gogglebox-proxy
-    restart: unless-stopped
-    environment:
-      - JELLYFIN_URL=${JELLYFIN_URL:?required}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    ports:
-      - "${GOGGLEBOX_PORT:?host port to expose}:8080"
-    depends_on:
-      - gogglebox
