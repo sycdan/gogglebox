@@ -167,7 +167,6 @@ function ignorePayloadForMovieCard(item: ContinueWatchingItem): IgnorePayload {
 interface SessionResponse {
   authenticated: boolean;
   portalAutoLoginEnabled: boolean;
-  configSyncEnabled: boolean;
   configUpdateEnabled: boolean;
   appName: string;
   watchedThreshold: number;
@@ -1159,22 +1158,6 @@ export function App() {
     }
   }
 
-  async function syncConfig() {
-    try {
-      setBusy(true);
-      setError(null);
-      setConfigSyncMessage(null);
-      const result = await apiRequest<{ changed: boolean }>('/api/config/sync', { method: 'POST' });
-      await loadSession();
-      await loadSavedParties();
-      setConfigSyncMessage(result.changed ? 'Config updated from the state repo.' : 'Config is up to date.');
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : 'Could not sync config');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function loadConfigUpdateStatus() {
     setConfigUpdateStatus(await apiRequest<ConfigUpdateStatus>('/api/config/update'));
   }
@@ -1232,7 +1215,7 @@ export function App() {
     const changedFiles = configUpdateStatus?.changedFiles.filter(Boolean) ?? [];
     const updateAvailable = Boolean(configUpdateStatus?.pending);
     const statusLabel = !session?.configUpdateEnabled
-      ? session?.configSyncEnabled ? 'Manual sync' : 'Not connected'
+      ? 'Not connected'
       : configUpdateStatus?.phase === 'updating'
         ? 'Updating'
         : updateAvailable
@@ -1302,14 +1285,7 @@ export function App() {
                   Restart and update
                 </button>
               ) : null}
-              {session.configSyncEnabled ? (
-                <button className="ghost" disabled={busy} onClick={() => void syncConfig()} type="button">Sync config</button>
-              ) : null}
             </div>
-          </div>
-        ) : session?.configSyncEnabled ? (
-          <div className="row admin-card-actions">
-            <button disabled={busy} onClick={() => void syncConfig()} type="button">Sync config</button>
           </div>
         ) : (
           <p className="muted">This deployment does not have a config manager connected.</p>

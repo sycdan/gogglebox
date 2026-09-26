@@ -105,7 +105,10 @@ Compose's prompt to confirm the variables a remote stack uses.
 
 This needs Docker Compose v5 or newer (`docker compose version`). Compose 2.40
 and earlier reject the folder's `docker-compose.yml` with "conflicts with
-imported resource", because it extends a service it includes.
+imported resource", because it extends a service it includes. On Windows with
+Docker Desktop, Compose v5.1.4 cannot download the stack ("proxyconnect tcp:
+open ./pipe/dockerHttpProxy: The system cannot find the path specified");
+update Docker Desktop to a release with Compose v5.2.0 or newer.
 
 Useful commands, run in the folder:
 
@@ -182,23 +185,21 @@ a wildcard over the remaining live Jellyfin users after higher-priority tiers
 are assigned. Guests without a configured `pin` in `users` are not addable,
 because Gogglebox cannot verify them.
 
-### Config manager deployment
+### Managing config remotely
 
-Set `GOGGLEBOX_CONFIG_MANAGER_URL` to the manager's internal Compose URL (for
-example, `http://config-manager:3001`). At startup Gogglebox reads the active
-`config.json` from that API and validates it against live Jellyfin users. It
-does not need a Git or Docker mount. An authenticated page shows a pending
-config commit as an alert on the top-right account menu. Open
-**Administration** from that menu to review the active and available revisions
-and choose **Restart and update**. Gogglebox validates the candidate config and
-sends the exact SHA to the manager, which owns the Git checkout and redeploys
-the ordinary Compose services. The manager is not exposed through Caddy. The
-private `whh-gogglebox-config` README describes the HTPC setup, rollout, and
-recovery.
+The deploy folder is the whole configuration: Gogglebox reads only the
+`config.json` it mounts. To manage it from elsewhere, run `git init` in the
+folder, commit, and connect a remote you push changes to.
 
-Other deployments can continue using their local `config.json`. The older
-`GOGGLEBOX_CONFIG_REPO` and **Sync config** path remains available for existing
-deployments during migration, but the HTPC Compose file no longer uses it.
+A config manager can then apply those changes from the app. Set
+`GOGGLEBOX_CONFIG_MANAGER_URL` to its internal Compose URL (for example,
+`http://config-manager:3001`). A pending commit shows as an alert on the
+top-right account menu; **Administration** lists the active and available
+revisions and offers **Restart and update**. Gogglebox validates the candidate
+`config.json` against live Jellyfin users, then the manager fast-forwards the
+folder and recreates the stack. The manager is not exposed through Caddy and
+does not ship with the stack yet; the private `whh-gogglebox-config` README
+describes the HTPC one.
 
 ## Development
 

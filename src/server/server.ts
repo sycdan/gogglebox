@@ -15,7 +15,6 @@ import {
 import { AppState } from './appState';
 import { buildEffectiveConfig, loadConfig, readSourceHash, resolveViewers } from './config';
 import { CachedEffectiveConfig } from './appState';
-import { syncConfigRepo } from './configRepo';
 import { CURRENT_SCHEMA_VERSION } from './configMigrations';
 import {
   ContinueWatchingCandidate,
@@ -58,14 +57,9 @@ const config = loadConfig();
 const jellyfin = new JellyfinClient(config.jellyfinUrl, config.jellyfinApiKey);
 const featureFlags = createFeatureFlagReaderFromEnv();
 const appState = new AppState();
-const configRepoPath = process.env.GOGGLEBOX_CONFIG_REPO?.trim() || null;
 const configManagerUrl = process.env.GOGGLEBOX_CONFIG_MANAGER_URL?.trim().replace(/\/$/, '') || null;
-const configRepoBranch = process.env.GOGGLEBOX_CONFIG_BRANCH?.trim() || 'main';
-const configSourcePath = configManagerUrl
-  ? '/data/config-manager.json'
-  : configRepoPath
-  ? path.join(configRepoPath, 'config.json')
-  : path.join(process.cwd(), 'config.json');
+// The deploy folder's config.json, mounted here, is the only config source.
+const configSourcePath = path.join(process.cwd(), 'config.json');
 const clientDist = path.resolve(process.cwd(), 'dist/client');
 const jellyfinDebugEnabled = process.env.JELLYFIN_DEBUG === '1' || process.env.JELLYFIN_DEBUG === 'true';
 
@@ -83,18 +77,6 @@ function writeManagerConfig(configValue: unknown, target: string): void {
   const temp = `${target}.${process.pid}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(configValue), { mode: 0o600 });
   fs.renameSync(temp, target);
-}
-
-async function waitForManagerConfig(): Promise<void> {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      writeManagerConfig(await managerRequest<unknown>(configManagerUrl as string, '/config'), configSourcePath);
-      return;
-    } catch (error) {
-      if (attempt === 59) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-  }
 }
 
 // The running image's package version. Stamped onto the cached effective config
@@ -328,13 +310,9 @@ export function createApp(
   jellyfin: JellyfinClient,
   appState: AppState,
   featureFlags: FeatureFlagReader = createFeatureFlagReaderFromEnv(),
-  configRepository: string | null = configRepoPath,
   configManager: string | null = configManagerUrl,
 ): express.Express {
   const app = express();
-  const activeConfigPath = configRepository
-    ? path.join(configRepository, 'config.json')
-    : configSourcePath;
 
   function isKidsContent(item: LibraryItem): boolean {
     const rating = item.officialRating?.toUpperCase() ?? '';
@@ -581,7 +559,6 @@ export function createApp(
       appName: config.appName,
       watchedThreshold: config.watchedThreshold,
       account: auth ? auth.accountKey : null,
-      configSyncEnabled: Boolean(configRepository),
       configUpdateEnabled: Boolean(configManager),
       viewers,
       activeViewerIds: req.session.activeViewerIds ?? [],
@@ -592,28 +569,6 @@ export function createApp(
       // reading the old name. Never diverges from activePartyAlias above.
       activeGroupAlias: partyAlias,
     });
-  });
-
-  app.post('/api/config/sync', requireAuth, async (_req, res) => {
-    if (!configRepository) {
-      res.status(404).json({ error: 'Config sync is not configured' });
-      return;
-    }
-
-    try {
-      const jellyfinUsers = await jellyfin.fetchUsers();
-      const sync = await syncConfigRepo(configRepository, configRepoBranch, async (candidatePath) => {
-        buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), candidatePath);
-      });
-      const effective = buildEffectiveConfig({ jellyfinUsers }, readPackageVersion(), activeConfigPath);
-      appState.setEffectiveConfig(effective);
-      applyEffectiveConfig(config, effective);
-      config.viewersByName = resolveViewers(jellyfinUsers);
-      res.json({ ok: true, ...sync });
-    } catch (error) {
-      console.error('[config] sync failed:', error);
-      res.status(502).json({ error: error instanceof Error ? error.message : 'Config sync failed' });
-    }
   });
 
   app.get('/api/config/update', requireAuth, async (_req, res) => {
@@ -1276,7 +1231,6 @@ if (isEntryPoint) {
       // (builtForPackage) — otherwise reuse the cached effective config.
       const jellyfinUsers = await jellyfin.fetchUsers();
       const packageVersion = readPackageVersion();
-      if (configManagerUrl) await waitForManagerConfig();
       const sourceHash = readSourceHash(configSourcePath);
 
       let effective = appState.getEffectiveConfig();
