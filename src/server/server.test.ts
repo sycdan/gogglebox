@@ -265,16 +265,31 @@ test('Rebuild requires authentication and a primary user PIN, and forwards only 
   }
 });
 
-test('Reboot requires authentication, answers, then exits the process', async () => {
+test('Reboot requires authentication and a primary user PIN, answers, then exits the process', async () => {
   let rebooted = 0;
   const config = buildConfig();
   const testServer = await startTestServerWithFlags(
     config, new AppState(tempStatePath()), new MapFeatureFlags(), undefined, undefined, () => { rebooted += 1; },
   );
+  const reboot = (cookie: string | undefined, body: unknown) => fetch(`${testServer.baseUrl}/api/admin/reboot`, {
+    method: 'POST',
+    headers: { ...(cookie ? { cookie } : {}), 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
   try {
-    assert.equal((await fetch(`${testServer.baseUrl}/api/admin/reboot`, { method: 'POST' })).status, 401);
+    assert.equal((await reboot(undefined, { pin: '1234' })).status, 401);
     const cookie = await login(testServer.baseUrl, 'test-token');
-    const response = await fetch(`${testServer.baseUrl}/api/admin/reboot`, { method: 'POST', headers: { cookie } });
+    // No primary user of the account has a PIN yet: Reboot is refused.
+    const noPins = await reboot(cookie, { pin: '1234' });
+    assert.equal(noPins.status, 403);
+    assert.match((await json<{ error: string }>(noPins)).error, /Reboot needs a PIN/);
+    // Bob is primary; a non-primary user's PIN does not count.
+    config.users = [{ jellyfin_name: 'Alice' }, { jellyfin_name: 'Bob', pin: '1234' }, { jellyfin_name: 'Carol', pin: '9999' }];
+    assert.equal((await reboot(cookie, {})).status, 403);
+    assert.equal((await reboot(cookie, { pin: '9999' })).status, 403);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.equal(rebooted, 0);
+    const response = await reboot(cookie, { pin: '1234' });
     assert.equal(response.status, 202);
     await new Promise((resolve) => setTimeout(resolve, 300));
     assert.equal(rebooted, 1);

@@ -191,7 +191,9 @@ At each start Gogglebox checks `config.json` against the live Jellyfin users
 and skips what it cannot use, such as a user Jellyfin does not have. Those
 warnings, each with its fix, show as an alert on the top-right account menu
 and are listed under **Administration**. After fixing `config.json` or
-Jellyfin, press **Reboot** there: the app restarts and reads both again.
+Jellyfin, press **Reboot** there: the app restarts and reads both again. Like
+**Rebuild** below, it asks for the PIN of one of the account's primary users
+(set in `config.json`), so an account needs one to reboot.
 
 ### Managing config remotely
 
