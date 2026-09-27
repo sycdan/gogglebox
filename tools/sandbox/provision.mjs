@@ -292,7 +292,8 @@ async function emitArtifacts(apiKey, usersByName) {
     playback: { watchedThreshold: 0.9 },
     recommendations: { count: 9 },
     users: [
-      { jellyfin_name: 'Alice' },
+      // A primary user's PIN: Reboot and Rebuild ask for one.
+      { jellyfin_name: 'Alice', pin: '1234' },
       { jellyfin_name: 'Bob' },
       { jellyfin_name: 'Carol', pin: '5678' },
       { jellyfin_name: 'Dave' },

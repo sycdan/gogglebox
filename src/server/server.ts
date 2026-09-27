@@ -585,29 +585,35 @@ export function createApp(
     }
   });
 
+  // Reboot and Rebuild restart the household's Gogglebox, so they ask for a
+  // PIN of one of the active account's primary users to prevent accidents.
+  // Returns the refusal to send, or null when the PIN matches.
+  function primaryPinRefusal(req: express.Request, action: string): string | null {
+    const primaryNames = new Set(accountForSession(req)?.account.primary_users ?? []);
+    const pins = config.users.filter((user) => primaryNames.has(user.jellyfin_name) && user.pin).map((user) => user.pin);
+    if (pins.length === 0) return `${action} needs a PIN: give a primary user of this account a pin in config.json.`;
+    const pin = (req.body as { pin?: unknown } | undefined)?.pin;
+    return typeof pin === 'string' && pins.includes(pin) ? null : 'Wrong PIN';
+  }
+
   // Restart on the current config.json and live Jellyfin users, e.g. after
   // creating a user a config warning named.
-  app.post('/api/admin/reboot', requireAuth, (_req, res) => {
+  app.post('/api/admin/reboot', requireAuth, (req, res) => {
+    const refusal = primaryPinRefusal(req, 'Reboot');
+    if (refusal) return res.status(403).json({ error: refusal });
     res.status(202).json({ ok: true });
     res.on('finish', () => setTimeout(reboot, 100));
   });
 
-  // Rebuild (a config-manager redeploy) guards against accidents with a PIN of
-  // one of the active account's primary users.
+  // Rebuild: a config-manager redeploy of a pending commit.
   app.post('/api/config/update', requireAuth, async (req, res) => {
     if (!configManager) return res.status(404).json({ error: 'Config manager is not configured' });
-    const { revision, pin } = (req.body ?? {}) as { revision?: unknown; pin?: unknown };
+    const { revision } = (req.body ?? {}) as { revision?: unknown };
     if (typeof revision !== 'string' || !/^[0-9a-f]{40}$/.test(revision)) {
       return res.status(400).json({ error: 'Expected a full commit SHA' });
     }
-    const primaryNames = new Set(accountForSession(req)?.account.primary_users ?? []);
-    const pins = config.users.filter((user) => primaryNames.has(user.jellyfin_name) && user.pin).map((user) => user.pin);
-    if (pins.length === 0) {
-      return res.status(403).json({ error: 'Rebuild needs a PIN: give a primary user of this account a pin in config.json.' });
-    }
-    if (typeof pin !== 'string' || !pins.includes(pin)) {
-      return res.status(403).json({ error: 'Wrong PIN' });
-    }
+    const refusal = primaryPinRefusal(req, 'Rebuild');
+    if (refusal) return res.status(403).json({ error: refusal });
     const candidatePath = path.join(os.tmpdir(), `gogglebox-candidate-${crypto.randomUUID()}.json`);
     try {
       const candidate = await managerRequest<unknown>(configManager, `/candidate?revision=${revision}`);

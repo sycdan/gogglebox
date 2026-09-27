@@ -24,9 +24,18 @@ async function openAdministration(page) {
   await page.locator('#config-health-title').waitFor({ state: 'visible', timeout: 15_000 });
 }
 
+// A PIN of one of the household's primary users, which Reboot asks for.
+function primaryPin(config) {
+  const primaries = new Set(config.accounts.household.primary_users);
+  const pin = config.users.find((user) => primaries.has(user.jellyfin_name) && user.pin)?.pin;
+  if (!pin) throw new Error('the sandbox household has no primary user with a pin; re-provision the sandbox');
+  return pin;
+}
+
 // Press Reboot and wait for the page's reload once Gogglebox answers again.
-async function rebootFromUi(page) {
+async function rebootFromUi(page, pin) {
   const reloaded = page.waitForEvent('load', { timeout: 90_000 });
+  await page.getByLabel('PIN to reboot').fill(pin);
   await page.getByRole('button', { name: 'Reboot', exact: true }).click();
   await reloaded;
   await page.getByRole('button', { name: 'Open account menu' }).waitFor({ state: 'visible', timeout: 60_000 });
@@ -38,9 +47,9 @@ async function bootId(url) {
 }
 
 // Reboot through the API and wait for a new process to answer.
-async function rebootAndWait(page, url) {
+async function rebootAndWait(page, url, pin) {
   const before = await bootId(url);
-  await page.request.post(`${url}/api/admin/reboot`);
+  await page.request.post(`${url}/api/admin/reboot`, { data: { pin } });
   for (let attempt = 0; attempt < 60; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     try {
@@ -60,6 +69,7 @@ export async function run(page, ctx) {
   const url = process.env.PROOF_URL ?? 'http://proxy:8080';
   const jf = makeJellyfin(process.env.JELLYFIN_URL, process.env.JELLYFIN_API_KEY);
   const original = readFileSync(CONFIG_PATH, 'utf8');
+  const pin = primaryPin(JSON.parse(original));
 
   const removeFromJellyfin = async () => {
     for (const user of await jf.listUsers()) {
@@ -76,7 +86,7 @@ export async function run(page, ctx) {
   try {
     console.log(`[proof] config-warnings: ${MISSING} is in config.json but not Jellyfin; rebooting`);
     await openAdministration(page);
-    await rebootFromUi(page);
+    await rebootFromUi(page, pin);
 
     const alert = page.locator('.account-menu-alert');
     if (!(await alert.isVisible().catch(() => false))) {
@@ -99,7 +109,7 @@ export async function run(page, ctx) {
 
     console.log(`[proof] config-warnings: creating ${MISSING} in Jellyfin; rebooting`);
     await jf.createUser(MISSING);
-    await rebootFromUi(page);
+    await rebootFromUi(page, pin);
     await openAdministration(page);
     if (await missingUserWarning(page).count()) {
       await shootView(page, `${flowName}-02-still-warning`);
@@ -110,6 +120,6 @@ export async function run(page, ctx) {
   } finally {
     writeFileSync(CONFIG_PATH, original);
     await removeFromJellyfin();
-    await rebootAndWait(page, url);
+    await rebootAndWait(page, url, pin);
   }
 }

@@ -484,6 +484,7 @@ export function App() {
   const [configUpdateStatus, setConfigUpdateStatus] = useState<ConfigUpdateStatus | null>(null);
   const [updateStarting, setUpdateStarting] = useState(false);
   const [rebuildPin, setRebuildPin] = useState('');
+  const [rebootPin, setRebootPin] = useState('');
   const [appView, setAppView] = useState<AppView>('browse');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1176,7 +1177,8 @@ export function App() {
       setUpdateStarting(true);
       setError(null);
       const before = await readBootId();
-      await apiRequest('/api/admin/reboot', { method: 'POST' });
+      await apiRequest('/api/admin/reboot', { method: 'POST', body: JSON.stringify({ pin: rebootPin }) });
+      setRebootPin('');
       setConfigSyncMessage('Rebooting. This page will reconnect.');
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -1272,7 +1274,18 @@ export function App() {
           ) : null}
 
           <div className="row admin-card-actions">
-            <button className="ghost" disabled={updateStarting} onClick={() => void reboot()} type="button">
+            <label className="rebuild-pin">
+              <span>Primary user's PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                aria-label="PIN to reboot"
+                value={rebootPin}
+                onChange={(event) => setRebootPin(event.target.value)}
+              />
+            </label>
+            <button className="ghost" disabled={!rebootPin || updateStarting} onClick={() => void reboot()} type="button">
               Reboot
             </button>
           </div>
