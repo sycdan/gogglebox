@@ -168,6 +168,8 @@ interface SessionResponse {
   authenticated: boolean;
   portalAutoLoginEnabled: boolean;
   configUpdateEnabled: boolean;
+  // What startup warned about while reading config.json, each naming its fix.
+  configWarnings: string[];
   appName: string;
   watchedThreshold: number;
   // The logged-in account's key, or null when not authenticated.
@@ -481,6 +483,7 @@ export function App() {
   const [configSyncMessage, setConfigSyncMessage] = useState<string | null>(null);
   const [configUpdateStatus, setConfigUpdateStatus] = useState<ConfigUpdateStatus | null>(null);
   const [updateStarting, setUpdateStarting] = useState(false);
+  const [rebuildPin, setRebuildPin] = useState('');
   const [appView, setAppView] = useState<AppView>('browse');
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1162,7 +1165,38 @@ export function App() {
     setConfigUpdateStatus(await apiRequest<ConfigUpdateStatus>('/api/config/update'));
   }
 
-  async function restartAndUpdate() {
+  // Restart on the current config, e.g. after creating a user a config
+  // warning named; the page reloads once Gogglebox answers again.
+  async function reboot() {
+    const readBootId = async () => {
+      const health = await fetch('/api/health', { cache: 'no-store' });
+      return health.ok ? (await health.json() as { bootId?: string }).bootId : undefined;
+    };
+    try {
+      setUpdateStarting(true);
+      setError(null);
+      const before = await readBootId();
+      await apiRequest('/api/admin/reboot', { method: 'POST' });
+      setConfigSyncMessage('Rebooting. This page will reconnect.');
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        try {
+          const now = await readBootId();
+          if (now && now !== before) {
+            window.location.reload();
+            return;
+          }
+        } catch { /* Still restarting. */ }
+      }
+      setConfigSyncMessage('The reboot was requested. Refresh this page when Gogglebox is back.');
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : 'Could not reboot');
+    } finally {
+      setUpdateStarting(false);
+    }
+  }
+
+  async function rebuild() {
     const revision = configUpdateStatus?.pending;
     if (!revision) return;
     try {
@@ -1170,8 +1204,9 @@ export function App() {
       setError(null);
       await apiRequest('/api/config/update', {
         method: 'POST',
-        body: JSON.stringify({ revision }),
+        body: JSON.stringify({ revision, pin: rebuildPin }),
       });
+      setRebuildPin('');
       setConfigSyncMessage(`Restarting with ${revision.slice(0, 12)}. This page will reconnect.`);
       let sawOutage = false;
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -1209,6 +1244,41 @@ export function App() {
     } finally {
       setUpdateStarting(false);
     }
+  }
+
+  function healthCard() {
+    const warnings = session?.configWarnings ?? [];
+
+    return (
+      <section className="panel admin-card" aria-labelledby="config-health-title">
+        <div className="row spread top-align admin-card-heading">
+          <div>
+            <p className="eyebrow">Health</p>
+            <h2 id="config-health-title">Config warnings</h2>
+            <p className="muted">
+              What Gogglebox skipped in config.json at its last start. Fix config.json or Jellyfin, then Reboot.
+            </p>
+          </div>
+          <span className={`status-pill${warnings.length ? ' attention' : ''}`} role="status">
+            {warnings.length ? `${warnings.length} warning${warnings.length === 1 ? '' : 's'}` : 'All clear'}
+          </span>
+        </div>
+
+        <div className="config-admin-body">
+          {warnings.length ? (
+            <ul className="config-warnings">
+              {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            </ul>
+          ) : null}
+
+          <div className="row admin-card-actions">
+            <button className="ghost" disabled={updateStarting} onClick={() => void reboot()} type="button">
+              Reboot
+            </button>
+          </div>
+        </div>
+      </section>
+    );
   }
 
   function configurationCard() {
@@ -1281,9 +1351,25 @@ export function App() {
                 Check for updates
               </button>
               {configUpdateStatus?.pending ? (
-                <button disabled={updateStarting || configUpdateStatus.phase === 'updating'} onClick={() => void restartAndUpdate()} type="button">
-                  Restart and update
-                </button>
+                <>
+                  <label className="rebuild-pin">
+                    <span>Primary user's PIN</span>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      value={rebuildPin}
+                      onChange={(event) => setRebuildPin(event.target.value)}
+                    />
+                  </label>
+                  <button
+                    disabled={!rebuildPin || updateStarting || configUpdateStatus.phase === 'updating'}
+                    onClick={() => void rebuild()}
+                    type="button"
+                  >
+                    Rebuild
+                  </button>
+                </>
               ) : null}
             </div>
           </div>
@@ -1301,7 +1387,8 @@ export function App() {
     if (!session) return null;
     const menuViewer = primaryViewers[0] ?? session.viewers[0];
     const accountLabel = menuViewer?.name || session.account || 'Household account';
-    const configNeedsAttention = Boolean(configUpdateStatus?.pending || configUpdateStatus?.error);
+    const hasConfigWarnings = Boolean(session.configWarnings?.length);
+    const configNeedsAttention = Boolean(configUpdateStatus?.pending || configUpdateStatus?.error || hasConfigWarnings);
 
     return (
       <div className="account-menu" ref={accountMenuRef}>
@@ -1356,6 +1443,7 @@ export function App() {
                   <span>Administration</span>
                   {configUpdateStatus?.pending ? <small>Config update available</small> : null}
                   {configUpdateStatus?.error ? <small>Config needs attention</small> : null}
+                  {hasConfigWarnings ? <small>Config warnings</small> : null}
                 </span>
               </button>
             )}
@@ -1430,6 +1518,7 @@ export function App() {
             <button className="ghost" onClick={() => setAppView('browse')} type="button">Back</button>
           </div>
           <div className="administration-grid">
+            {healthCard()}
             {configurationCard()}
           </div>
           {error ? <div className="panel error">{error}</div> : null}

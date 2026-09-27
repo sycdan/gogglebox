@@ -57,6 +57,8 @@ export interface AppConfig {
   // live Jellyfin users (wildcard tiers may include unconfigured users). Empty
   // until the startup resolution runs (see resolveViewers / server.ts).
   viewersByName: Record<string, FamilyMember>;
+  // What deriving the effective config warned about at startup (see config.ts).
+  configWarnings: string[];
 }
 
 export interface LibraryItem {

@@ -61,6 +61,7 @@ import * as playerHandoff from './flows/player-handoff.mjs';
 import * as playerUat from './flows/player-uat.mjs';
 import * as partyPin from './flows/party-pin.mjs';
 import * as partyAlias from './flows/party-alias.mjs';
+import * as configWarnings from './flows/config-warnings.mjs';
 
 // Flow dispatch order — preserved from the original single-file script. Each
 // flow whose `match` matches the flowName runs; multiple may fire for one name.
@@ -85,6 +86,8 @@ const flows = [
   { name: 'show-cross-episode', mod: showCrossEpisode },
   { name: 'show-detail-browser', mod: showDetailBrowser },
   { name: 'rail-pagination', mod: railPagination },
+  // Last: it reboots the app, which ends every session.
+  { name: 'config-warnings', mod: configWarnings },
 ];
 
 // Reserved PROOF_FLOW value that runs every flow in one invocation. Chosen

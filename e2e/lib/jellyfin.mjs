@@ -4,6 +4,7 @@
 // server uses in src/server/jellyfin.ts:
 //
 //   GET  /Users                                          -> list users
+//   POST /Users/New, DELETE /Users/<userId>              -> create/delete a user
 //   GET  /Items?ParentId=<series>&IncludeItemTypes=Episode (sorted air order)
 //   POST /Users/<userId>/Items/<itemId>/UserData         -> set PlaybackPositionTicks
 //   POST /Users/<userId>/PlayedItems/<itemId>            -> mark played
@@ -47,6 +48,15 @@ export function makeJellyfin(rawUrl, apiKey) {
     async listUsers() {
       const data = await request('/Users');
       return (Array.isArray(data) ? data : []).map((u) => ({ id: u.Id, name: u.Name }));
+    },
+
+    async createUser(name) {
+      const user = await request('/Users/New', { method: 'POST', body: { Name: name } });
+      return { id: user.Id, name: user.Name };
+    },
+
+    async deleteUser(userId) {
+      await request(`/Users/${userId}`, { method: 'DELETE' });
     },
 
     // Series with episodes, recursive, so we can pick a mid-series episode.

@@ -99,6 +99,7 @@ function applyEffectiveConfig(target: AppConfig, effective: CachedEffectiveConfi
   target.accessTokens = effective.accessTokens;
   target.watchedThreshold = effective.watchedThreshold;
   target.recommendations = { count: effective.recommendationCount };
+  target.configWarnings = effective.warnings ?? [];
 }
 
 function isKidsContent(item: LibraryItem): boolean {
@@ -310,8 +311,12 @@ export function createApp(
   appState: AppState,
   featureFlags: FeatureFlagReader = createFeatureFlagReaderFromEnv(),
   configManager: string | null = configManagerUrl,
+  // Reboot exits the process; Compose's restart policy starts it again.
+  reboot: () => void = () => process.exit(0),
 ): express.Express {
   const app = express();
+  // Changes with every process, so a client can tell a Reboot has finished.
+  const bootId = crypto.randomUUID();
 
   function isKidsContent(item: LibraryItem): boolean {
     const rating = item.officialRating?.toUpperCase() ?? '';
@@ -539,7 +544,7 @@ export function createApp(
   );
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, appName: config.appName });
+    res.json({ ok: true, appName: config.appName, bootId });
   });
 
   app.get('/api/session', (req, res) => {
@@ -559,6 +564,7 @@ export function createApp(
       watchedThreshold: config.watchedThreshold,
       account: auth ? auth.accountKey : null,
       configUpdateEnabled: Boolean(configManager),
+      configWarnings: auth ? config.configWarnings : [],
       viewers,
       activeViewerIds: req.session.activeViewerIds ?? [],
       // The active party's human-readable alias (never the raw gbx-grp-<hash>),
@@ -579,11 +585,28 @@ export function createApp(
     }
   });
 
+  // Restart on the current config.json and live Jellyfin users, e.g. after
+  // creating a user a config warning named.
+  app.post('/api/admin/reboot', requireAuth, (_req, res) => {
+    res.status(202).json({ ok: true });
+    res.on('finish', () => setTimeout(reboot, 100));
+  });
+
+  // Rebuild (a config-manager redeploy) guards against accidents with a PIN of
+  // one of the active account's primary users.
   app.post('/api/config/update', requireAuth, async (req, res) => {
     if (!configManager) return res.status(404).json({ error: 'Config manager is not configured' });
-    const revision = (req.body as { revision?: unknown })?.revision;
+    const { revision, pin } = (req.body ?? {}) as { revision?: unknown; pin?: unknown };
     if (typeof revision !== 'string' || !/^[0-9a-f]{40}$/.test(revision)) {
       return res.status(400).json({ error: 'Expected a full commit SHA' });
+    }
+    const primaryNames = new Set(accountForSession(req)?.account.primary_users ?? []);
+    const pins = config.users.filter((user) => primaryNames.has(user.jellyfin_name) && user.pin).map((user) => user.pin);
+    if (pins.length === 0) {
+      return res.status(403).json({ error: 'Rebuild needs a PIN: give a primary user of this account a pin in config.json.' });
+    }
+    if (typeof pin !== 'string' || !pins.includes(pin)) {
+      return res.status(403).json({ error: 'Wrong PIN' });
     }
     const candidatePath = path.join(os.tmpdir(), `gogglebox-candidate-${crypto.randomUUID()}.json`);
     try {
