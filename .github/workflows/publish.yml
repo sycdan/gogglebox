@@ -6,6 +6,9 @@ name: Publish image
 # already-tested images, it does not rebuild. No PAT needed — the built-in
 # GITHUB_TOKEN has package write scope for this repo.
 #
+# arm64 and amd64 each build on a native runner (no QEMU) and are joined into
+# one multi-arch tag.
+#
 # Tag = the full package version, e.g. 2026.6.29-55527303 (the pre-push hook +
 # scripts/bump.sh guarantee main carries a fresh version per publish-worthy change,
 # so the tag is unique). `latest` is NOT set here — it tracks releases, set by
@@ -66,12 +69,23 @@ jobs:
     if: needs.gate.outputs.bump == 'true'
     uses: ./.github/workflows/checks.yml
 
-  # No `if` here: publish `needs: checks`, and a skipped dependency (when the
+  # Each platform builds natively on its own runner and pushes by digest only;
+  # `publish` then joins the digests under the version tag. Emulating arm64
+  # under QEMU crashed node mid `npm ci` and hung the job until cancelled.
+  # No `if` here: build `needs: checks`, and a skipped dependency (when the
   # gate said not a bump) skips this job too. It only runs when every check ran
   # and passed.
-  publish:
+  build:
     needs: checks
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
@@ -79,8 +93,73 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Name the platform and image
+        id: names
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          echo "pair=${PLATFORM//\//-}" >> "$GITHUB_OUTPUT"
+          echo "image=${REGISTRY}/${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,"name=${{ steps.names.outputs.image }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ steps.names.outputs.pair }}
+          cache-to: type=gha,mode=max,scope=${{ steps.names.outputs.pair }}
+
+      - name: Export digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ steps.names.outputs.pair }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -98,7 +177,7 @@ jobs:
         # 2026.6.29-<ts>). release.yml promotes this tag to its clean release.
         run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Compute tags + labels
+      - name: Compute tags
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -107,16 +186,18 @@ jobs:
           tags: |
             type=raw,value=${{ steps.pkg.outputs.version }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Tag the multi-arch image
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          VERSION: ${{ steps.pkg.outputs.version }}
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_NAME,,}"
+          tags=()
+          while read -r tag; do tags+=(-t "$tag"); done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          sources=()
+          for digest in *; do sources+=("${IMAGE}@sha256:${digest}"); done
+          docker buildx imagetools create "${tags[@]}" "${sources[@]}"
+          docker buildx imagetools inspect "${IMAGE}:${VERSION}"
 
       # The stack deploy folders include, under the image's exact version. The
       # file ships verbatim (its ${VAR}s stay unresolved); .env.e2e only
